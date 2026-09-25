@@ -162,10 +162,12 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		claudeConfigDirs = []string{filepath.Join(home, ".claude")}
 	}
 
-	// One Codex agents/ registry per configured Codex home; an installer that
-	// never names its accounts keeps the single {Home}/.codex registry.
+	// One Codex agents/ registry per configured Codex home; a caller that
+	// never names its accounts (a nil roster, `pfm codex agents`) keeps the
+	// single {Home}/.codex registry, while a non-nil empty roster means no
+	// Codex home at all: no role is planned or written.
 	codexHomes := options.CodexHomes
-	if len(codexHomes) == 0 {
+	if codexHomes == nil {
 		codexHomes = []string{filepath.Join(home, ".codex")}
 	}
 	// The registries a pre-migration role symlink is allowed to point into —
@@ -483,10 +485,6 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	}
 	effort := strings.TrimSpace(fields["effort"])
 
-	withFleetPrompt, err := fleetRoleInstructions(body)
-	if err != nil {
-		return "", "", fmt.Errorf("%s: %w", mdPath, err)
-	}
 	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n"
@@ -496,7 +494,7 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 		}
 		content += "model_reasoning_effort = \"" + globalAgentEscape(effort) + "\"\n"
 	}
-	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(withFleetPrompt) + "\n\"\"\"\n"
+	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
 
 	return name, content, nil
 }
