@@ -152,11 +152,10 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		"model = \"gpt-5.6-sol\"\n" +
 		"model_reasoning_effort = \"high\"\n" +
 		"developer_instructions = \"\"\"\n"
-	// The fleet prompt is prepended to every role, so the role's own body is
-	// the TAIL of the value — escaped byte for byte, as before.
+	// The role's own body, escaped byte for byte, is the whole value.
 	body := "Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
 		"\"\"\"\n"
-	if !strings.HasPrefix(got, head) || !strings.HasSuffix(got, body) {
+	if got != head+body {
 		t.Fatalf("quirky.toml =\n%q\nwant %q ... %q", got, head, body)
 	}
 	if err := validateTOML(got); err != nil {
@@ -352,6 +351,52 @@ func TestGlobalAgentsCheckReportsMissingBeforeInstall(t *testing.T) {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("check mode wrote %s: %v", path, err)
 		}
+	}
+}
+
+// TestGlobalAgentsCodexRosterNilDefaultsEmptyPlansNoRole pins the roster
+// contract the installer relies on: a nil CodexHomes (`pfm codex agents`)
+// defaults to {Home}/.codex, while a non-nil empty CodexHomes (an install
+// with no Codex account) means no Codex home — the Claude link is still
+// planned and built, and no role is planned or written.
+func TestGlobalAgentsCodexRosterNilDefaultsEmptyPlansNoRole(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		roster    []string
+		wantRoles int
+	}{
+		{name: "nil roster", roster: nil, wantRoles: 1},
+		{name: "empty roster", roster: []string{}, wantRoles: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			source := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")
+			writeTestFile(t, source, "---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+			options := GlobalAgentsOptions{Home: home, CodexHomes: tc.roster, Mode: ModeCheck}
+			plan, err := RunGlobalAgents(options)
+			if err != nil {
+				t.Fatalf("RunGlobalAgents check: %v", err)
+			}
+			if len(plan.Roles) != tc.wantRoles {
+				t.Fatalf("planned roles=%#v, want %d", plan.Roles, tc.wantRoles)
+			}
+			if len(plan.Installed) != 1 {
+				t.Fatalf("planned Claude links=%#v, want one", plan.Installed)
+			}
+			options.Mode = ModeBuild
+			if _, err := RunGlobalAgents(options); err != nil {
+				t.Fatalf("RunGlobalAgents build: %v", err)
+			}
+			assertGlobalSymlink(t, filepath.Join(home, ".claude", "agents", "alpha.md"), source)
+			role := filepath.Join(home, ".codex", "agents", "alpha.toml")
+			if tc.wantRoles == 0 {
+				if _, err := os.Lstat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
+					t.Fatalf("empty roster wrote under ~/.codex: %v", err)
+				}
+				return
+			}
+			assertGlobalRoleFile(t, role)
+		})
 	}
 }
 
