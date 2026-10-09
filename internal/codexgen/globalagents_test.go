@@ -3,13 +3,12 @@ package codexgen
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
 func TestGlobalAgentCodexFrontmatterOverridesModelAndEffort(t *testing.T) {
@@ -227,18 +226,17 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 // tracked-twin comparison: wave 9b retired the tracked `.toml` twins from
 // git (root CLAUDE.md — "nothing generated is written into the clone"), so
 // there is no on-disk artifact left to diff against. What remains true and
-// worth pinning for every real `templates/global/agents/*.md` source: the
+// worth pinning for every `templates/global/agents/*.md` shape: the
 // compiler succeeds, is deterministic (two renders byte-equal), the output
 // independently parses as TOML (via the same BurntSushi/toml parser
 // validateTOML already depends on — no new dependency), carries the
 // source frontmatter's name/description, and no `.toml` is ever written
 // beside the `.md` source (the clone stays clean).
 func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate codexgen test source")
-	}
-	agentsDir := filepath.Join(filepath.Dir(testFile), "..", "..", "..", "templates", "global", "agents")
+	// The professor clone's real roster is compiled by its own gate (the
+	// fence runs engine-sync over the checkout); this repository pins every
+	// shape that roster uses on an invented fixture roster.
+	agentsDir := filepath.Join("testdata", "global-agents")
 	sources, err := filepath.Glob(filepath.Join(agentsDir, "*.md"))
 	if err != nil {
 		t.Fatal(err)

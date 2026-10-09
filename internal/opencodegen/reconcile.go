@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/sourcelink"
+	"github.com/rezzminator/engine-sync/internal/atomicfile"
+	"github.com/rezzminator/engine-sync/internal/sourcelink"
 )
 
 type reconcileResult struct {

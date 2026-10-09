@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/engine-sync/internal/testjail"
 )
 
 // TestMain gives this package a short, canonical TMPDIR and a jailed home

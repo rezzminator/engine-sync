@@ -252,7 +252,7 @@ func TestOpenCodeDanglingCommandWarnsOnceInBuildAndIsAProblemInCheck(t *testing.
 				}
 				return
 			}
-			if code != 1 || mentions != 1 || !strings.Contains(stderr.String(), "pfm opencode: DANGLING "+dangling) {
+			if code != 1 || mentions != 1 || !strings.Contains(stderr.String(), "engine-sync opencode: DANGLING "+dangling) {
 				t.Fatalf("%s: code=%d mentions=%d stderr=%q", action, code, mentions, stderr.String())
 			}
 		})
@@ -472,7 +472,7 @@ func TestOpenCodeBrokenSourceIsSkippedInBuildAndIsAProblemInCheck(t *testing.T) 
 					}
 					return
 				}
-				if code != 0 || !strings.Contains(named, "pfm opencode: warning: SKIP ") {
+				if code != 0 || !strings.Contains(named, "engine-sync opencode: warning: SKIP ") {
 					t.Fatalf("build: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 				}
 				for _, path := range []string{
@@ -570,11 +570,11 @@ func TestOpenCodeUnresolvableAgentSourceKeepsItsTwin(t *testing.T) {
 	if !bytes.Equal(have, seeded) {
 		t.Fatalf("twin %s was rewritten:\nhave %q\nwant %q", twin, have, seeded)
 	}
-	want := "pfm opencode: warning: source unresolvable: " + source + " → " + target + "; twin kept"
+	want := "engine-sync opencode: warning: source unresolvable: " + source + " → " + target + "; twin kept"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("build stderr lacks %q: %q", want, stderr)
 	}
-	if strings.Contains(stdout, "pfm opencode: deleted ") || !strings.Contains(stdout, "deleted=0") {
+	if strings.Contains(stdout, "engine-sync opencode: deleted ") || !strings.Contains(stdout, "deleted=0") {
 		t.Fatalf("build deleted something with the twin kept: %q", stdout)
 	}
 
@@ -582,7 +582,7 @@ func TestOpenCodeUnresolvableAgentSourceKeepsItsTwin(t *testing.T) {
 	if strings.Contains(stderr, "ORPHAN") {
 		t.Fatalf("check reports the kept twin as an orphan: %q", stderr)
 	}
-	if code != 1 || !strings.Contains(stderr, "pfm opencode: DANGLING "+source) {
+	if code != 1 || !strings.Contains(stderr, "engine-sync opencode: DANGLING "+source) {
 		t.Fatalf("check no longer gates on the dangling source: code=%d stderr=%q", code, stderr)
 	}
 }
@@ -603,7 +603,7 @@ func TestOpenCodeAbsentAgentSourceStillDeletesItsTwin(t *testing.T) {
 	if _, err := os.Lstat(twin); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("twin %s of an absent source survived: %v", twin, err)
 	}
-	if !strings.Contains(stdout, "pfm opencode: deleted "+twin) {
+	if !strings.Contains(stdout, "engine-sync opencode: deleted "+twin) {
 		t.Fatalf("build did not name the deleted twin: %q", stdout)
 	}
 	if strings.Contains(stderr, "twin kept") {
@@ -687,9 +687,16 @@ func TestOpenCodeWorkbenchProbeErrors(t *testing.T) {
 	for _, scenario := range []string{"root", "child"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, home := t.TempDir(), t.TempDir()
-			length := 4088
+			// The kernel's PATH_MAX: Linux 4096, Darwin 1024. The root sits 8
+			// bytes under it, the child scenario's 262 under (room for a
+			// 255-byte child whose own marker probe then overflows).
+			pathMax := 4096
+			if runtime.GOOS == "darwin" {
+				pathMax = 1024
+			}
+			length := pathMax - 8
 			if scenario == "child" {
-				length = 3834
+				length = pathMax - 262
 			}
 			for remaining := length - len(root); remaining > 0; {
 				n := min(200, remaining-1)

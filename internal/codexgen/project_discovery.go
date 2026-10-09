@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
 func discoverProjects(root string, cfg Config, result *Result) []string {

@@ -1,0 +1,6 @@
+.worktrees/
+dist/
+*.log
+.DS_Store
+/engine-sync
+scripts/leak-terms.txt

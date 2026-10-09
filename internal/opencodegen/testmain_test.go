@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/engine-sync/internal/testjail"
 )
 
 func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }

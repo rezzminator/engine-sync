@@ -51,7 +51,7 @@ func TestRunCommandBuildPassLineCountsAndNamesDeletions(t *testing.T) {
 	second := build()
 	deleted := filepath.Join(root, ".opencode", "command", "review.md")
 	if !regexp.MustCompile(`(?m)^OPENCODE BUILD PASS wrote=0 unchanged=[1-9][0-9]* deleted=1$`).MatchString(second) ||
-		!regexp.MustCompile(`(?m)^pfm opencode: deleted `+regexp.QuoteMeta(deleted)+`$`).MatchString(second) {
+		!regexp.MustCompile(`(?m)^engine-sync opencode: deleted `+regexp.QuoteMeta(deleted)+`$`).MatchString(second) {
 		t.Fatalf("second build stdout=%q", second)
 	}
 }

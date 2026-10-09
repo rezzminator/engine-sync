@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
 // GlobalLinkState is the on-disk shape check found at one desired global

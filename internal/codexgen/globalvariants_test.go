@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
 const variantSourceAgent = "---\nname: lead\ndescription: >\n  Folded lead description\n  over two lines.\ntools: Read, Agent\n" +

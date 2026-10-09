@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/engine-sync/internal/atomicfile"
 )
 
 const (
@@ -340,3 +340,8 @@ func generatedBytes(bytes []byte) bool {
 	prefix := string(bytes[:min(len(bytes), 600)])
 	return strings.Contains(prefix, generatedMarker) || strings.Contains(prefix, legacyGeneratedMarker)
 }
+
+// GeneratedMarkers are the lines that mark a file this compiler (or its
+// declared predecessor) wrote: a project whose outputs carry one is in
+// engine-sync's scope.
+func GeneratedMarkers() []string { return []string{generatedMarker, legacyGeneratedMarker} }

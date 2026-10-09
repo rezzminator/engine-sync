@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/sourcelink"
+	"github.com/rezzminator/engine-sync/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/sourcelink"
 )
 
 // Mode selects whether the reconciler may change the filesystem.

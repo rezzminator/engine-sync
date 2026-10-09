@@ -4,9 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // reviewTestModel is the model every rewrite below is pinned to: the tier
@@ -279,29 +276,13 @@ func TestCompiledCommandFrontmatterStaysParseableAroundTheReview(t *testing.T) {
 	}
 }
 
-// Door 3: the composed Codex fleet prompt — the bytes the installer stages,
-// writes into developer_instructions and prepends to every compiled role, and
-// the bytes doctor compares a config against. The shared parts name no review
-// today (the flight's lander reviews, not the executor), so the door is proven
-// on a fixture tail: whatever the parts spell, the composed Codex prompt never
-// carries Claude's command, and the parts ON DISK never carry Codex's.
-func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {
-	prompt, err := FleetPrompt()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(prompt, codeReviewCommand) {
-		t.Fatalf("the composed Codex fleet prompt still spells %s", codeReviewCommand)
-	}
+// Door 3's compiler half: whatever the fleet prompt's parts spell, the
+// compose-time mapping turns Claude's review command into Codex's shell
+// review. The composed prompt itself is pfm's (its fleet-prompt package
+// asserts the composed bytes); this pins the rewrite those bytes go through.
+func TestCodeReviewFixtureTailMapsToTheShellReview(t *testing.T) {
 	mapped := rewriteCodeReview("- Your last step is `"+codeReviewCommand+" low` over your own change.\n", nil)
 	if strings.Contains(mapped, codeReviewCommand) || !strings.Contains(mapped, reviewWant("low")) {
 		t.Fatalf("the compose-time mapping left a fixture tail unmapped:\n%s", mapped)
-	}
-	claude, err := harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Claude).LongName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(claude), "codex review -c") {
-		t.Fatal("the Claude fleet prompt spells Codex's review — the shared parts are no longer engine-neutral")
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/config"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/engine-sync/internal/config"
+	pfmengine "github.com/rezzminator/engine-sync/internal/engine"
 )
 
 const (

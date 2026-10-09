@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/sourcelink"
+	"github.com/rezzminator/engine-sync/internal/sourcelink"
 )
 
 const skillFileName = "SKILL.md"

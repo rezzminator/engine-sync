@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strings"
 
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/sourcelink"
+	pfmengine "github.com/rezzminator/engine-sync/internal/engine"
+	"github.com/rezzminator/engine-sync/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/sourcelink"
 )
 
 // Mode selects whether the compiler may change the filesystem.
@@ -674,3 +674,8 @@ func validateDoctorSurfaces(root, home string, workbench bool, result *Result) {
 func openCodeName() string {
 	return pfmengine.MustLookup(pfmengine.OpenCode).LongName
 }
+
+// GeneratedMarkers are the lines that mark a file this compiler (or its
+// declared predecessor) wrote: a project whose outputs carry one is in
+// engine-sync's scope.
+func GeneratedMarkers() []string { return []string{newMarker, oldMarker} }

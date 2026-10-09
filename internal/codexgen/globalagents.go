@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
 // GlobalAgentsOptions selects the host HOME whose global Codex agents get
