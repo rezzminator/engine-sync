@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          [ -z "$unformatted" ] || { printf 'gofmt: not formatted:\n%s\n' "$unformatted"; exit 1; }
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+      - name: install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: validate the marketplace
+        run: claude plugin validate --strict .
+      - name: validate the plugin
+        run: claude plugin validate --strict plugins/engine-sync
+      - name: leak gate
+        # A fork's pull request gets no secrets; the gate runs on every push to develop and main.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          LEAK_TERMS_CONTENT: ${{ secrets.LEAK_TERMS }}
+        run: |
+          printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
+          LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt" scripts/leak-check.sh

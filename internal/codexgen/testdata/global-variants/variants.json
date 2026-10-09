@@ -1,0 +1,18 @@
+{
+  "digger-pro": {
+    "from": "digger",
+    "description": "Maps a topic deeper. Returns a cited map.",
+    "effort": "medium",
+    "replace": {
+      "Spawn at most 4 helpers a round": "Spawn at most 6 helpers a round",
+      "or at the end of round 3 — a safety ceiling": "or at the end of round 5 — a safety ceiling"
+    }
+  },
+  "digger-max": {
+    "from": "digger",
+    "tools": "WebSearch, WebFetch, Write, Agent",
+    "replace": {
+      "`scout` is the only agent type you spawn.": "`scout` digs the web; `surveyor` digs a repository."
+    }
+  }
+}
