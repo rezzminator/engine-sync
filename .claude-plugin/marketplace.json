@@ -1,6 +1,6 @@
 {
   "name": "engine-sync",
-  "description": "Carries a project's Claude Code agents, commands, skills, rules and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
+  "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
   "owner": {
     "name": "rezzminator",
     "url": "https://github.com/rezzminator"
@@ -14,7 +14,7 @@
         "path": "plugins/engine-sync",
         "ref": "main"
       },
-      "description": "Carries a project's Claude Code agents, commands, skills, rules and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
+      "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
       "version": "0.1.0",
       "license": "MIT",
       "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"],

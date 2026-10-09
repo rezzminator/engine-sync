@@ -1,6 +1,6 @@
 # engine-sync
 
-**Carries a project's Claude Code agents, commands, skills, rules and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
+**Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
 
 [![CI](https://github.com/rezzminator/engine-sync/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/rezzminator/engine-sync/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](./CHANGELOG.md)

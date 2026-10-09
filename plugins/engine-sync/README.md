@@ -1,6 +1,6 @@
 # engine-sync
 
-**Carries a project's Claude Code agents, commands, skills, rules and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
+**Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
 
 ## Install
 
