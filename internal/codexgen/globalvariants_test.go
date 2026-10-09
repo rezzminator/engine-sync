@@ -1,9 +1,9 @@
 package codexgen
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -180,21 +180,49 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 	}
 }
 
-// The declaration this repository ships must render: a variants.json that
-// drifts from its source agent fails here, not on an adopter's install.
+// The declaration shape the professor clone ships (a variants.json beside its
+// global agents) must render through the real compiler: a swap whose text has
+// drifted from its source agent is an error naming the variant. The input is
+// this repository's own fixture, never a path outside it, so a missing
+// fixture is a failure here and not an empty loop; the clone's real file is
+// rendered by that clone's gate with the built binary.
 func TestShippedGlobalAgentVariantsRender(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	agentsDir := filepath.Join("testdata", "global-variants")
+	raw, err := os.ReadFile(filepath.Join(agentsDir, GlobalAgentVariantsFile))
+	if err != nil {
+		t.Fatalf("variants fixture: %v", err)
 	}
-	agentsDir := filepath.Join(filepath.Dir(testFile), "..", "..", "..", "templates", "global", "agents")
+	var declared map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &declared); err != nil {
+		t.Fatalf("parse variants fixture: %v", err)
+	}
+	if len(declared) == 0 {
+		t.Fatalf("variants fixture declares no variant: the test would prove nothing")
+	}
 	variants, err := LoadGlobalAgentVariants(agentsDir, t.TempDir())
 	if err != nil {
-		t.Fatalf("shipped variants.json: %v", err)
+		t.Fatalf("variants fixture: %v", err)
 	}
+	if len(variants) != len(declared) {
+		t.Fatalf("rendered %d variants, the fixture declares %d", len(variants), len(declared))
+	}
+	byName := map[string]string{}
 	for _, variant := range variants {
-		if _, _, err := renderGlobalAgentTOML(variant.Path, string(variant.Content), t.TempDir()); err != nil {
+		role, toml, err := renderGlobalAgentTOML(variant.Path, string(variant.Content), t.TempDir())
+		if err != nil {
 			t.Fatalf("variant %s does not compile to TOML: %v", variant.Name, err)
 		}
+		if role != variant.Name || !strings.Contains(toml, `name = "`+variant.Name+`"`) {
+			t.Fatalf("variant %s compiled to role %q:\n%s", variant.Name, role, toml)
+		}
+		byName[variant.Name] = string(variant.Content)
+	}
+	if got := byName["digger-pro"]; !strings.Contains(got, "Spawn at most 6 helpers a round") ||
+		strings.Contains(got, "Spawn at most 4 helpers a round") || !strings.Contains(got, "effort: medium") {
+		t.Fatalf("digger-pro did not apply its swaps and override:\n%s", got)
+	}
+	if got := byName["digger-max"]; !strings.Contains(got, "`surveyor` digs a repository") ||
+		!strings.Contains(got, "tools: 'WebSearch, WebFetch, Write, Agent'") {
+		t.Fatalf("digger-max did not apply its swap and override:\n%s", got)
 	}
 }
