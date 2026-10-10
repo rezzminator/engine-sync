@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ type NewerWriterError struct {
 
 func (e *NewerWriterError) Error() string {
 	where := "the engine-sync plugin of the Claude config dir that runs " + e.Record.Writer
-	if config := os.Getenv("CLAUDE_CONFIG_DIR"); config != "" {
+	if config := paths.Getenv("CLAUDE_CONFIG_DIR"); config != "" {
 		where = "the engine-sync plugin in " + config
 	}
 	return fmt.Sprintf("NEWER-WRITER %s — %s was last written by engine-sync %s (%s), this is %s; update %s",
@@ -131,8 +132,8 @@ func Save(state, root, mine, writer string) error {
 // is older than the same core without one. Anything else compares as not
 // newer.
 func Newer(a, b string) bool {
-	coreA, preA, okA := parse(a)
-	coreB, preB, okB := parse(b)
+	coreA, preA, okA := parseWriterVersion(a)
+	coreB, preB, okB := parseWriterVersion(b)
 	if !okA || !okB {
 		return false
 	}
@@ -178,7 +179,7 @@ func newerPreRelease(a, b string) bool {
 	return len(idsA) > len(idsB)
 }
 
-func parse(version string) ([3]int, string, bool) {
+func parseWriterVersion(version string) ([3]int, string, bool) {
 	var core [3]int
 	main, pre, _ := strings.Cut(strings.TrimPrefix(version, "v"), "-")
 	parts := strings.Split(main, ".")

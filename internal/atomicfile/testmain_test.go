@@ -13,4 +13,4 @@ import (
 //
 // It lives in the external test package: testjail imports this package, and an
 // internal test file importing it back is a cycle Go rejects.
-func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
+func TestMain(m *testing.M) { os.Exit(testjail.RunTests(m)) }

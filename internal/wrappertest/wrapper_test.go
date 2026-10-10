@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/testjail"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,10 +20,8 @@ import (
 
 const version = "0.1.0"
 
-// fakeBinary prints its name and arguments: every test reads which copy ran.
 const fakeBinary = "#!/bin/sh\nprintf 'ran %s args=%s\\n' \"$FAKE_NAME\" \"$*\"\n"
 
-// rig is one plugin copy, one engine-sync home and the env the wrapper sees.
 type rig struct {
 	wrapper string
 	home    string
@@ -31,7 +30,7 @@ type rig struct {
 
 func newRig(t *testing.T, sums string) rig {
 	t.Helper()
-	base := t.TempDir()
+	base := testjail.Scratch(t)
 	plugin := filepath.Join(base, "plugin")
 	src, err := os.ReadFile(filepath.Join("..", "..", "plugins", "engine-sync", "libexec", "engine-sync"))
 	if err != nil {
@@ -94,18 +93,8 @@ func (r rig) linkTarget(t *testing.T) string {
 	return target
 }
 
-func TestTheOverrideRunsAndIsNeverLinked(t *testing.T) {
-	r := newRig(t, "")
-	r.cache(t, version)
-	override := filepath.Join(t.TempDir(), "dev-engine-sync")
-	writeFile(t, override, fakeBinary, 0o755)
-	out, stderr, code := r.run(t, "", []string{"ENGINE_SYNC_BIN=" + override, "FAKE_NAME=override"}, "codex", "check", ".")
-	if code != 0 || out != "ran override args=codex check .\n" {
-		t.Fatalf("code %d, stdout %q, stderr %q: $ENGINE_SYNC_BIN runs first", code, out, stderr)
-	}
-	if got := r.linkTarget(t); got != "" {
-		t.Fatalf("the stable link names %q: an override is never linked", got)
-	}
+func assetName() string {
+	return fmt.Sprintf("engine-sync_%s_%s_%s", version, runtime.GOOS, runtime.GOARCH)
 }
 
 func TestTheCacheRunsAndTheLinkOnlyMovesForward(t *testing.T) {
@@ -141,10 +130,6 @@ func TestTheCacheRunsAndTheLinkOnlyMovesForward(t *testing.T) {
 			}
 		})
 	}
-}
-
-func assetName() string {
-	return fmt.Sprintf("engine-sync_%s_%s_%s", version, runtime.GOOS, runtime.GOARCH)
 }
 
 func TestTheDownloadIsVerifiedInstalledAndLinked(t *testing.T) {

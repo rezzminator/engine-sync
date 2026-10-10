@@ -12,7 +12,7 @@
 
 - After a turn that wrote a Claude source (anything under `.claude/`, a `CLAUDE.md`, a `.mcp.json`, a global command), the `Stop` hook rebuilds and checks the Codex mirror (`AGENTS.md`, `.codex/`) and the OpenCode mirror (`.opencode/`). A mirror that fails its check blocks the turn's end, naming the failing stage, so the model repairs it.
 - At session start it rebuilds a mirror a `git pull` left stale, and refreshes the machine-level Codex roles when `~/.config/engine-sync/targets.json` names them.
-- A project is in scope when it carries `.claude/codex-build.json` or a mirror engine-sync generated; every other project is left alone.
+- A project is in scope when it carries `.claude/engine-sync.json`, the legacy `.claude/codex-build.json`, or a mirror engine-sync generated; every other project is left alone.
 
 ## The binary
 

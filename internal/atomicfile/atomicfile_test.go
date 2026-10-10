@@ -2,6 +2,7 @@ package atomicfile
 
 import (
 	"errors"
+	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ import (
 // (not the process umask, not the old file's), a missing parent is created, and
 // nothing but the target remains in the directory.
 func TestWriteReplacesWholeWithTheModeAndLeavesNoScratch(t *testing.T) {
-	directory := filepath.Join(t.TempDir(), "nested")
+	directory := filepath.Join(testjail.Scratch(t), "nested")
 	path := filepath.Join(directory, "config.json")
 	if err := Write(path, []byte("first\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -40,7 +41,7 @@ func TestWriteReplacesWholeWithTheModeAndLeavesNoScratch(t *testing.T) {
 // replace — reports which path failed, keeps what was there, and removes its
 // scratch file.
 func TestWriteFailureLeavesTheOldFileAndNoScratch(t *testing.T) {
-	directory := t.TempDir()
+	directory := testjail.Scratch(t)
 	target := filepath.Join(directory, "occupied")
 	if err := os.Mkdir(target, 0o700); err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func TestWriteFailureLeavesTheOldFileAndNoScratch(t *testing.T) {
 // either, the error names both — the caller learns a ".<name>.tmp-*" file was
 // left behind instead of being told only that the rename failed.
 func TestWriteFailureReportsAScratchItCouldNotRemove(t *testing.T) {
-	directory := t.TempDir()
+	directory := testjail.Scratch(t)
 	target := filepath.Join(directory, "occupied")
 	if err := os.Mkdir(target, 0o700); err != nil {
 		t.Fatal(err)
@@ -89,7 +90,7 @@ func TestWriteFailureReportsAScratchItCouldNotRemove(t *testing.T) {
 // is published whole; one byte past it is ErrTooLarge, the old file stays and
 // no scratch remains.
 func TestWriteFromStreamsUnderTheLimitAndRefusesPastIt(t *testing.T) {
-	directory := t.TempDir()
+	directory := testjail.Scratch(t)
 	path := filepath.Join(directory, "body.bin")
 	written, err := WriteFrom(path, strings.NewReader("0123456789"), 0o600, 10)
 	if err != nil || written != 10 {
@@ -111,7 +112,7 @@ func TestWriteFromStreamsUnderTheLimitAndRefusesPastIt(t *testing.T) {
 func TestCreatePublishesOnceAndPreservesExistingTarget(t *testing.T) {
 	for _, shape := range []string{"file", "symlink", "directory"} {
 		t.Run(shape, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := testjail.Scratch(t)
 			path := filepath.Join(dir, "target")
 			if err := Create(path, []byte("original"), 0o600); err != nil {
 				t.Fatal(err)

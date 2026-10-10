@@ -1,4 +1,4 @@
-// Package atomicfile is the one atomic file writer: every file pfm replaces
+// Package atomicfile is the one atomic file writer: every file engine-sync replaces
 // whole — config, caches, crumbs, receipts, staged assets — goes through Write,
 // so a reader sees the old content or the new, never a torn write, and a
 // failure leaves the old file and no scratch behind.
@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 )
@@ -142,3 +143,22 @@ func WriteScratch(directory, pattern string, content []byte) (path string, clean
 	}
 	return path, cleanup, nil
 }
+
+func Symlink(target, path string) error {
+	scratch := filepath.Join(
+		filepath.Dir(path),
+		fmt.Sprintf(".%s.engine-sync-link-%d-%016x", filepath.Base(path), os.Getpid(), rand.Uint64()),
+	)
+	if err := os.Symlink(target, scratch); err != nil {
+		return err
+	}
+	if err := os.Rename(scratch, path); err != nil {
+		if removeErr := os.Remove(scratch); removeErr != nil {
+			return fmt.Errorf("%w; remove scratch link %s: %v", err, scratch, removeErr)
+		}
+		return err
+	}
+	return nil
+}
+
+func Move(from, to string) error { return os.Rename(from, to) }
