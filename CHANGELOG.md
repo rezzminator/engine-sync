@@ -6,6 +6,7 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ### Changed
 
+- Development builds report `0.2.0-alpha` so a released binary refuses their roots as `NEWER-WRITER`.
 - One source model, rewrite chain, target registry and artifact reconciler serve project and machine scopes. Added `plan`, `--engine`, `--dry-run`, `config show|validate|schema`, tracked JSON Schema, permanent goldens and mechanical tree gates with pinned staticcheck.
 
 - Standalone defaults for both engines and global roles; project policy lives in validated `.claude/engine-sync.json`, in symmetric `codex` and `opencode` sections, with one-release compatibility for the previous Codex configuration file.

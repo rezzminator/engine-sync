@@ -75,7 +75,7 @@ for target in $targets; do
   env -u GOFLAGS -u GOEXPERIMENT GOAMD64=v1 GOARM64=v8.0 \
     CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
     go build -trimpath -buildvcs=false \
-    -ldflags "-s -w -buildid= -X main.version=$version" \
+    -ldflags "-s -w -buildid= -X github.com/rezzminator/engine-sync/internal/cli.Version=$version" \
     -o "$out/$asset" ./cmd/engine-sync
 done
 

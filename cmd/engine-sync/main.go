@@ -6,6 +6,4 @@ import (
 	"os"
 )
 
-var version = "0.1.0"
-
-func main() { os.Exit(cli.Main(os.Args[1:], os.Stdout, os.Stderr, os.Stdin, version)) }
+func main() { os.Exit(cli.Main(os.Args[1:], os.Stdout, os.Stderr, os.Stdin, cli.Version)) }

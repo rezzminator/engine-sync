@@ -17,9 +17,9 @@ import (
 	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
-// version is this binary's release; a release build stamps it with
-// -ldflags "-X main.version=…", and the plugin manifest names the same one.
-var version = "0.1.0"
+// Version identifies this build; release builds stamp it with the plugin
+// manifest's version using -ldflags "-X github.com/rezzminator/engine-sync/internal/cli.Version=…".
+var Version = "0.2.0-alpha"
 
 // env is the process environment one run reads.
 type env struct {
@@ -37,7 +37,7 @@ type policyResult struct {
 
 // Main is the process adapter; all compiler stages are driven by run.
 func Main(args []string, stdout, stderr io.Writer, stdin io.Reader, release string) int {
-	version = release
+	Version = release
 	return dispatch(args, stdout, stderr, env{get: paths.Getenv, stdin: stdin})
 }
 
@@ -93,7 +93,7 @@ func commandTable() []commandEntry {
 		{"config", "config show|validate|schema [--json] [root]", runConfig},
 		{"global", "global [options]", runGlobal},
 		{"hook", "hook claude mark|stop|start", runHook},
-		{"version", "version", func(_ []string, o, w io.Writer, e env) int { fmt.Fprintf(o, "engine-sync %s\n", version); return 0 }},
+		{"version", "version", func(_ []string, o, w io.Writer, e env) int { fmt.Fprintf(o, "engine-sync %s\n", Version); return 0 }},
 		{"help", "help", func(_ []string, o, w io.Writer, e env) int { printUsage(o); return 0 }},
 	}
 }
@@ -148,7 +148,7 @@ func guarded(e env, roots []string, writes bool, body func() int) (int, error) {
 	}
 	if !writes {
 		for _, key := range keys {
-			if err := guard.Check(state, key, version); err != nil {
+			if err := guard.Check(state, key, Version); err != nil {
 				return 1, err
 			}
 		}
@@ -170,7 +170,7 @@ func guarded(e env, roots []string, writes bool, body func() int) (int, error) {
 		releases = append(releases, release)
 	}
 	for _, key := range keys {
-		if err := guard.Check(state, key, version); err != nil {
+		if err := guard.Check(state, key, Version); err != nil {
 			return 1, errors.Join(err, releaseAll())
 		}
 	}
@@ -178,7 +178,7 @@ func guarded(e env, roots []string, writes bool, body func() int) (int, error) {
 	var saveErr error
 	if code == 0 {
 		for _, key := range keys {
-			saveErr = errors.Join(saveErr, guard.Save(state, key, version, writerPath()))
+			saveErr = errors.Join(saveErr, guard.Save(state, key, Version, writerPath()))
 		}
 	}
 	if err := releaseAll(); err != nil {
