@@ -193,7 +193,9 @@ func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
 	for _, name := range names {
 		roots = append(roots, artifact.Root{Path: name, SourceRoots: sources})
 	}
-	roots = append(roots, artifact.Root{Path: filepath.Join(p.Root, ".codex"), ValidateOnly: true}, artifact.Root{Path: filepath.Join(p.Home, ".codex"), ValidateOnly: true})
+	for _, name := range []string{filepath.Join(p.Root, ".codex", "config.toml"), filepath.Join(p.Home, ".codex", "config.toml"), filepath.Join(p.Home, ".codex", "agents")} {
+		roots = append(roots, artifact.Root{Path: name, ValidateOnly: true})
+	}
 	return roots
 }
 

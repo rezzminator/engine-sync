@@ -553,16 +553,25 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 }
 
 func TestCheckRejectsInvalidKeeperTOML(t *testing.T) {
-	root := testjail.Scratch(t)
-	home := testjail.Scratch(t)
-	writeCodexFixture(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
-	writeCodexFixture(t, filepath.Join(root, ".codex", "config.toml"), "broken = [\n")
-	result, err := RunProject(Options{Root: root, Home: home, Mode: ModeCheck})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.OK || !containsFinding(result.Problems, "UNPARSEABLE") {
-		t.Fatalf("invalid TOML check = %#v", result)
+	for _, surface := range []string{"project config", "home config", "project agents", "home agents"} {
+		t.Run(surface, func(t *testing.T) {
+			root, home := testjail.Scratch(t), testjail.Scratch(t)
+			writeCodexFixture(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
+			writeCodexFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"codex":{"globalCommands":false}}`)
+			base := root
+			if strings.HasPrefix(surface, "home") {
+				base = home
+			}
+			path := filepath.Join(base, ".codex", "config.toml")
+			if strings.HasSuffix(surface, "agents") {
+				path = filepath.Join(base, ".codex", "agents", "keeper.toml")
+			}
+			writeCodexFixture(t, path, "broken = [\n")
+			result, err := RunProject(Options{Root: root, Home: home, Mode: ModeCheck})
+			if err != nil || result.OK || !containsFinding(result.Problems, "UNPARSEABLE "+path) {
+				t.Fatalf("invalid TOML check = %#v, err=%v", result, err)
+			}
+		})
 	}
 }
 
