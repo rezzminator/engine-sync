@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -21,31 +22,71 @@ func Home() (string, error) {
 	return home, nil
 }
 
-// WorkbenchManifest is the marker of a nested workbench project.
+// WorkbenchManifest is empty unless the integration names a marker.
 func WorkbenchManifest(dir string) string {
-	return filepath.Join(dir, ".professor", "workbench.json")
+	marker := os.Getenv("ENGINE_SYNC_WORKBENCH_MARKER")
+	if marker == "" {
+		return ""
+	}
+	return filepath.Join(dir, filepath.FromSlash(marker))
 }
 
-// HasWorkbenchManifest inspects a workbench marker without following links.
-func HasWorkbenchManifest(dir string) (bool, error) {
-	path := WorkbenchManifest(dir)
-	for _, candidate := range []string{filepath.Dir(path), path} {
-		info, err := os.Lstat(candidate)
-		// ENOTDIR: a regular file named .professor holds no manifest.
+// HasWorkbenchManifest never follows a symlink in a configured marker path.
+func HasWorkbenchManifest(dir string, markers ...string) (bool, error) {
+	marker := ""
+	if len(markers) > 0 {
+		marker = markers[0]
+	} else {
+		marker = os.Getenv("ENGINE_SYNC_WORKBENCH_MARKER")
+	}
+	if marker == "" {
+		return false, nil
+	}
+	if err := RelativePath(marker, "workbenchMarker"); err != nil {
+		return false, err
+	}
+	path := filepath.Join(dir, filepath.FromSlash(marker))
+	current := dir
+	for _, part := range strings.Split(filepath.FromSlash(marker), string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			return false, nil
 		}
 		if err != nil {
-			return false, fmt.Errorf("inspect workbench %s: %w", candidate, err)
+			return false, fmt.Errorf("inspect workbench %s: %w", current, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return false, nil
 		}
-		if candidate == path && !info.Mode().IsRegular() {
+		if current == path && !info.Mode().IsRegular() {
 			return false, fmt.Errorf("inspect workbench %s: not a regular file", path)
 		}
 	}
 	return true, nil
+}
+
+// ClaudeConfigDir is the global source default shared by global and doctor.
+func ClaudeConfigDir(env Env, home string) string {
+	if value := env("CLAUDE_CONFIG_DIR"); value != "" {
+		return value
+	}
+	return filepath.Join(home, ".claude")
+}
+func GlobalAgentsSource(home, repo string, configDirs ...string) string {
+	if repo == "" {
+		return filepath.Join(GlobalSourceRoot(home, repo, configDirs...), "agents")
+	}
+	return filepath.Join(repo, "templates", "global", "agents")
+}
+func GlobalSourceRoot(home, repo string, configDirs ...string) string {
+	if repo == "" {
+		if len(configDirs) > 0 && configDirs[0] != "" {
+			return configDirs[0]
+		}
+		return ClaudeConfigDir(os.Getenv, home)
+	}
+	return repo
 }
 
 // PhysicalPath resolves the deepest existing ancestor and keeps a missing tail.
@@ -69,24 +110,29 @@ func PhysicalPath(path string) string {
 	}
 }
 
-// GeneratedCodexAgentsDir is where pfm compiles the machine-global Codex
-// agent .toml twins (codexgen.RunGlobalAgents) — pfm-owned state, never
+// SameEntry compares parent directories physically without following the leaf link.
+func SameEntry(first, second string) bool {
+	return filepath.Base(first) == filepath.Base(second) && PhysicalPath(filepath.Dir(first)) == PhysicalPath(filepath.Dir(second))
+}
+
+// GeneratedCodexAgentsDir is where engine-sync compiles the machine-global Codex
+// agent .toml twins (codex.RunGlobalAgents) — engine-sync-owned state, never
 // inside the source clone a template's .md lives in, so a stale compiler on
 // any host can never rewrite a tracked file. A `~/.codex/agents/<name>.toml`
 // link points here; uninstall removes this whole directory along with the
 // links it owns.
 func LegacyGeneratedCodexAgentsDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "generated", "codex-agents")
+	return filepath.Join(home, CodexLegacyStore)
 }
 
-// GeneratedClaudeAgentsDir is where pfm renders the machine-global Claude
+// GeneratedClaudeAgentsDir is where engine-sync renders the machine-global Claude
 // agent VARIANTS templates/global/agents/variants.json declares
-// (codexgen.RunGlobalAgents) — one source agent re-emitted under another name
+// (codex.RunGlobalAgents) — one source agent re-emitted under another name
 // with overridden frontmatter. An original agent is linked straight from the
 // clone and never lands here; only a variant's `{config}/agents/<name>.md`
 // link points into this directory, and uninstall removes it with those links.
 func GeneratedClaudeAgentsDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
+	return filepath.Join(home, ClaudeVariantStore)
 }
 
 // Env reads one environment variable; os.Getenv in production, a map in a
@@ -128,3 +174,6 @@ func EngineSyncState(env Env, home string) string {
 func EngineSyncConfig(env Env, home string) string {
 	return filepath.Join(absoluteOr(env, "XDG_CONFIG_HOME", home, ".config"), "engine-sync")
 }
+
+const ClaudeVariantStore = ".local/state/engine-sync/generated/claude-agents"
+const CodexLegacyStore = ".local/state/engine-sync/generated/codex-agents"

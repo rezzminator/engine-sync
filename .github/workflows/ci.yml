@@ -22,6 +22,27 @@ jobs:
           [ -z "$unformatted" ] || { printf 'gofmt: not formatted:\n%s\n' "$unformatted"; exit 1; }
       - name: vet
         run: go vet ./...
+      - name: staticcheck
+        run: |
+          version=$(awk '$1 == "staticcheck" { print $2 }' scripts/tool-versions.txt)
+          go install honnef.co/go/tools/cmd/staticcheck@"$version"
+          staticcheck ./...
+      - name: tree gate tests
+        run: scripts/check-tree_test.sh
+      - name: compiler tree
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          LEAK_TERMS_CONTENT: ${{ secrets.LEAK_TERMS }}
+        run: |
+          printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
+          LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt" scripts/check-tree.sh
+      - name: public compiler tree on fork pull requests
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          for baseline in scripts/baselines/*.txt; do
+            check=$(basename "$baseline" .txt)
+            [ "$check" = publication ] || scripts/check-tree.sh --only "$check"
+          done
       - name: test
         run: go test ./...
       - name: install Claude Code

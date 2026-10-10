@@ -1,0 +1,70 @@
+{
+  "home/.claude/agents/reader.md": {
+    "content": "---\nname: reader\ndescription: Reads a named file — use for source inspection. Returns a quote.\ntools: Read, Bash\nmodel: opus\n---\nRead the source and return the requested lines.\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "home/.codex/agents/reader.toml": {
+    "content": "{marker}\nname = \"reader\"\ndescription = \"Reads a named file — use for source inspection. Returns a quote.\"\nsandbox_mode = \"read-only\"\ndeveloper_instructions = \"\"\"\nRead the source and return the requested lines.\n\"\"\"\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "home/.codex/prompts/memo.md": {
+    "content": "---\n{marker}\nname: memo\ndescription: Record a memo — use $memo for a short note.\n---\nRecord the requested note.\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "home/.codex/skills/memo/SKILL.md": {
+    "content": "---\n{marker}\nname: memo\ndescription: Record a memo — use $memo for a short note.\n---\nRecord the requested note.\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "home/.config/opencode/command/memo.md": {
+    "content": "---\n{marker}\ndescription: \"Record a memo — use /memo for a short note.\"\n---\nRecord the requested note.\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "project/.codex/agents/reader.toml": {
+    "content": "{marker}\nname = \"reader\"\ndescription = \"Reads a named file — use for source inspection. Returns a quote.\"\nsandbox_mode = \"read-only\"\ndeveloper_instructions = \"\"\"\nYou are the reader role in this repository, running as a native Codex subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\nRead the source and return the requested lines.\n\"\"\"\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "project/.codex/config.toml": {
+    "content": "\n\n{marker}\n[mcp_servers.sample]\ncommand = \"sample-server\"\n# END mcp_servers — generated\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "project/.codex/skills/hello/SKILL.md": {
+    "content": "---\n{marker}\nname: hello\ndescription: Say hello — use $hello for a greeting.\n---\nHello.\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "project/.codex/skills/sample": {
+    "kind": "link",
+    "target": "../../.claude/skills/sample"
+  },
+  "project/.opencode/agent/reader.md": {
+    "content": "---\n{marker}\ndescription: \"Reads a named file — use for source inspection. Returns a quote.\"\nmode: all\ntools:\n  apply_patch: false\n  edit: false\n  execute: false\n  glob: false\n  grep: false\n  invalid: false\n  lsp: false\n  plan_exit: false\n  question: false\n  skill: false\n  task: false\n  todowrite: false\n  webfetch: false\n  websearch: false\n  write: false\n  sample_*: false\n---\nYou are the reader role in this repository, running as a native OpenCode subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\nRead the source and return the requested lines.\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "project/.opencode/command/hello.md": {
+    "content": "---\n{marker}\ndescription: \"Say hello — use /hello for a greeting.\"\n---\nHello.\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "project/.opencode/opencode.jsonc": {
+    "content": "{marker}\n// Sources: this compiler owns $schema, permission, and mcp. Other keys survive regeneration.\n{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"permission\": {\n    \"*\": \"allow\"\n  },\n  \"mcp\": {\n    \"sample\": {\n      \"command\": [\n        \"sample-server\"\n      ],\n      \"enabled\": true,\n      \"type\": \"local\"\n    }\n  }\n}\n",
+    "kind": "file",
+    "mode": 420
+  },
+  "project/.opencode/skills/sample": {
+    "kind": "link",
+    "target": "../../.claude/skills/sample"
+  },
+  "project/AGENTS.md": {
+    "content": "{marker}\n# Sample — checks compiler artifacts\n\nUse $hello and read the source before changing it.\n\n## Codex adapter — reading this file in the Codex harness\n\nThis file is compiled from CLAUDE.md by engine-sync build. Translate harness mechanics to the matching Codex command or role: edit the source and rebuild.\n",
+    "kind": "file",
+    "mode": 420
+  }
+}

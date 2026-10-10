@@ -10,7 +10,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 )
 
-func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
+func TestMain(m *testing.M) { os.Exit(testjail.RunTests(m)) }
 
 func TestNewerOrdersReleasesAndRefusesNothingItCannotParse(t *testing.T) {
 	cases := []struct {
@@ -41,7 +41,7 @@ func TestNewerOrdersReleasesAndRefusesNothingItCannotParse(t *testing.T) {
 }
 
 func TestAnOlderWriterIsRefusedAndTheRecordOnlyMovesForward(t *testing.T) {
-	state, root := t.TempDir(), "/repo"
+	state, root := testjail.Scratch(t), "/repo"
 	if err := Check(state, root, "0.1.0"); err != nil {
 		t.Fatalf("no record must admit the write: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestAnOlderWriterIsRefusedAndTheRecordOnlyMovesForward(t *testing.T) {
 }
 
 func TestAnUnreadableRecordIsAnErrorNotAPass(t *testing.T) {
-	state, root := t.TempDir(), "/repo"
+	state, root := testjail.Scratch(t), "/repo"
 	if err := Save(state, root, "0.1.0", "/bin/x"); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestAnUnreadableRecordIsAnErrorNotAPass(t *testing.T) {
 }
 
 func TestLockIsHeldUntilReleased(t *testing.T) {
-	state := t.TempDir()
+	state := testjail.Scratch(t)
 	release, err := Lock(state, "/repo")
 	if err != nil {
 		t.Fatal(err)

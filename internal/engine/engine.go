@@ -55,6 +55,9 @@ func OpenCodeMCPToolName(claudeTool string) (string, error) {
 // its prefix on the first "__" and sanitizes each part to letters, digits, '_'
 // and '-', as OpenCode names a server's tools.
 func OpenCodeMCPToolParts(claudeTool string) (serverName, toolName string, err error) {
+	if !strings.HasPrefix(claudeTool, "mcp__") {
+		return "", "", fmt.Errorf("OpenCode MCP tool %q must be mcp__server__tool", claudeTool)
+	}
 	parts := strings.SplitN(claudeTool[len("mcp__"):], "__", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("OpenCode MCP tool %q must be mcp__server__tool", claudeTool)
