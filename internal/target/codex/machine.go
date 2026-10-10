@@ -26,13 +26,25 @@ func machineRoots(p source.Project, cfg config.Config) []artifact.Root {
 	for _, home := range p.CodexHomes {
 		roots = append(roots, artifact.Root{Path: filepath.Join(home, "agents"), SourceRoots: sources, ValidateOnly: true})
 	}
-	for _, dir := range p.ClaudeConfigDirs {
-		if filepath.Clean(filepath.Join(dir, "agents")) != filepath.Clean(p.AgentSourceDir) {
-			roots = append(roots, artifact.Root{Path: filepath.Join(dir, "agents"), SourceRoots: sources, ValidateOnly: true})
+	// Each Claude registry link is its own root, so its claim test keeps these
+	// sources with no Codex home, without walking the rest of the registry.
+	for _, a := range p.Agents {
+		for _, path := range claudeRegistryLinks(p, a.Path) {
+			roots = append(roots, artifact.Root{Path: path, SourceRoots: sources, ValidateOnly: true})
 		}
 	}
-	roots = append(roots, artifact.Root{Path: filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), SourceRoots: sources, ValidateOnly: true})
 	return roots
+}
+
+// claudeRegistryLinks names the link each Claude config directory owes agent.
+func claudeRegistryLinks(p source.Project, agent string) []string {
+	var links []string
+	for _, dir := range p.ClaudeConfigDirs {
+		if path := filepath.Join(dir, "agents", filepath.Base(agent)); !paths.SameEntry(path, agent) {
+			links = append(links, path)
+		}
+	}
+	return links
 }
 func renderMachine(p source.Project, cfg config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
 	var outputs []artifact.Artifact
@@ -83,11 +95,7 @@ func renderMachine(p source.Project, cfg config.Config) ([]artifact.Artifact, []
 		if a.Generated {
 			outputs = append(outputs, artifact.Artifact{Path: a.Path, Content: a.Raw, Source: filepath.Join(p.AgentSourceDir, "variants.json"), Syntax: artifact.YAMLFront})
 		}
-		for _, dir := range p.ClaudeConfigDirs {
-			path := filepath.Join(dir, "agents", filepath.Base(a.Path))
-			if paths.SameEntry(path, a.Path) {
-				continue
-			}
+		for _, path := range claudeRegistryLinks(p, a.Path) {
 			outputs = append(outputs, artifact.Artifact{Path: path, Kind: artifact.Link, Target: a.Path, Source: a.Path})
 		}
 	}

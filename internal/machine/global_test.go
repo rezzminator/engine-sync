@@ -194,6 +194,36 @@ func TestNoCodexHomeWritesNoRoleAndSkipsTheMirrors(t *testing.T) {
 	}
 }
 
+// TestNoCodexHomeKeepsClaudeLinkOwnership: with no Codex home, the Claude
+// registry links keep the same claim test as with one — a foreign link into
+// another .claude/agents stays, a relative link into the generated store is ours.
+func TestNoCodexHomeKeepsClaudeLinkOwnership(t *testing.T) {
+	home, repo := fixture(t)
+	registry := filepath.Join(home, ".claude", "agents")
+	foreign := filepath.Join(home, "elsewhere", ".claude", "agents", "gamma.md")
+	writeMachineFixture(t, foreign, "---\nname: gamma\ndescription: Theirs.\n---\n")
+	store := filepath.Join(home, paths.ClaudeVariantStore, "gamma-deep.md")
+	relative, err := filepath.Rel(registry, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for link, target := range map[string]string{"gamma.md": foreign, "gamma-deep.md": relative} {
+		if err := os.Symlink(target, filepath.Join(registry, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	RunMachine(Options{Home: home, SourceRepo: repo, CodexHomes: []string{}})
+	if got, _ := os.Readlink(filepath.Join(registry, "gamma.md")); got != foreign {
+		t.Fatalf("foreign Claude link was claimed: now -> %q", got)
+	}
+	if got, _ := os.Readlink(filepath.Join(registry, "gamma-deep.md")); got != store {
+		t.Fatalf("owned relative Claude link was refused: now -> %q, want %q", got, store)
+	}
+}
+
 func TestAbsentSourceIsNamedNotSilent(t *testing.T) {
 	home := testjail.Scratch(t)
 	report := RunMachine(Options{Home: home, SourceRepo: filepath.Join(home, "nowhere"), CodexHomes: []string{}})

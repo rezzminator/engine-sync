@@ -3,11 +3,42 @@ package codex
 import (
 	"bytes"
 	"github.com/rezzminator/engine-sync/internal/artifact"
+	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
+	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestMachineInspectionValidatesOnlyCodexRoles(t *testing.T) {
+	home := testjail.Scratch(t)
+	cfg := config.Default()
+	p := source.Project{Scope: source.MachineScope, Home: home, AgentSourceDir: filepath.Join(home, "source"), CodexHomes: []string{filepath.Join(home, ".codex")}, ClaudeConfigDirs: []string{filepath.Join(home, ".claude")}}
+	for _, dir := range []string{filepath.Join(home, ".claude", "agents"), filepath.Join(home, cfg.Machine.GeneratedAgentsDir)} {
+		path := filepath.Join(dir, "unrelated.txt")
+		writeCodexFixture(t, path, "private data\n")
+		if err := os.Chmod(path, 0000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(path, 0600) })
+		if _, err := os.ReadFile(path); err == nil {
+			t.Skip("permission proof requires a non-root user")
+		}
+	}
+	role := filepath.Join(home, ".codex", "agents", "keeper.toml")
+	writeCodexFixture(t, role, "broken = [\n")
+	target := Target{}
+	outputs, problems := reconcile.Inspect(target.Roots(p, cfg), nil)
+	if len(problems) != 0 {
+		t.Fatalf("unrelated machine entries were read: %v", problems)
+	}
+	diagnostics := target.Validate(outputs)
+	if len(diagnostics) != 1 || diagnostics[0].Path != role {
+		t.Fatalf("Codex role validation lost: %+v", diagnostics)
+	}
+}
 
 // TestClassifyGlobalRoleSeparatesOursFromTheirs walks every state the install
 // path can meet at a role's path. The line that matters most is the foreign

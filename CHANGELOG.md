@@ -12,6 +12,7 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 - Native ordered OpenCode permissions and per-agent overrides, configurable preambles, root-file mirrors, MCP server knowledge and workbench markers. Machine policy lives beside targets in `config.json`; doctor reports the source of each resolved value. Global agent stores and retirements are machine-only settings; literal `rewrites` support engine and artifact scopes.
 - Global roles default to the Claude configuration directory. `codex agents` accepts `--source-repo`; `codex-sandbox` frontmatter controls sandbox exceptions for any role name.
 - Generated markers and rebuild hints name engine-sync; rebuilding recognizes and migrates existing owned mirrors.
+- Checks inspect only generated surfaces and native configuration files, leaving unrelated engine-home files alone. Inspection skips sockets, FIFOs and devices while reporting regular-file read and directory-walk errors.
 
 ## [0.1.0] - 2026-10-09
 

@@ -37,6 +37,9 @@ func Inspect(roots []artifact.Root, desired []artifact.Artifact) ([]artifact.Art
 	var problems []string
 	visit := func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
+			if entry == nil {
+				return err
+			}
 			if !os.IsNotExist(err) {
 				problems = append(problems, "inspect "+path+": "+err.Error())
 			}
@@ -46,7 +49,17 @@ func Inspect(roots []artifact.Root, desired []artifact.Artifact) ([]artifact.Art
 			return nil
 		}
 		seen[path] = true
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
+		info, err := os.Lstat(path)
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			info, err = os.Stat(path)
+		}
+		if err != nil {
+			if !os.IsNotExist(err) {
+				problems = append(problems, "read "+path+": "+err.Error())
+			}
+			return nil
+		}
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 		raw, err := os.ReadFile(path)
@@ -67,7 +80,9 @@ func Inspect(roots []artifact.Root, desired []artifact.Artifact) ([]artifact.Art
 		return nil
 	}
 	for _, root := range roots {
-		_ = filepath.WalkDir(root.Path, visit)
+		if err := filepath.WalkDir(root.Path, visit); err != nil && !os.IsNotExist(err) {
+			problems = append(problems, "inspect "+root.Path+": "+err.Error())
+		}
 	}
 	for _, a := range desired {
 		if seen[a.Path] {
