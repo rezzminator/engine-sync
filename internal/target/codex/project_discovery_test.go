@@ -13,9 +13,9 @@ func TestListedProjectWorkbenchProbeFailure(t *testing.T) {
 	writeCodexFixture(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
 	project := strings.Repeat("x", 300)
 	writeCodexFixture(t, filepath.Join(root, ".claude", "engine-sync.json"),
-		`{"version":1,"workbenchMarker":".professor/workbench.json","codex":{"projects":["`+project+`"]}}`)
+		`{"version":1,"workbenchMarker":".example/workbench.json","codex":{"projects":["`+project+`"]}}`)
 	result, err := Build(Options{Root: root, Home: home})
-	want := "inspect workbench " + filepath.Join(root, project, ".professor") + ": "
+	want := "inspect workbench " + filepath.Join(root, project, ".example") + ": "
 	if err != nil || result.OK || result.Wrote != 0 || len(result.Problems) != 1 ||
 		!strings.HasPrefix(result.Problems[0], want) {
 		t.Fatalf("build = %#v, %v, want zero writes and problem starting %q", result, err, want)
@@ -30,11 +30,11 @@ func TestWorkbenchParentProjects(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root, home := testjail.Scratch(t), testjail.Scratch(t)
-			writeCodexFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".professor/workbench.json"}`)
+			writeCodexFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".example/workbench.json"}`)
 			writeCodexFixture(t, filepath.Join(root, "CLAUDE.md"), "Parent.\n")
 			writeCodexFixture(t, filepath.Join(root, "api", "CLAUDE.md"), "API.\n")
 			writeCodexFixture(t, filepath.Join(root, "scribe", "CLAUDE.md"), "Scribe.\n")
-			writeCodexFixture(t, filepath.Join(root, "scribe", ".professor", "workbench.json"), `{}`)
+			writeCodexFixture(t, filepath.Join(root, "scribe", ".example", "workbench.json"), `{}`)
 			writeCodexFixture(
 				t,
 				filepath.Join(root, "scribe", ".claude", "agents", "clerk.md"),
@@ -47,7 +47,7 @@ func TestWorkbenchParentProjects(t *testing.T) {
 				writeCodexFixture(
 					t,
 					filepath.Join(root, ".claude", "engine-sync.json"),
-					`{"version":1,"workbenchMarker":".professor/workbench.json","codex":{"projects":["scribe"]}}`,
+					`{"version":1,"workbenchMarker":".example/workbench.json","codex":{"projects":["scribe"]}}`,
 				)
 			}
 			result, err := Build(Options{Root: root, Home: home})

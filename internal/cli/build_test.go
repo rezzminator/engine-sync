@@ -121,3 +121,110 @@ func TestCommandsIgnoreUnrelatedEngineHomeEntries(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewProjectUsageAndFailures(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	putProjectFile(t, root, "CLAUDE.md", "Sample\n")
+	putProjectFile(t, root, "AGENTS.md", "foreign")
+	e := env{get: func(k string) string {
+		if k == "HOME" {
+			return home
+		}
+		return ""
+	}}
+	for _, args := range [][]string{{"check", "--dry-run", root}, {"doctor", "--dry-run", root}, {"codex", "build", "--engine", "opencode", root}, {"opencode", "build", "--engine", "codex", root}} {
+		var out, errOut bytes.Buffer
+		if rc := dispatch(args, &out, &errOut, e); rc != 2 || errOut.Len() == 0 {
+			t.Errorf("usage %v rc=%d: %s%s", args, rc, &out, &errOut)
+		}
+	}
+	var out, errOut bytes.Buffer
+	if rc := dispatch([]string{"plan", root}, &out, &errOut, e); rc != 1 || !strings.Contains(errOut.String(), "CONFLICT") {
+		t.Errorf("silent plan rc=%d: %s%s", rc, &out, &errOut)
+	}
+}
+
+func TestReviewMachinePolicyIndependence(t *testing.T) {
+	home := testjail.Scratch(t)
+	putProjectFile(t, home, ".claude/commands/hello.md", "---\ndescription: Hello.\n---\nTOKEN /hello.\n")
+	e := env{get: func(k string) string {
+		if k == "HOME" {
+			return home
+		}
+		return ""
+	}}
+	for _, engine := range []string{"codex", "opencode"} {
+		for _, word := range []string{"FIRST", "SECOND"} {
+			root := testjail.Scratch(t)
+			putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
+			putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"rewrites":[{"literal":"TOKEN","replace":"`+word+`"}]}`)
+			var out, errOut bytes.Buffer
+			if rc := dispatch([]string{"build", root, "--engine", engine}, &out, &errOut, e); rc != 0 {
+				t.Errorf("build rc=%d %s%s", rc, &out, &errOut)
+			}
+			path := filepath.Join(home, ".codex", "prompts", "hello.md")
+			if engine == "opencode" {
+				path = filepath.Join(home, ".config", "opencode", "command", "hello.md")
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil || !strings.Contains(string(raw), "TOKEN") || strings.Contains(string(raw), word) {
+				t.Errorf("project changed machine bytes: %s %v", raw, err)
+			}
+		}
+	}
+}
+
+func TestReviewRejectHomeAndCanonicalizeProject(t *testing.T) {
+	home := testjail.Scratch(t)
+	root := filepath.Join(home, "projects", "sample")
+	putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
+	e := env{get: func(k string) string {
+		if k == "HOME" {
+			return home
+		}
+		return ""
+	}}
+	alias := filepath.Join(home, "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{home, filepath.Dir(home), alias} {
+		var out, errOut bytes.Buffer
+		rc := dispatch([]string{"build", path, "--engine", "codex"}, &out, &errOut, e)
+		if path == alias {
+			if rc != 0 {
+				t.Errorf("alias build %d %s", rc, &errOut)
+			}
+			var cfgOut bytes.Buffer
+			if c := dispatch([]string{"config", "validate", alias}, &cfgOut, &errOut, e); c != 0 || !strings.Contains(cfgOut.String(), root) {
+				t.Errorf("root differs: %d %s", c, &cfgOut)
+			}
+		} else if rc == 0 || !strings.Contains(errOut.String(), "project root") {
+			t.Errorf("unsafe root allowed rc=%d %s%s", rc, &out, &errOut)
+		}
+	}
+}
+
+func TestReviewSharedRoleNaming(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	for _, rel := range []string{"CLAUDE.md", "unit-api/CLAUDE.md"} {
+		putProjectFile(t, root, rel, "# Sample\n")
+	}
+	putProjectFile(t, root, "unit-api/.claude/agents/reader.md", "---\nname: reader\ndescription: Reads.\n---\nRead.\n")
+	putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"codex":{"projects":["unit-api"],"suffixMode":"strip-prefix","suffixPrefix":"unit-"}}`)
+	e := env{get: func(k string) string {
+		if k == "HOME" {
+			return home
+		}
+		return ""
+	}}
+	var out, errOut bytes.Buffer
+	if rc := dispatch([]string{"build", root}, &out, &errOut, e); rc != 0 {
+		t.Fatalf("build %d %s%s", rc, &out, &errOut)
+	}
+	for _, rel := range []string{".codex/agents/reader-api.toml", ".opencode/agent/reader-api.md"} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Errorf("shared naming differs: %s %v", rel, err)
+		}
+	}
+}

@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bytes"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/reconcile"
@@ -43,7 +42,7 @@ func TestMachineInspectionValidatesOnlyCodexRoles(t *testing.T) {
 // TestClassifyGlobalRoleSeparatesOursFromTheirs walks every state the install
 // path can meet at a role's path. The line that matters most is the foreign
 // one: a regular file with no generated marker belongs to the operator, and
-// ApplyGlobalRole must leave it byte-for-byte alone whatever its name.
+// Reconciliation must leave it byte-for-byte alone whatever its name.
 func TestClassifyGlobalRoleSeparatesOursFromTheirs(t *testing.T) {
 	dir := testjail.Scratch(t)
 	legacy := filepath.Join(dir, "legacy")
@@ -69,7 +68,7 @@ func TestClassifyGlobalRoleSeparatesOursFromTheirs(t *testing.T) {
 			if err := os.Symlink(source, target); err != nil {
 				t.Fatal(err)
 			}
-		}, GlobalRoleOwnedLink},
+		}, GlobalRoleForeign},
 		{"foreign file", func(target string) {
 			writeCodexFixture(t, target, "name = \"alpha\"\ndescription = \"the operator's own\"\n")
 		}, GlobalRoleForeign},
@@ -85,7 +84,6 @@ func TestClassifyGlobalRoleSeparatesOursFromTheirs(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			target := filepath.Join(testjail.Scratch(t), "alpha.toml")
 			testCase.setup(target)
-			before, _ := os.ReadFile(target)
 
 			state, _, err := ClassifyGlobalRole(target, want, []string{legacy})
 			if err != nil {
@@ -95,26 +93,6 @@ func TestClassifyGlobalRoleSeparatesOursFromTheirs(t *testing.T) {
 				t.Fatalf("state=%s, want %s", state, testCase.state)
 			}
 
-			if err := ApplyGlobalRole(target, want, state); err != nil {
-				t.Fatalf("ApplyGlobalRole: %v", err)
-			}
-			if state == GlobalRoleForeign {
-				// os.ReadFile, not ReadGlobalRoleFile: a foreign entry may be
-				// the very symlink Codex refuses, and the question here is
-				// only whether apply left it exactly as the operator had it.
-				after, afterErr := os.ReadFile(target)
-				if afterErr != nil || !bytes.Equal(after, before) {
-					t.Fatalf("a foreign role was touched: read %q err=%v, want %q", after, afterErr, before)
-				}
-				return
-			}
-			got, err := ReadGlobalRoleFile(target)
-			if err != nil {
-				t.Fatalf("after apply, Codex cannot read the role: %v", err)
-			}
-			if !bytes.Equal(got, want) {
-				t.Fatalf("after apply, role = %q, want %q", got, want)
-			}
 		})
 	}
 }
@@ -130,7 +108,7 @@ func TestGeneratedGlobalRoleAnchorsOnTheFirstLine(t *testing.T) {
 		owned   bool
 	}{
 		{"today's header", globalRoleHeader("templates/global/agents/alpha.md"), true},
-		{"the retired build-codex.mjs header", "# " + artifact.LegacyCodexScript + " from x\nname = \"a\"\n", true},
+		{"the retired build-codex.mjs header", "# " + artifact.LegacyCodexScript + " from x; do not edit\nname = \"a\"\n", true},
 		{"no marker", "name = \"a\"\n", false},
 		{"the phrase buried in a body", "name = \"a\"\ndeveloper_instructions = \"\"\"\n" + artifact.Prefix + "\n", false},
 		{"empty", "", false},

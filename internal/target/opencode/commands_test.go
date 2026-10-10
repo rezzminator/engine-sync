@@ -30,7 +30,7 @@ func TestOpenCodeDanglingCommandKeepsItsTwin(t *testing.T) {
 	}
 	result, err = Compile(Options{Root: root, Home: home, Mode: ModeBuild})
 	body, readErr := os.ReadFile(twin)
-	warning := "source unresolvable: " + source + " → " + target + "; twin kept"
+	warning := "source unresolvable: " + source + " → " + target + "; output kept"
 	if err != nil || !result.OK || result.Deleted != 0 || readErr != nil || !bytes.Equal(body, seeded) ||
 		!containsProblem(result.Warnings, warning) {
 		t.Fatalf("build=%#v err=%v body=%q read=%v, want kept twin warning %q", result, err, body, readErr, warning)

@@ -107,7 +107,7 @@ func TestLegacyTextIsLiteralNotATemplate(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got, e := RenderTemplate(cfg.Codex.RootAdapter, TemplateData{Name: "reader", Root: "AGENTS.md"}); e != nil || got != "Write {{ braces }} and {{.Root}} for reader." {
+	if got, e := RenderTemplate(cfg.Codex.RootAdapter, TemplateData{Name: "reader", Root: "AGENTS.md"}); e != nil || got != "Write {{ braces }} and {{.Root}} for ${name}." {
 		t.Fatalf("legacy adapter = %q (%v)", got, e)
 	}
 }

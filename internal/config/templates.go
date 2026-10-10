@@ -25,7 +25,7 @@ func prepareTemplates(cfg Config) (Config, error) {
 		text *string
 	}{{"codex.agentPreamble", &cfg.Codex.AgentPreamble}, {"codex.rootAdapter", &cfg.Codex.RootAdapter}, {"opencode.agentPreamble", &cfg.OpenCode.AgentPreamble}}
 	for _, row := range rows {
-		if strings.Contains(*row.text, "${name}") {
+		if row.key != "codex.rootAdapter" && strings.Contains(*row.text, "${name}") {
 			*row.text = strings.ReplaceAll(*row.text, "${name}", "{{.Name}}")
 			notice := row.key + ": ${name} is deprecated; use {{.Name}}"
 			seen := false

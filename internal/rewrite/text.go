@@ -62,7 +62,7 @@ func CommandsIn(text string, commands map[string]string, naming func(string) str
 			if end > len(text) || text[index+1:end] != name {
 				continue
 			}
-			if end < len(text) && SuffixChar(text[end]) {
+			if end < len(text) && (SuffixChar(text[end]) || (text[end] == '.' && end+1 < len(text) && WordChar(text[end+1]))) {
 				continue
 			}
 			matched = name

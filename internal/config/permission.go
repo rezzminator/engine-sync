@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // Permission is OpenCode's native tool -> action-or-ordered-patterns object.
@@ -64,6 +66,9 @@ func (value PermissionValue) MarshalJSON() ([]byte, error) {
 	if value.Action != "" {
 		return json.Marshal(value.Action)
 	}
+	if len(value.Rules) == 0 {
+		return json.Marshal("deny")
+	}
 	var out bytes.Buffer
 	out.WriteByte('{')
 	for i, rule := range value.Rules {
@@ -87,16 +92,22 @@ func (permission *Permission) UnmarshalJSON(raw []byte) error {
 		if !validAction(action) {
 			return fmt.Errorf("invalid permission action %q", action)
 		}
-		*permission = Permission{Action: action}
-		return nil
+		if permission.Action == "" && len(permission.Tools) == 0 {
+			*permission = Permission{Action: action}
+			return nil
+		}
+		raw = []byte(`{"*":"` + action + `"}`)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
 		return fmt.Errorf("permission must be an action or tool object")
 	}
-	permission.Action = ""
 	tools := append([]ToolPermission(nil), permission.Tools...)
+	if permission.Action != "" {
+		tools = []ToolPermission{{Name: "*", Value: PermissionValue{Action: permission.Action}}}
+	}
+	permission.Action = ""
 	seen := map[string]bool{}
 	for decoder.More() {
 		token, err := decoder.Token()
@@ -112,12 +123,11 @@ func (permission *Permission) UnmarshalJSON(raw []byte) error {
 		if err := decoder.Decode(&value); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
-		// A layer that names a tool again replaces its rules in place: tool
-		// order is precedence, and a later layer never moves a tool past another.
+		// Merge a repeated tool without discarding either layer's denies.
 		replaced := false
 		for i, tool := range tools {
 			if tool.Name == name {
-				tools[i] = ToolPermission{Name: name, Value: value}
+				tools[i] = ToolPermission{Name: name, Value: mergePermissionValue(tool.Value, value)}
 				replaced = true
 				break
 			}
@@ -129,10 +139,55 @@ func (permission *Permission) UnmarshalJSON(raw []byte) error {
 	if _, err := decoder.Token(); err != nil {
 		return err
 	}
+	sort.SliceStable(tools, func(i, j int) bool { return tools[i].Name == "*" && tools[j].Name != "*" })
 	permission.Tools = tools
 	return nil
 }
+
+// mergePermissionValue orders broad patterns before specific ones. A deny
+// wins a tie for the same pattern, regardless of the layer that declared it.
+func mergePermissionValue(base, overlay PermissionValue) PermissionValue {
+	if base.Action != "" && overlay.Action != "" {
+		if base.Action == "deny" || overlay.Action == "deny" {
+			return PermissionValue{Action: "deny"}
+		}
+		return overlay
+	}
+	rules := func(v PermissionValue) []PermissionRule {
+		if v.Action != "" {
+			return []PermissionRule{{Pattern: "*", Action: v.Action}}
+		}
+		if len(v.Rules) == 0 {
+			return []PermissionRule{{Pattern: "*", Action: "deny"}}
+		}
+		return v.Rules
+	}
+	merged := append([]PermissionRule(nil), rules(base)...)
+	for _, rule := range rules(overlay) {
+		found := false
+		for i, old := range merged {
+			if old.Pattern == rule.Pattern {
+				if old.Action != "deny" {
+					merged[i] = rule
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged = append(merged, rule)
+		}
+	}
+	specificity := func(pattern string) int { return len(strings.NewReplacer("*", "", "?", "").Replace(pattern)) }
+	sort.SliceStable(merged, func(i, j int) bool { return specificity(merged[i].Pattern) < specificity(merged[j].Pattern) })
+	return PermissionValue{Rules: merged}
+}
+
 func (permission Permission) MarshalJSON() ([]byte, error) {
+	if permission.Action == "" && len(permission.Tools) == 0 {
+		return json.Marshal("deny")
+	}
+
 	if permission.Action != "" {
 		return json.Marshal(permission.Action)
 	}

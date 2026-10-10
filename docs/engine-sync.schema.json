@@ -42,6 +42,24 @@
               },
               "type": "array"
             },
+            "review": {
+              "additionalProperties": false,
+              "properties": {
+                "defaultEffort": {
+                  "type": "string"
+                },
+                "modelAlias": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                },
+                "slotPrompt": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
             "rootAdapter": {
               "type": "string"
             },
@@ -53,6 +71,12 @@
             }
           },
           "type": "object"
+        },
+        "commandDirs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "mcp": {
           "additionalProperties": false,
@@ -254,6 +278,24 @@
           },
           "type": "array"
         },
+        "review": {
+          "additionalProperties": false,
+          "properties": {
+            "defaultEffort": {
+              "type": "string"
+            },
+            "modelAlias": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "slotPrompt": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "rootAdapter": {
           "type": "string"
         },
@@ -266,9 +308,18 @@
       },
       "type": "object"
     },
+    "commandDirs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "machine": {
       "additionalProperties": false,
       "properties": {
+        "agentMarkerDir": {
+          "type": "string"
+        },
         "claudeAgentsDir": {
           "type": "string"
         },
@@ -328,6 +379,9 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "sourceAgentsDir": {
+          "type": "string"
         },
         "variants": {
           "type": "string"

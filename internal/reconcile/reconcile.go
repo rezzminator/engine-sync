@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/atomicfile"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,10 +20,22 @@ const (
 )
 
 func Run(outputs []artifact.Artifact, mode Mode, roots []artifact.Root, ownership ...func(string) (bool, error)) Result {
-	prepared, warnings, problems := Prepare(outputs)
+	prepared, warnings, problems := Prepare(outputs, roots)
+	// Validate every managed surface even when rendering produced no outputs.
+	// GC must retain the caller's full boundary, not only the root's parent.
+	unsafeRoot := false
+	for _, root := range roots {
+		if root.ValidateOnly {
+			continue
+		}
+		if err := safeParents(filepath.Join(root.Path, ".scan"), []artifact.Root{root}); err != nil {
+			problems = append(problems, err.Error())
+			unsafeRoot = true
+		}
+	}
 	result := Result{Warnings: warnings, Problems: problems}
 	outputs = prepared
-	if mode == Build && len(problems) > 0 {
+	if unsafeRoot || mode == Build && len(problems) > 0 {
 		return result
 	}
 	managed := make([]string, 0, len(roots))
@@ -31,7 +44,20 @@ func Run(outputs []artifact.Artifact, mode Mode, roots []artifact.Root, ownershi
 			managed = append(managed, root.Path)
 		}
 	}
-	owns := func(path string) (bool, error) { return Claimable(path, roots) }
+	owns := func(path string) (bool, error) {
+		for _, r := range roots {
+			if r.Suffix != "" && inside(r.Path, path) && !strings.HasSuffix(path, r.Suffix) {
+				info, err := os.Lstat(path)
+				if err != nil {
+					return false, err
+				}
+				if !info.IsDir() {
+					return false, nil
+				}
+			}
+		}
+		return Claimable(path, roots)
+	}
 	if len(ownership) > 0 {
 		owns = ownership[0]
 	}
@@ -48,8 +74,9 @@ func Run(outputs []artifact.Artifact, mode Mode, roots []artifact.Root, ownershi
 			continue
 		}
 		wanted[entry] = true
+		wanted[output.Path] = true
 		if output.Kept != nil {
-			warning, problem := KeepTwin(output.Path, output.Kept.Path, output.Kept.Target)
+			warning, problem := KeepArtifact(output.Path, output.Kept.Path, output.Kept.Target)
 			if warning != "" {
 				result.Warnings = append(result.Warnings, warning)
 			}
@@ -107,9 +134,13 @@ func LinkArtifact(result *Result, output artifact.Artifact, mode Mode, owns func
 		result.Actions = append(result.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Target})
 		return
 	}
-	result.Actions = append(result.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Target})
 	if exists && info.IsDir() {
-		if removeErr := os.RemoveAll(output.Path); removeErr != nil {
+		removeOwned(result, output.Path, Build, owns)
+		if _, e := os.Lstat(output.Path); e == nil {
+			result.Problems = append(result.Problems, "CONFLICT "+output.Path+": foreign directory content preserved")
+			return
+		}
+		if removeErr := os.Remove(output.Path); removeErr != nil && !os.IsNotExist(removeErr) {
 			result.Problems = append(result.Problems, fmt.Sprintf("remove %s: %v", output.Path, removeErr))
 			return
 		}
@@ -122,7 +153,11 @@ func LinkArtifact(result *Result, output artifact.Artifact, mode Mode, owns func
 		result.Problems = append(result.Problems, fmt.Sprintf("symlink %s: %v", output.Path, err))
 		return
 	}
+	result.Actions = append(result.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Target})
 	result.Wrote++
+	if e := recordLink(output.Path, output.Target); e != nil {
+		result.Problems = append(result.Problems, e.Error())
+	}
 }
 
 // outputState names an output check would rewrite: only an absent path is
@@ -150,7 +185,7 @@ func claimProblem(output artifact.Artifact, owns func(string) (bool, error)) str
 	}
 
 	if output.Source != "" && !artifact.Claims(string(output.Content)) {
-		return fmt.Sprintf("%s %s — differs from %s and engine-sync cannot prove it wrote it; delete it and rebuild", Conflict, output.Path, output.Source)
+		return fmt.Sprintf("%s %s — differs from %s and engine-sync cannot prove it wrote it; preserved; move it aside before rebuilding", Conflict, output.Path, output.Source)
 	}
 	return fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path)
 }
@@ -174,7 +209,10 @@ func FileArtifact(result *Result, output artifact.Artifact, mode Mode, owns func
 	haveMode := os.FileMode(0)
 	if regular {
 		haveMode = info.Mode().Perm()
-		raw, readErr := os.ReadFile(output.Path)
+		if output.Kind == artifact.Region && output.Mode == 0 {
+			wantMode = haveMode
+		}
+		raw, readErr := paths.ReadRegular(output.Path)
 		if readErr != nil {
 			result.Problems = append(result.Problems, unreadableProblem(output.Path, readErr))
 			return
@@ -226,15 +264,22 @@ func FileArtifact(result *Result, output artifact.Artifact, mode Mode, owns func
 		result.Wrote++
 		return
 	}
-	result.Actions = append(result.Actions, Action{Kind: actionWrite, Path: output.Path})
+	if regular && output.Kind != artifact.Region {
+		result.Warnings = append(result.Warnings, "replacing changed generated output "+output.Path+"; direct edits are discarded; edit its source")
+	}
 	if err := atomicfile.Write(output.Path, output.Content, wantMode); err != nil {
 		result.Problems = append(result.Problems, fmt.Sprintf("write %s: %v", output.Path, err))
 		return
 	}
+	result.Actions = append(result.Actions, Action{Kind: actionWrite, Path: output.Path})
 	result.Wrote++
 }
 
 func Orphans(result *Result, dir string, wanted map[string]bool, mode Mode, owns func(string) (bool, error)) {
+	if e := safeParents(filepath.Join(dir, ".scan"), []artifact.Root{{Path: dir}}); e != nil {
+		result.Problems = append(result.Problems, e.Error())
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return
@@ -245,13 +290,13 @@ func Orphans(result *Result, dir string, wanted map[string]bool, mode Mode, owns
 	}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
-		if wanted[path] {
+		if scratchName(entry.Name()) || wanted[path] {
 			continue
 		}
 		claimable, claimErr := owns(path)
 		if claimErr != nil {
-			result.Warnings = append(
-				result.Warnings,
+			result.Problems = append(
+				result.Problems,
 				fmt.Sprintf("unreadable %s — cannot tell whether engine-sync owns it; left in place: %v", path, claimErr),
 			)
 			continue
@@ -259,73 +304,6 @@ func Orphans(result *Result, dir string, wanted map[string]bool, mode Mode, owns
 		if !claimable {
 			continue
 		}
-		if mode != Build {
-			result.Problems = append(result.Problems, string(Orphan)+" "+path)
-			result.Rebuildable = append(result.Rebuildable, string(Orphan)+" "+path)
-			result.Actions = append(result.Actions, Action{Kind: actionDelete, Path: path})
-			continue
-		}
-		if err := os.RemoveAll(path); err != nil {
-			result.Problems = append(result.Problems, fmt.Sprintf("remove orphan %s: %v", path, err))
-			continue
-		}
-		result.Actions = append(result.Actions, Action{Kind: actionDelete, Path: path})
-		result.Deleted++
+		removeOwned(result, path, mode, owns)
 	}
-}
-
-// Claimable checks a header or a link into an explicit source root.
-func Claimable(path string, roots []artifact.Root) (bool, error) {
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	switch {
-	case info.Mode()&os.ModeSymlink != 0:
-		target, err := os.Readlink(path)
-		if err != nil {
-			return false, err
-		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(path), target)
-		}
-		target = filepath.Clean(target)
-		for _, root := range roots {
-			for _, source := range root.SourceRoots {
-				relative, err := filepath.Rel(source, target)
-				if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-					return true, nil
-				}
-			}
-		}
-		if len(roots) == 0 {
-			return ClaudeTarget(target), nil
-		}
-		return false, nil
-	case info.Mode().IsRegular():
-		raw, err := os.ReadFile(path)
-		return artifact.Claims(string(raw)), err
-	case info.IsDir():
-		raw, err := os.ReadFile(filepath.Join(path, "SKILL.md"))
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return artifact.Claims(string(raw)), err
-	}
-	return false, nil
-}
-func ClaudeTarget(target string) bool {
-	parts := strings.Split(filepath.ToSlash(filepath.Clean(target)), "/")
-	for i, part := range parts[:len(parts)-1] {
-		if part == ".claude" {
-			switch parts[i+1] {
-			case "agents", "commands", "skills":
-				return true
-			}
-		}
-	}
-	return false
 }

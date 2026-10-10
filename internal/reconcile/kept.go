@@ -10,18 +10,18 @@ import (
 	"strings"
 )
 
-// KeepTwin leaves twin, the generated output of the unresolvable source link
-// source → target, exactly as it is and says so when it exists. A twin that
+// KeepArtifact leaves output, the generated output of the unresolvable source link
+// source → target, exactly as it is and says so when it exists. An output that
 // was never generated has nothing to keep and returns neither; one that
 // cannot be inspected is a problem, never a silent keep.
-func KeepTwin(twin, source, target string) (warning, problem string) {
-	if _, err := os.Lstat(twin); err != nil {
+func KeepArtifact(output, source, target string) (warning, problem string) {
+	if _, err := os.Lstat(output); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", ""
 		}
-		return "", fmt.Sprintf("inspect kept twin %s: %v", twin, err)
+		return "", fmt.Sprintf("inspect kept output %s: %v", output, err)
 	}
-	return fmt.Sprintf("source unresolvable: %s → %s; twin kept", source, target), ""
+	return fmt.Sprintf("source unresolvable: %s → %s; output kept", source, target), ""
 }
 
 // ExpandKept resolves prefix reservations against disk before orphan classification.

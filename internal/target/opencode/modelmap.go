@@ -20,16 +20,6 @@ const (
 	openCodeTodoWriteTool   = "todowrite"
 )
 
-func defaultOpenCodeModelMap() map[string]string { return config.Default().OpenCode.ModelMap }
-
-func loadOpenCodeModelMap(root string) (map[string]string, error) {
-	cfg, err := config.LoadConfigLayers(root)
-	if err != nil {
-		return nil, err
-	}
-	return cfg.OpenCode.ModelMap, nil
-}
-
 var claudeToOpenCodeTools = map[string][]string{
 	"Agent":           {openCodeTaskTool},
 	"AskUserQuestion": {"question"},

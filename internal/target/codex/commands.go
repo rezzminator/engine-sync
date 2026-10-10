@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/rewrite"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"os"
@@ -55,12 +56,12 @@ func compileRepoCommands(
 	for _, entry := range markdownSources(sourceRoot, cfg.ExcludeDirs, result) {
 		if entry.Target != "" {
 			if entry.DirLink || strings.HasSuffix(entry.Rel, ".md") {
-				for _, twin := range keptDirTwins(root, entry, problem) {
+				for _, twin := range keptDirArtifacts(root, entry, problem) {
 					add(twin)
 				}
 				continue
 			}
-			add(keptCommandTwin(root, entry))
+			add(keptCommandArtifact(root, entry))
 			continue
 		}
 		if entry.SkillDir {
@@ -93,9 +94,12 @@ func compileGlobalCommands(
 	result *Result,
 ) {
 	sourceRoot := filepath.Join(sourceHome, ".claude", "commands")
+	if options.Source != nil && options.Source.SourceCommandDir != "" {
+		sourceRoot = options.Source.SourceCommandDir
+	}
 	for _, entry := range markdownSources(sourceRoot, nil, result) {
 		if entry.Target != "" {
-			for _, twin := range keptGlobalCommandTwins(outputHome, entry, problem) {
+			for _, twin := range keptGlobalCommandArtifacts(outputHome, entry, problem) {
 				add(twin)
 			}
 			continue
@@ -103,9 +107,6 @@ func compileGlobalCommands(
 		if entry.SkillDir {
 			dst := filepath.Join(outputHome, ".codex", "skills", flatName(filepath.ToSlash(entry.Rel)))
 			link := entry.Path
-			if sourceHome != outputHome {
-				link = filepath.Join(outputHome, ".claude", "commands", entry.Rel)
-			}
 			add(artifact.Artifact{Path: dst, Target: link})
 			continue
 		}
@@ -142,8 +143,11 @@ func compileInstalledGlobalCommands(
 	}
 	cfg := policy.Codex
 	sourceRoot := filepath.Join(sourceHome, ".claude", "commands")
+	if result.Source != nil && result.Source.SourceCommandDir != "" {
+		sourceRoot = result.Source.SourceCommandDir
+	}
 	roster := discoverCommandRosterIn(sourceRoot, nil, result)
-	transform := TransformOptions{ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, RetiredFiles: policy.Machine.RetiredFiles, Rewrites: policy.Rewrites}
+	transform := TransformOptions{Review: cfg.Review, ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, RetiredFiles: policy.Machine.RetiredFiles, Rewrites: policy.Rewrites}
 	compileGlobalCommands(outputHome, sourceHome, outputHome, cfg, transform, add, problem, warn, result)
 }
 
@@ -179,6 +183,10 @@ func compileCommandFile(
 		return
 	}
 	flat := flatName(filepath.ToSlash(entry.Rel))
+	if err := paths.ValidateName(flat); err != nil {
+		problem(fmt.Sprintf("%s: %v", entry.Path, err))
+		return
+	}
 	fm := claudesource.HeaderLines(content)
 	_ = fields
 	// The incumbent compilers only rewrite command references in command
@@ -186,9 +194,9 @@ func compileCommandFile(
 	// model selections; rewriting them changes user-facing skill descriptions.
 	// A /code-review written there IS a command reference, and a Codex seat
 	// reading the Claude spelling reviews the whole branch (review.go).
-	header := rewriteCodeReviewFrontmatter(swapCommands(strings.Join(fm, "\n"), options.Commands), options.ModelMap)
+	header := rewriteCodeReviewFrontmatter(swapCommands(strings.Join(fm, "\n"), options.Commands), options.ModelMap, options.Review)
 	header = rewrite.Configured(options.Rewrites).Apply(header, rewrite.Context{Engine: "codex", Kind: "command", Source: entry.Path})
-	generated := "---\n# " + generatedLine(
+	generated := "---\n" + artifact.Marker(artifact.YAMLFront,
 		relSource,
 	) + "\nname: " + flat + "\n" + header + "\n---\n" + transformMarkdown(
 		body,

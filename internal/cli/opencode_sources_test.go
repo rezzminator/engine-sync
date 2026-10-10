@@ -31,7 +31,7 @@ func seedOpenCodeLabber(t *testing.T, root, home string) (string, string, []byte
 func buildOpenCodeForTest(t *testing.T, action, root, home string) (int, string, string) {
 	t.Helper()
 	var out, err bytes.Buffer
-	code := RunOpenCodeCommand([]string{action, root, "--home", home}, func() (string, error) { return root, nil }, home, &out, &err)
+	code := invokeOpenCodeCLI([]string{action, root, "--home", home}, func() (string, error) { return root, nil }, home, &out, &err)
 	return code, out.String(), err.String()
 }
 
@@ -61,12 +61,12 @@ func TestOpenCodeUnresolvableAgentSourceKeepsItsTwin(t *testing.T) {
 	if !bytes.Equal(have, seeded) {
 		t.Fatalf("twin %s was rewritten:\nhave %q\nwant %q", twin, have, seeded)
 	}
-	want := "engine-sync opencode: warning: source unresolvable: " + source + " → " + target + "; twin kept"
+	want := "engine-sync opencode: warning: source unresolvable: " + source + " → " + target + "; output kept"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("build stderr lacks %q: %q", want, stderr)
 	}
 	if strings.Contains(stdout, "engine-sync opencode: deleted ") || !strings.Contains(stdout, "deleted=0") {
-		t.Fatalf("build deleted something with the twin kept: %q", stdout)
+		t.Fatalf("build deleted something with the output kept: %q", stdout)
 	}
 
 	code, _, stderr = buildOpenCodeForTest(t, "check", root, home)
@@ -97,7 +97,7 @@ func TestOpenCodeAbsentAgentSourceStillDeletesItsTwin(t *testing.T) {
 	if !strings.Contains(stdout, "engine-sync opencode: deleted "+twin) {
 		t.Fatalf("build did not name the deleted twin: %q", stdout)
 	}
-	if strings.Contains(stderr, "twin kept") {
+	if strings.Contains(stderr, "output kept") {
 		t.Fatalf("an absent source claimed a kept twin: %q", stderr)
 	}
 }

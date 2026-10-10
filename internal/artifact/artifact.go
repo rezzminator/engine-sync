@@ -20,9 +20,12 @@ const (
 )
 
 type Root struct {
-	ValidateOnly bool
-	Path         string
-	SourceRoots  []string
+	ValidateOnly   bool
+	InspectForeign bool
+	Suffix         string
+	Boundary       string
+	Path           string
+	SourceRoots    []string
 }
 type SourceLink struct{ Path, Target, Prefix string }
 type Artifact struct {

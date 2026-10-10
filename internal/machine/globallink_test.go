@@ -29,7 +29,7 @@ func TestClassifyGlobalLinkAliasRoot(t *testing.T) {
 			state, _, err := ClassifyGlobalLink(
 				target, filepath.Join(tc.sourceRoot, "desired.md"), tc.sourceRoot, GlobalLinkFile,
 			)
-			if err != nil || state != GlobalLinkWrongTarget {
+			if err != nil || state != GlobalLinkConflict {
 				t.Fatalf("state=%s err=%v", state, err)
 			}
 		})

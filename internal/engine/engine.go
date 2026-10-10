@@ -25,20 +25,13 @@ type Descriptor struct {
 	LongName string
 }
 
-var registry = map[ID]Descriptor{
-	Claude:   {ID: Claude, LongName: "claude"},
-	Codex:    {ID: Codex, LongName: "codex"},
-	OpenCode: {ID: OpenCode, LongName: "opencode"},
-}
-
-// MustLookup returns the descriptor of a known engine and panics on an
-// unknown one: every caller names a constant above.
+// MustLookup describes a source or target identity. Target dispatch is owned
+// solely by target.Registry; this helper does not maintain another registry.
 func MustLookup(id ID) Descriptor {
-	descriptor, ok := registry[id]
-	if !ok {
-		panic(fmt.Sprintf("engine: unknown engine %q", id))
+	if id == "" {
+		panic("engine: empty identity")
 	}
-	return descriptor
+	return Descriptor{ID: id, LongName: string(id)}
 }
 
 // OpenCodeMCPToolParts joined by '_'. The caller checks the mcp__ prefix; this is

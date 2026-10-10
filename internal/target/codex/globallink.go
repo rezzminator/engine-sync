@@ -21,6 +21,4 @@ const (
 
 var ClassifyGlobalLink = reconciler.ClassifyGlobalLink
 
-var ApplyGlobalLink = reconciler.ApplyGlobalLink
-
 var DescribeGlobalLinkState = reconciler.DescribeGlobalLinkState

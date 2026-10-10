@@ -46,7 +46,7 @@ for f in "$plugin_json" "$marketplace" "$readme" "$changelog" "$sums"; do
 done
 
 json_version() {
-  grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$root/$1" | head -n 1 | sed 's/^"version"[[:space:]]*:[[:space:]]*"//; s/"$//'
+  python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); print(value["version"] if "version" in value else next(p["version"] for p in value["plugins"] if p["name"]=="engine-sync"))' "$root/$1"
 }
 
 version="$(json_version "$plugin_json")"
@@ -92,7 +92,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 if ! "$root/scripts/build-release.sh" --out "$tmp" >"$tmp/build.log" 2>&1; then
   echo "release-check: build-release.sh failed, so $sums cannot be compared:" >&2
-  cat "$tmp/build.log" >&2
+  tail -30 "$tmp/build.log" >&2
   exit 1
 fi
 if ! diff -u --label "committed $sums" --label "fresh build" "$root/$sums" "$tmp/SHA256SUMS" >"$tmp/sums.diff"; then

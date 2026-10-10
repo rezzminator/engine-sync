@@ -91,3 +91,11 @@ func TestSerializeConfigDeniesGitWritesInAFixedOrderAfterAllow(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewJSONCForms(t *testing.T) {
+	raw := []byte("{/* comment */ \"theme\": \"sample\", \"url\": \"https://example.invalid/x/*y\",}")
+	var object map[string]json.RawMessage
+	if e := json.Unmarshal(parseOpenCodeJSONC(raw), &object); e != nil || string(object["theme"]) != `"sample"` {
+		t.Fatalf("valid JSONC rejected: %s %v", parseOpenCodeJSONC(raw), e)
+	}
+}

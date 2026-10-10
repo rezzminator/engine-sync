@@ -64,7 +64,7 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state != GlobalLinkCopy || found != "" {
+		if state != GlobalLinkConflict || found != "" {
 			t.Fatalf("state=%s found=%q, want copy/\"\"", state, found)
 		}
 	})
@@ -85,7 +85,7 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state != GlobalLinkWrongTarget || found != stale {
+		if state != GlobalLinkConflict || found != stale {
 			t.Fatalf("state=%s found=%q, want wrong-target/%q", state, found, stale)
 		}
 	})
@@ -153,7 +153,7 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state != GlobalLinkCopy {
+		if state != GlobalLinkConflict {
 			t.Fatalf("state=%s, want copy for a same-shape directory", state)
 		}
 	})
@@ -182,56 +182,6 @@ func TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing(t *testing.T) {
 		t.Fatal(
 			"ClassifyGlobalLink reported no error for an unreadable target — an unreadable probe must never read as absence",
 		)
-	}
-}
-
-func TestApplyGlobalLinkIsANoOpForCorrectAndConflict(t *testing.T) {
-	root := testjail.Scratch(t)
-	elsewhere := filepath.Join(root, "elsewhere.md")
-	if err := os.WriteFile(elsewhere, []byte("foreign\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(root, "alpha.md")
-	if err := os.Symlink(elsewhere, target); err != nil {
-		t.Fatal(err)
-	}
-	source := filepath.Join(root, "repo", "templates", "global", "agents", "alpha.md")
-	if err := ApplyGlobalLink(target, source, GlobalLinkConflict); err != nil {
-		t.Fatalf("ApplyGlobalLink(conflict): %v", err)
-	}
-	resolved, err := os.Readlink(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != elsewhere {
-		t.Fatalf("ApplyGlobalLink(conflict) touched the target: now -> %s", resolved)
-	}
-}
-
-func TestApplyGlobalLinkRepointsADanglingLink(t *testing.T) {
-	root := testjail.Scratch(t)
-	source := filepath.Join(root, "generated", "alpha.toml")
-	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(root, "codex-agents", "alpha.toml")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// The link already resolves to the desired source, but nothing exists
-	// there yet — the shape ClassifyGlobalLink reports GlobalLinkDangling for.
-	if err := os.Symlink(source, target); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplyGlobalLink(target, source, GlobalLinkDangling); err != nil {
-		t.Fatalf("ApplyGlobalLink(dangling): %v", err)
-	}
-	resolved, err := os.Readlink(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != source {
-		t.Fatalf("ApplyGlobalLink(dangling) = -> %s, want -> %s", resolved, source)
 	}
 }
 

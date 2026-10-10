@@ -2,16 +2,21 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
+	"github.com/rezzminator/engine-sync/internal/diag"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/testjail"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
 func TestRunCommandRejectsUnknownAction(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := RunOpenCodeCommand(
+	if code := invokeOpenCodeCLI(
 		[]string{"generate"},
 		func() (string, error) { return ".", nil },
 		".",
@@ -30,7 +35,7 @@ func TestRunCommandBuildPassLineCountsAndNamesDeletions(t *testing.T) {
 	build := func() string {
 		t.Helper()
 		var stdout, stderr bytes.Buffer
-		if code := RunOpenCodeCommand(
+		if code := invokeOpenCodeCLI(
 			[]string{"build", root, "--home", home},
 			func() (string, error) { return root, nil },
 			home,
@@ -55,4 +60,34 @@ func TestRunCommandBuildPassLineCountsAndNamesDeletions(t *testing.T) {
 		!regexp.MustCompile(`(?m)^engine-sync opencode: deleted `+regexp.QuoteMeta(deleted)+`$`).MatchString(second) {
 		t.Fatalf("second build stdout=%q", second)
 	}
+}
+
+func invokeOpenCodeCLI(args []string, resolve func() (string, error), home string, out, errout io.Writer) int {
+	if len(args) > 0 && (args[0] == "build" || args[0] == "check" || args[0] == "doctor") {
+		hasRoot := false
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--home" {
+				i++
+				continue
+			}
+			if !strings.HasPrefix(args[i], "-") {
+				hasRoot = true
+			}
+		}
+		if !hasRoot {
+			root, err := resolve()
+			if err != nil {
+				if containsFlag(args, "--json") {
+					return diag.WriteJSON(out, errout, diag.Report{}, err)
+				}
+				fmt.Fprintln(errout, err)
+				return 1
+			}
+			args = append(args, root)
+		}
+		if !containsFlag(args, "--home") {
+			args = append(args, "--home", home)
+		}
+	}
+	return runOpenCode(args, out, errout, env{get: paths.Getenv})
 }

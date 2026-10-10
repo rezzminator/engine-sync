@@ -5,10 +5,11 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 # Vocabulary
 
 - binary: the Go program behind `engine-sync {codex|opencode|build|check|doctor|global|hook|version}` · `cmd/engine-sync/` · contract `docs/interface.md`
+- configuration: validated project `.claude/engine-sync.json` and machine `{XDG_CONFIG_HOME:-~/.config}/engine-sync/config.json`, with provenance and schema · `internal/config/`
 - source model: one Claude parser and discovery, shared across targets · `internal/source/`
 - Codex compiler: `AGENTS.md`, `.codex/**`, the role TOMLs and the global commands · `internal/target/codex/`
 - OpenCode compiler: `.opencode/**` · `internal/target/opencode/`
-- global: the machine-level Codex roles, Claude agent links and Codex commands, with their retirements and `doctor --machine` rows · `internal/machine/`
+- machine scope: the machine-level Codex roles, Claude agent links and both targets' commands, with their retirements and `doctor --machine` rows · `internal/machine/`
 - version guard: the per-root writer record and lock; an older binary refuses a root a newer one wrote (`NEWER-WRITER`) · `internal/guard/`, records under `{engine-sync state}/writers/`
 - `{engine-sync home}`: `$ENGINE_SYNC_HOME`, else `$XDG_DATA_HOME/engine-sync`, else `~/.local/share/engine-sync`; holds `versions/{version}/engine-sync` and the stable link `bin/engine-sync` · `internal/paths/paths.go`
 - `{engine-sync state}`: `$ENGINE_SYNC_STATE`, else `$XDG_STATE_HOME/engine-sync`, else `~/.local/state/engine-sync`; writer records, locks, dirty flags
@@ -55,6 +56,6 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 ## Plugin
 
-- `plugins/engine-sync/` holds only what installs: manifest, hooks, wrapper, checksums; every other file lives outside it.
+- `plugins/engine-sync/` holds only what installs: manifest, hooks, wrapper, checksums, README and LICENSE; implementation source stays outside it.
 - A hook never fails a turn by its exit code: every hook exits 0; a failing stage answers a `Stop` block or a `systemMessage`.
 - Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest and the marketplace.

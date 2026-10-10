@@ -13,12 +13,14 @@ import (
 	"errors"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/paths"
+	"golang.org/x/text/unicode/norm"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rezzminator/engine-sync/internal/atomicfile"
 )
@@ -52,13 +54,18 @@ func (e *NewerWriterError) Unwrap() error { return ErrNewerWriter }
 
 // key is the file stem every root's lock and record share.
 func key(root string) string {
-	sum := sha256.Sum256([]byte(filepath.Clean(root)))
+	sum := sha256.Sum256([]byte(norm.NFC.String(filepath.Clean(root))))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
 // Lock takes the exclusive per-root lock under state and returns its release.
 // It blocks until a concurrent writer of the same root is done.
-func Lock(state, root string) (func() error, error) {
+func Lock(state, root string, wait ...time.Duration) (func() error, error) {
+	var e error
+	root, e = CanonicalRoot(root)
+	if e != nil {
+		return nil, e
+	}
 	dir := filepath.Join(state, "locks")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create lock directory %s: %w", dir, err)
@@ -68,8 +75,38 @@ func Lock(state, root string) (func() error, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open lock %s: %w", path, err)
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		return nil, errors.Join(fmt.Errorf("lock %s: %w", path, err), file.Close())
+	deadline := time.Time{}
+	if len(wait) > 0 && wait[0] > 0 {
+		deadline = time.Now().Add(wait[0])
+	}
+	for {
+		mode := syscall.LOCK_EX
+		if !deadline.IsZero() {
+			mode |= syscall.LOCK_NB
+		}
+		err := syscall.Flock(int(file.Fd()), mode)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return nil, errors.Join(fmt.Errorf("lock %s: %w", path, err), file.Close())
+		}
+		if time.Now().After(deadline) {
+			owner := make([]byte, 1024)
+			n, readErr := file.ReadAt(owner, 0)
+			if readErr != nil && n == 0 {
+				return nil, errors.Join(fmt.Errorf("BUSY lock %s: holder unavailable: %w", path, readErr), file.Close())
+			}
+			return nil, errors.Join(fmt.Errorf("BUSY lock %s: holder %s; deadline exceeded", path, strings.TrimSpace(string(owner[:n]))), file.Close())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := file.Truncate(0); err != nil {
+		return nil, errors.Join(fmt.Errorf("truncate lock owner %s: %w", path, err), file.Close())
+	}
+	if _, err := fmt.Fprintf(file, "pid=%d root=%s\n", os.Getpid(), root); err != nil {
+		return nil, errors.Join(fmt.Errorf("write lock owner %s: %w", path, err), file.Close())
 	}
 	return func() error {
 		unlockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
@@ -84,8 +121,13 @@ func Lock(state, root string) (func() error, error) {
 // record, or an unparseable version on either side, admits the write: only a
 // proven newer writer refuses. An unreadable record is an error, never a pass.
 func Check(state, root, mine string) error {
+	var e error
+	root, e = CanonicalRoot(root)
+	if e != nil {
+		return e
+	}
 	path := filepath.Join(state, "writers", key(root)+".json")
-	raw, err := os.ReadFile(path)
+	raw, err := paths.ReadRegular(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -105,12 +147,17 @@ func Check(state, root, mine string) error {
 // Save records mine as root's writer, unless the record already names a
 // version at least as new: the record moves only forward.
 func Save(state, root, mine, writer string) error {
+	var e error
+	root, e = CanonicalRoot(root)
+	if e != nil {
+		return e
+	}
 	dir := filepath.Join(state, "writers")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create writer records %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, key(root)+".json")
-	if raw, err := os.ReadFile(path); err == nil {
+	if raw, err := paths.ReadRegular(path); err == nil {
 		var record Record
 		if json.Unmarshal(raw, &record) == nil &&
 			(Newer(record.Version, mine) || record.Version == mine && record.Writer == writer) {
@@ -194,4 +241,21 @@ func parseWriterVersion(version string) ([3]int, string, bool) {
 		core[i] = n
 	}
 	return core, pre, true
+}
+
+func CanonicalRoot(root string) (string, error) {
+	prefix := ""
+	// Namespaces identify independent locks, not filesystem path components.
+	for _, namespace := range []string{"global:", "dirty:"} {
+		if strings.HasPrefix(root, namespace) {
+			prefix = namespace
+			root = strings.TrimPrefix(root, prefix)
+			break
+		}
+	}
+	p, e := paths.PhysicalPath(root)
+	if e != nil {
+		return "", e
+	}
+	return prefix + p, nil
 }

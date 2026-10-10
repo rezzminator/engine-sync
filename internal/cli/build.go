@@ -1,41 +1,37 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
-	"github.com/rezzminator/engine-sync/internal/artifact"
+	"github.com/rezzminator/engine-sync/internal/cliargs"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/diag"
 	"github.com/rezzminator/engine-sync/internal/engine"
 	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/target"
 	"io"
-	"strings"
 )
 
-type selection struct {
-	engine string
-	dryRun bool
-}
+type selection = cliargs.Selection
 
 func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e env, filter string) int {
-	selected := selection{engine: filter}
+	selected := selection{Engine: filter}
 	parseAction := action
-	if action == "doctor" || action == "plan" {
-		parseAction = "check"
-	}
 	o, asJSON, code, ok := parseCodexOptions(parseAction, args, stdout, stderr, e, &selected)
 	if !ok {
 		return code
 	}
+	if (selected.DryRun && action != "build") || (filter != "" && filter != selected.Engine) {
+		fmt.Fprintf(stderr, "engine-sync %s: incompatible --dry-run or --engine\n", action)
+		return 2
+	}
 	var targets []target.Target
 	for _, t := range target.Registry {
-		if selected.engine == "" || selected.engine == t.Name() {
+		if selected.Engine == "" || selected.Engine == t.Name() {
 			targets = append(targets, t)
 		}
 	}
 	if len(targets) == 0 {
-		fmt.Fprintf(stderr, "engine-sync: unknown engine %q\n", selected.engine)
+		fmt.Fprintf(stderr, "engine-sync: unknown engine %q\n", selected.Engine)
 		return 2
 	}
 	cfg, err := e.policy(o.Root, o.Home, stderr)
@@ -52,19 +48,52 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	if action == "build" {
 		mode = reconcile.Build
 	}
-	if action == "plan" || selected.dryRun {
+	if action == "plan" || selected.DryRun {
 		mode = reconcile.Plan
 	}
 	roots := []string{o.Root}
-	for _, t := range targets {
-		if t.Name() == "codex" {
-			roots = append(roots, globalRoot(o.Home))
-			break
-		}
-	}
+
 	var combined diag.Report
 	combined.OK = true
 	var actions []reconcile.Action
+	if !p.Workbench && cfg.Codex.GlobalCommands {
+		machinePolicy, loadErr := e.policy("", o.Home, stderr)
+		if loadErr != nil {
+			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		}
+		roster, loadErr := config.ResolveTargets(e.get, o.Home, *machinePolicy, config.Targets{})
+		if loadErr != nil {
+			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		}
+		_, loadErr = guarded(e, machineGuardRoots(o.Home, roster), mode == reconcile.Build, func() int {
+			for _, t := range targets {
+				r, pass := engine.Commands(o.Home, "", *machinePolicy, *roster.CodexHomes, false, mode, t.Render, t.Roots, t.Validate)
+				combined.OK = combined.OK && pass
+				combined.Problems = append(combined.Problems, r.Problems...)
+				combined.Warnings = append(combined.Warnings, r.Warnings...)
+				combined.Rebuildable = append(combined.Rebuildable, r.Rebuildable...)
+				combined.Wrote += r.Wrote
+				combined.Unchanged += r.Unchanged
+				combined.Deleted += r.Deleted
+				actions = append(actions, r.Actions...)
+				if !asJSON {
+					for _, s := range r.Problems {
+						fmt.Fprintln(stderr, s)
+					}
+					for _, s := range r.Warnings {
+						fmt.Fprintln(stderr, "warning:", s)
+					}
+				}
+			}
+			if !combined.OK {
+				return 1
+			}
+			return 0
+		})
+		if loadErr != nil {
+			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		}
+	}
 	code, err = guarded(e, roots, mode == reconcile.Build, func() int {
 		for _, t := range targets {
 			r, pass := engine.Execute(*p, *cfg, mode, t.Render, t.Roots, t.Validate)
@@ -89,25 +118,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 			combined.Deleted += r.Deleted
 			actions = append(actions, r.Actions...)
 			if !asJSON {
-				for _, w := range r.Warnings {
-					fmt.Fprintf(stderr, "engine-sync %s: warning: %s\n", t.Name(), w)
-				}
-				if mode != reconcile.Plan {
-					for _, p := range r.Problems {
-						fmt.Fprintf(stderr, "engine-sync %s: %s\n", t.Name(), p)
-					}
-				}
-				if mode == reconcile.Plan {
-					for _, a := range r.Actions {
-						fmt.Fprintf(stdout, "%s %s %s\n", a.Kind, a.Path, a.Target)
-					}
-				} else if pass {
-					if mode == reconcile.Build && t.Name() == "opencode" {
-						fmt.Fprintf(stdout, "OPENCODE BUILD PASS wrote=%d unchanged=%d deleted=%d\n", r.Wrote, r.Unchanged, r.Deleted)
-					} else {
-						fmt.Fprintf(stdout, "%s %s PASS\n", strings.ToUpper(t.Name()), strings.ToUpper(action))
-					}
-				}
+				diag.PrintEngine(stdout, stderr, r, mode, t.Name(), action, pass)
 			}
 		}
 		if !combined.OK {
@@ -117,27 +128,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	})
 	if asJSON {
 		if mode == reconcile.Plan {
-			record := planJSON{OK: combined.OK && err == nil, Problems: combined.Problems, Rebuildable: combined.Rebuildable, Warnings: combined.Warnings, Actions: make([]planAction, 0, len(actions))}
-			if record.Problems == nil {
-				record.Problems = []string{}
-			}
-			if record.Rebuildable == nil {
-				record.Rebuildable = []string{}
-			}
-			if record.Warnings == nil {
-				record.Warnings = []string{}
-			}
-			if err != nil {
-				record.Error = err.Error()
-			}
-			for _, a := range actions {
-				record.Actions = append(record.Actions, planAction{a.Kind, a.Path, a.Target})
-			}
-			if encodeErr := json.NewEncoder(stdout).Encode(record); encodeErr != nil {
-				fmt.Fprintln(stderr, encodeErr)
-				return 1
-			}
-			return code
+			return diag.WritePlan(stdout, stderr, combined, actions, err, code)
 		}
 		if action == "doctor" {
 			return diag.WriteJSON(stdout, stderr, combined, err, config.Describe(*cfg))
@@ -155,22 +146,3 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	}
 	return code
 }
-
-type planAction struct {
-	Kind   string `json:"kind"`
-	Path   string `json:"path"`
-	Target string `json:"target,omitempty"`
-}
-type planJSON struct {
-	OK          bool         `json:"ok"`
-	Problems    []string     `json:"problems"`
-	Rebuildable []string     `json:"rebuildable"`
-	Warnings    []string     `json:"warnings"`
-	Wrote       int          `json:"wrote"`
-	Unchanged   int          `json:"unchanged"`
-	Deleted     int          `json:"deleted"`
-	Error       string       `json:"error"`
-	Actions     []planAction `json:"actions"`
-}
-
-var _ artifact.Kind

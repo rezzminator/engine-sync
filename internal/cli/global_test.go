@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -54,5 +55,87 @@ func TestGlobalUsesClaudeConfigSourcesAndPreservesThem(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "name = \"reader\"") {
 		t.Fatalf("frontmatter override on renamed role: %s", raw)
+	}
+}
+
+func TestReviewMachineRosterAndConflicts(t *testing.T) {
+	for _, name := range []string{"policy homes", "targets homes", "env homes", "conflict", "empty source", "invalid name"} {
+		t.Run(name, func(t *testing.T) {
+			home := testjail.Scratch(t)
+			chosen := filepath.Join(home, "chosen")
+			vars := map[string]string{"HOME": home}
+			e := env{get: func(k string) string { return vars[k] }}
+			putProjectFile(t, home, ".claude/agents/reader.md", "---\nname: reader\ndescription: Reads.\ntools: Read\n---\nRead.\n")
+			switch name {
+			case "policy homes":
+				putProjectFile(t, home, ".config/engine-sync/config.json", `{"version":1,"machine":{"codexHomes":["`+chosen+`"]}}`)
+			case "targets homes":
+				putProjectFile(t, home, ".config/engine-sync/targets.json", `{"codexHomes":["`+chosen+`"]}`)
+			case "env homes":
+				vars["CODEX_HOME"] = chosen
+			case "conflict":
+				putProjectFile(t, home, ".codex/agents/reader.toml", "user role")
+			case "empty source":
+				if e := os.Remove(filepath.Join(home, ".claude/agents/reader.md")); e != nil {
+					t.Fatal(e)
+				}
+				putProjectFile(t, home, ".claude/agents/README.md", "help")
+			case "invalid name":
+				putProjectFile(t, home, ".claude/agents/reader.md", "---\nname: ../../ESCAPED\ndescription: Reads.\n---\nRead.\n")
+			}
+			var out, errOut bytes.Buffer
+			rc := dispatch([]string{"global"}, &out, &errOut, e)
+			if name == "conflict" || name == "invalid name" {
+				if rc != 1 {
+					t.Errorf("unsafe global rc=%d: %s%s", rc, &out, &errOut)
+				}
+				return
+			}
+			if rc != 0 {
+				t.Errorf("global rc=%d: %s%s", rc, &out, &errOut)
+				return
+			}
+			out.Reset()
+			errOut.Reset()
+			rc = dispatch([]string{"doctor", "--machine"}, &out, &errOut, e)
+			if rc != 0 {
+				t.Errorf("doctor disagrees rc=%d: %s%s", rc, &out, &errOut)
+			}
+			if name != "empty source" {
+				out.Reset()
+				errOut.Reset()
+				rc = dispatch([]string{"codex", "agents"}, &out, &errOut, e)
+				if rc != 0 {
+					t.Errorf("agents rc=%d: %s%s", rc, &out, &errOut)
+				}
+				if name == "policy homes" {
+					if _, e := os.Stat(filepath.Join(home, ".codex", "agents", "reader.toml")); e == nil {
+						t.Error("agents wrote wrong home")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestReviewMachineNameCollisions(t *testing.T) {
+	for _, names := range [][2]string{{"Reader", "reader"}, {"caf\u00e9", "cafe\u0301"}} {
+		t.Run(names[0], func(t *testing.T) {
+			home := testjail.Scratch(t)
+			for i, name := range names {
+				putProjectFile(t, home, fmt.Sprintf(".claude/agents/source%d.md", i), "---\nname: "+name+"\ndescription: Reads.\n---\nRead.\n")
+			}
+			e := env{get: func(k string) string {
+				if k == "HOME" {
+					return home
+				}
+				return ""
+			}}
+			var out, errOut bytes.Buffer
+			rc := dispatch([]string{"global"}, &out, &errOut, e)
+			if rc == 0 || !strings.Contains(out.String()+errOut.String(), "source0.md") || !strings.Contains(out.String()+errOut.String(), "source1.md") {
+				t.Errorf("collision lost %d %s%s", rc, &out, &errOut)
+			}
+		})
 	}
 }

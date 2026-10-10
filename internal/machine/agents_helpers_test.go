@@ -46,6 +46,7 @@ func fixtureMachinePolicy() config.Config {
 	c := config.Default()
 	c.Codex.ModelMap = map[string]string{"opus": "gpt-6.1-sol", "sonnet": "gpt-6-luna", "haiku": "gpt-6-luna", "fable": "gpt-6.1-sol"}
 	c.Machine.ModelMap = c.Codex.ModelMap
+	c.Codex.Review = config.Review{ModelAlias: "opus", DefaultEffort: "low", Prompt: "Review the current task files.", SlotPrompt: "Review the selected flight files."}
 	return c
 }
 
@@ -58,6 +59,7 @@ func runFixtureMachineAgents(o GlobalAgentsOptions) (GlobalAgentsResult, error) 
 		if len(c.Machine.ModelMap) == 0 {
 			c.Machine.ModelMap = fixtureMachinePolicy().Machine.ModelMap
 		}
+		c.Codex.Review = fixtureMachinePolicy().Codex.Review
 		o.Config = &c
 	}
 	return RunGlobalAgents(o)

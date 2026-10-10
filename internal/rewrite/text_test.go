@@ -12,3 +12,11 @@ func TestTextRewritesRespectModelAndCommandBoundaries(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestReviewCommandReferencesPreserveFilenames(t *testing.T) {
+	input := "{clone}/inspect.config.json /inspect. /inspect/file /inspect run"
+	want := "{clone}/inspect.config.json $inspect. /inspect/file $inspect run"
+	if got := CommandsIn(input, map[string]string{"inspect": "$inspect"}, nil); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

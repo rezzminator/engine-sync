@@ -50,7 +50,7 @@ func TestOpenCodeNativeOverridesAndTemplateSource(t *testing.T) {
 		if a.Path == filepath.Join(root, ".opencode", "agent", "reader.md") {
 			found = true
 			raw := string(a.Content)
-			for _, want := range []string{"model: native/pinned", "mode: primary", "Source .claude/agents/reader.md; engine OpenCode; role reader."} {
+			for _, want := range []string{`model: "native/pinned"`, "mode: primary", "Source .claude/agents/reader.md; engine OpenCode; role reader."} {
 				if !strings.Contains(raw, want) {
 					t.Errorf("missing %q in %s", want, raw)
 				}

@@ -1,21 +1,16 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 
+	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/machine"
-	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
-type Targets = machine.Targets
-
-func readMachineTargets(e env, home string) (Targets, bool, error) {
-	return machine.ReadTargets(e.get, home)
-}
+type Targets = config.Targets
 
 func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 	flags := NewFlagSet("global", "usage: engine-sync global [--home H] [--source-repo R] [--claude-config-dir C]... "+
@@ -51,7 +46,7 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 	report := machine.Report{Err: err}
 	if err == nil {
 		var guardErr error
-		_, guardErr = guarded(e, []string{globalRoot(options.Home)}, !options.Plan, func() int {
+		_, guardErr = guarded(e, optionGuardRoots(options), !options.Plan, func() int {
 			report = machine.RunMachine(options)
 			if report.Err != nil || !report.OK {
 				return 1
@@ -73,31 +68,24 @@ func globalOptions(
 		return machine.Options{}, fmt.Errorf("resolve home: %w", err)
 	}
 	options := machine.Options{Home: resolvedHome, SourceRepo: sourceRepo, ClaudeConfigDirs: claudeDirs, SourceHome: sourceHome}
-	targets, found, err := readMachineTargets(e, resolvedHome)
+	policy, err := e.policy("", resolvedHome, io.Discard)
 	if err != nil {
 		return machine.Options{}, err
 	}
-	if found {
-		if len(options.ClaudeConfigDirs) == 0 {
-			options.ClaudeConfigDirs = targets.ClaudeConfigDirs
-		}
-		if options.SourceRepo == "" {
-			options.SourceRepo = targets.SourceRepo
-		}
+	options.Config = policy
+	override := Targets{SourceRepo: sourceRepo, ClaudeConfigDirs: claudeDirs}
+	if noCodex {
+		v := []string{}
+		override.CodexHomes = &v
+	} else if len(codexHomes) > 0 {
+		v := []string(codexHomes)
+		override.CodexHomes = &v
 	}
-	if len(options.ClaudeConfigDirs) == 0 {
-		options.ClaudeConfigDirs = []string{paths.ClaudeConfigDir(e.get, resolvedHome)}
+	resolved, err := config.ResolveTargets(e.get, resolvedHome, *policy, override)
+	if err != nil {
+		return machine.Options{}, err
 	}
-	switch {
-	case noCodex:
-		options.CodexHomes = []string{}
-	case len(codexHomes) != 0:
-		options.CodexHomes = codexHomes
-	case found:
-		options.CodexHomes = *targets.CodexHomes
-	case filepath.IsAbs(e.get("CODEX_HOME")):
-		options.CodexHomes = []string{e.get("CODEX_HOME")}
-	}
+	options.SourceRepo, options.ClaudeConfigDirs, options.CodexHomes = resolved.SourceRepo, resolved.ClaudeConfigDirs, *resolved.CodexHomes
 
 	for _, path := range []*string{&options.SourceRepo, &options.SourceHome} {
 		if *path == "" {
@@ -110,39 +98,21 @@ func globalOptions(
 	return options, nil
 }
 
-func printGlobal(report machine.Report, asJSON bool, stdout, stderr io.Writer) int {
-	ok := report.OK && report.Err == nil
-	errText := ""
-	if report.Err != nil {
-		errText = report.Err.Error()
-	}
-	if asJSON {
-		events := report.Events
-		if events == nil {
-			events = []machine.Event{}
-		}
-		if err := json.NewEncoder(stdout).Encode(struct {
-			OK     bool            `json:"ok"`
-			Events []machine.Event `json:"events"`
-			Error  string          `json:"error"`
-		}{OK: ok, Events: events, Error: errText}); err != nil {
-			fmt.Fprintf(stderr, "engine-sync global: write JSON: %v\n", err)
-			return 1
-		}
-	} else {
-		for _, event := range report.Events {
-			verb := event.Verb
-			if verb == machine.VerbRetire {
-				verb = machine.VerbChange
-			}
-			fmt.Fprintf(stdout, "  %-7s %s\n", verb, event.Message)
-		}
-		if errText != "" {
-			fmt.Fprintf(stderr, "engine-sync global: %s\n", errText)
+func machineGuardRoots(home string, t config.Targets) []string {
+	roots := []string{globalRoot(home), globalRoot(filepath.Join(home, ".config", "opencode", "command"))}
+	if t.CodexHomes != nil {
+		for _, h := range *t.CodexHomes {
+			roots = append(roots, globalRoot(h))
 		}
 	}
-	if !ok {
-		return 1
+	for _, d := range t.ClaudeConfigDirs {
+		roots = append(roots, globalRoot(filepath.Join(d, "agents")))
 	}
-	return 0
+	return roots
 }
+func optionGuardRoots(o machine.Options) []string {
+	homes := o.CodexHomes
+	return machineGuardRoots(o.Home, config.Targets{CodexHomes: &homes, ClaudeConfigDirs: o.ClaudeConfigDirs})
+}
+
+var printGlobal = machine.PrintReport

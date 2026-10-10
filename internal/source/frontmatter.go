@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type Frontmatter struct {
@@ -23,7 +24,7 @@ func Parse(text string) (Frontmatter, string, error) {
 		}
 	}
 	for key, value := range fields {
-		if engine, setting, ok := strings.Cut(key, "-"); ok && (engine == "codex" || engine == "opencode") {
+		if engine, setting, ok := strings.Cut(key, "-"); ok && engine != "" && setting != "" {
 			if front.Engine[engine] == nil {
 				front.Engine[engine] = map[string]string{}
 			}
@@ -42,14 +43,20 @@ var (
 // deliberately rejects malformed fences: silently treating a malformed
 // header as body changes both the generated frontmatter and its invocation.
 func Fields(text string) (map[string]string, string, error) {
-	lines := strings.Split(text, "\n")
+	lines := strings.Split(normalizeFrontmatter(text), "\n")
 	fields := make(map[string]string)
-	if len(lines) == 0 || lines[0] != "---" {
+	if !utf8.ValidString(text) {
+		return nil, "", fmt.Errorf("source is not UTF-8")
+	}
+	if strings.IndexByte(text, 0) >= 0 {
+		return nil, "", fmt.Errorf("source contains NUL")
+	}
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return fields, text, nil
 	}
 	end := -1
 	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
+		if strings.TrimSpace(lines[i]) == "---" {
 			end = i
 			break
 		}
@@ -108,6 +115,13 @@ func Fields(text string) (map[string]string, string, error) {
 				items = append(items, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i+1]), "- ")))
 				i++
 			}
+			for n, item := range items {
+				value, e := UnquoteScalar(item)
+				if e != nil {
+					return nil, "", fmt.Errorf("frontmatter field %s: %w", match[1], e)
+				}
+				items[n] = value
+			}
 			rawValue = strings.Join(items, ", ")
 		}
 		if rawValue == "" || rawValue[0] != '\'' && rawValue[0] != '"' {
@@ -118,6 +132,18 @@ func Fields(text string) (map[string]string, string, error) {
 		value, err := UnquoteScalar(rawValue)
 		if err != nil {
 			return nil, "", fmt.Errorf("frontmatter field %s: %w", match[1], err)
+		}
+		if match[1] == "tools" && strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+			value = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
+			parts := strings.Split(value, ",")
+			for n, v := range parts {
+				v, e := UnquoteScalar(strings.TrimSpace(v))
+				if e != nil {
+					return nil, "", e
+				}
+				parts[n] = v
+			}
+			value = strings.Join(parts, ", ")
 		}
 		fields[match[1]] = value
 	}
@@ -143,12 +169,12 @@ func UnquoteScalar(value string) (string, error) {
 }
 
 func HeaderLines(text string) []string {
-	lines := strings.Split(text, "\n")
-	if len(lines) == 0 || lines[0] != "---" {
+	lines := strings.Split(normalizeFrontmatter(text), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return nil
 	}
 	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
+		if strings.TrimSpace(lines[i]) == "---" {
 			out := make([]string, 0, i-1)
 			for _, line := range lines[1:i] {
 				if !strings.HasPrefix(line, "name:") {
@@ -162,3 +188,7 @@ func HeaderLines(text string) []string {
 }
 
 func ScalarField(line string) []string { return frontmatterField.FindStringSubmatch(line) }
+
+func normalizeFrontmatter(text string) string {
+	return strings.ReplaceAll(strings.TrimPrefix(text, "\ufeff"), "\r\n", "\n")
+}

@@ -49,7 +49,7 @@ func TestInspectReadsRegularFilesAndFileLinks(t *testing.T) {
 	var problems []string
 	done := make(chan struct{})
 	go func() {
-		outputs, problems = reconcile.Inspect([]artifact.Root{{Path: root}}, []artifact.Artifact{{Path: socket}, {Path: "/dev/null"}, {Path: regular, NativeMode: "subagent"}})
+		outputs, problems = reconcile.Inspect([]artifact.Root{{Path: root, ValidateOnly: true}}, []artifact.Artifact{{Path: socket}, {Path: "/dev/null"}, {Path: regular, NativeMode: "subagent"}})
 		close(done)
 	}()
 	select {
@@ -103,7 +103,7 @@ func TestInspectNamesReadAndWalkErrors(t *testing.T) {
 	}
 	child := filepath.Join(path, "config.toml")
 	_, problems = reconcile.Inspect([]artifact.Root{{Path: child}}, nil)
-	if len(problems) != 1 || !strings.Contains(problems[0], "inspect "+child) {
+	if len(problems) != 1 || (!strings.Contains(problems[0], child) || !strings.Contains(problems[0], "permission denied")) {
 		t.Fatalf("root lstat error not named: %v", problems)
 	}
 	walked := filepath.Join(root, "walked")
@@ -119,7 +119,7 @@ func TestInspectNamesReadAndWalkErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(path, 0700) })
-	outputs, problems := reconcile.Inspect([]artifact.Root{{Path: walked}}, nil)
+	outputs, problems := reconcile.Inspect([]artifact.Root{{Path: walked}}, []artifact.Artifact{{Path: later}})
 	if len(problems) != 1 || !strings.Contains(problems[0], "inspect "+path) || len(outputs) != 1 || outputs[0].Path != later {
 		t.Fatalf("an unreadable directory stopped the walk: outputs=%+v problems=%v", outputs, problems)
 	}

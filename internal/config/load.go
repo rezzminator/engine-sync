@@ -1,8 +1,11 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -12,6 +15,12 @@ import (
 func Resolve(root, home string, env func(string) string) (Config, error) {
 	cfg := Default()
 	cfg.ClaudeConfigDir = env("CLAUDE_CONFIG_DIR")
+	if cfg.ClaudeConfigDir != "" && !filepath.IsAbs(cfg.ClaudeConfigDir) {
+		return Config{}, fmt.Errorf("config env CLAUDE_CONFIG_DIR: must be absolute, got %q", cfg.ClaudeConfigDir)
+	}
+	if cfg.ClaudeConfigDir != "" {
+		cfg.Sources["machine.claudeAgentsDir"] = "env CLAUDE_CONFIG_DIR"
+	}
 	if cfg.ClaudeConfigDir == "" {
 		cfg.ClaudeConfigDir = filepath.Join(home, ".claude")
 	}
@@ -27,13 +36,14 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("config %s: opencode.agent: %w", machinePath, err)
 		}
-		machine := MachineFile{Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine}
+		machine := MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine}
 		raw, _ := json.Marshal(object)
 		if err := json.Unmarshal(raw, &machine); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", machinePath, err)
 		}
 		machine.OpenCode.Agent = agents
 		cfg.Version, cfg.Codex, cfg.OpenCode, cfg.WorkbenchMarker, cfg.MCP, cfg.Machine, cfg.Rewrites = machine.Version, machine.Codex, machine.OpenCode, machine.WorkbenchMarker, machine.MCP, machine.Machine, machine.Rewrites
+		cfg.CommandDirs = machine.CommandDirs
 		markSources(&cfg, object, "", machinePath)
 	}
 	// Cross-key rules run once, on the merged layers: a project may complete
@@ -59,6 +69,14 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	if found {
+		for _, rel := range []string{LegacyRelPath, ".claude/opencode-build.json"} {
+			legacyPath := filepath.Join(root, rel)
+			if _, e := os.Lstat(legacyPath); e == nil {
+				cfg.Deprecations = append(cfg.Deprecations, legacyPath+" is ignored because "+path+" exists")
+			} else if !os.IsNotExist(e) {
+				return Config{}, fmt.Errorf("inspect legacy config %s: %w", legacyPath, e)
+			}
+		}
 		if err := validateObject(object, reflect.TypeFor[Config](), ""); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", path, err)
 		}
@@ -79,7 +97,13 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 			return Config{}, err
 		}
 		if found {
+			for key, raw := range legacy {
+				if key != "version" && string(bytes.TrimSpace(raw)) == "null" {
+					delete(legacy, key)
+				}
+			}
 			version := legacy["version"]
+			cfg.Sources["version"] = path
 			delete(legacy, "version")
 			if err := validateValue(version, reflect.TypeFor[int](), "version"); err != nil {
 				return Config{}, fmt.Errorf("config %s: %w", path, err)
@@ -132,4 +156,54 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("config %s: %w", sourceForError(cfg, err), err)
 	}
 	return prepareTemplates(cfg)
+}
+
+// uniqueJSON rejects duplicates before decoding can discard their first value.
+func uniqueJSON(raw []byte) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	var value func(string) error
+	value = func(path string) error {
+		token, e := d.Token()
+		if e != nil {
+			return e
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		if delim == '{' {
+			seen := map[string]bool{}
+			for d.More() {
+				key, e := d.Token()
+				if e != nil {
+					return e
+				}
+				name := key.(string)
+				if seen[name] {
+					return fmt.Errorf("%s%s: duplicate key", path, name)
+				}
+				seen[name] = true
+				if e := value(path + name + "."); e != nil {
+					return e
+				}
+			}
+		} else if delim == '[' {
+			for d.More() {
+				if e := value(path); e != nil {
+					return e
+				}
+			}
+		} else {
+			return fmt.Errorf("unexpected delimiter %q", delim)
+		}
+		_, e = d.Token()
+		return e
+	}
+	if e := value(""); e != nil {
+		return e
+	}
+	if _, e := d.Token(); e != io.EOF {
+		return fmt.Errorf("trailing JSON data")
+	}
+	return nil
 }

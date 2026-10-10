@@ -10,6 +10,7 @@ import (
 // TransformOptions contains only deterministic text substitutions. The
 // compiler supplies the command roster discovered from source files.
 type TransformOptions struct {
+	Review            config.Review
 	RetiredFiles      []string
 	Rewrites          []config.Rewrite
 	Kind, Path        string
@@ -21,7 +22,9 @@ type TransformOptions struct {
 
 func transformMarkdown(text string, options TransformOptions) string {
 	ctx := rewrite.Context{Engine: "codex", Kind: options.Kind, Source: options.Path, Roster: options.Commands, ModelMap: options.ModelMap, Naming: codexCommandNaming}
-	rules := rewrite.Builtins(rewrite.Func(func(text string, ctx rewrite.Context) string { return rewriteCodeReview(text, ctx.ModelMap) }))
+	rules := rewrite.Builtins(rewrite.Func(func(text string, ctx rewrite.Context) string {
+		return rewriteCodeReview(text, ctx.ModelMap, options.Review)
+	}))
 	rules = append(rules, rewrite.Configured(options.Rewrites)...)
 	text = rules.Apply(text, ctx)
 	if options.ReplaceClaudeFile {

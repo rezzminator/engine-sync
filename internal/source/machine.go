@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
+	"os"
 	"path/filepath"
 )
 
@@ -14,12 +15,17 @@ func LoadMachine(home, agentsDir, generatedDir string, variants ...string) (Proj
 	if err != nil {
 		return p, err
 	}
-	if len(paths) == 0 {
-		return p, fmt.Errorf("no agent .md files in %s", agentsDir)
-	}
+
 	for _, path := range paths {
+		if filepath.Base(path) == "README.md" {
+			continue
+		}
 		raw, err := p.Read(path)
 		if err != nil {
+			if os.IsNotExist(err) {
+				p.Warnings = append(p.Warnings, fmt.Sprintf("dangling source %s: %v", path, err))
+				continue
+			}
 			return p, fmt.Errorf("read %s: %w", path, err)
 		}
 		front, body, err := Parse(string(raw))
@@ -44,13 +50,17 @@ func LoadMachine(home, agentsDir, generatedDir string, variants ...string) (Proj
 	return p, nil
 }
 
-func LoadMachineCommands(home, sourceHome string, uninstall bool) Project {
+func LoadMachineCommands(home, sourceHome string, uninstall bool, policies ...config.Config) Project {
 	p := Project{Root: sourceHome, Home: home, SourceHome: sourceHome, Scope: MachineScope, MachineCommands: true, documents: map[string]document{}, directories: map[string]directory{}}
+	p.SourceCommandDir = filepath.Join(sourceHome, ".claude", "commands")
+	if len(policies) > 0 && sourceHome == home && policies[0].ClaudeConfigDir != "" {
+		p.SourceCommandDir = filepath.Join(policies[0].ClaudeConfigDir, "commands")
+	}
 	if !uninstall {
 		report := Reporter{Problem: func(s string) { p.Problems = append(p.Problems, s) }, Warning: func(s string) { p.Warnings = append(p.Warnings, s) }, Dangling: func(path, rel string, err error) {
 			p.Unresolved = append(p.Unresolved, Unresolved{Path: path, Rel: rel, Target: LinkTarget(path), Err: err})
 		}}
-		dir := filepath.Join(sourceHome, ".claude", "commands")
+		dir := p.SourceCommandDir
 		for _, e := range p.Markdown(dir, nil, report) {
 			path := e.Path
 			if e.SkillDir {
@@ -69,6 +79,9 @@ func AgentsDirectory(home, repo string, cfg config.Config) string {
 			return cfg.Machine.ClaudeAgentsDir
 		}
 		return filepath.Join(home, cfg.Machine.ClaudeAgentsDir)
+	}
+	if repo != "" {
+		return filepath.Join(repo, filepath.FromSlash(cfg.Machine.SourceAgentsDir))
 	}
 	return paths.GlobalAgentsSource(home, repo, cfg.ClaudeConfigDir)
 }

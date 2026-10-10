@@ -26,18 +26,23 @@ func (Target) Validate(artifacts []artifact.Artifact) []diag.Diagnostic {
 			if err := json.Unmarshal(parseOpenCodeJSONC(a.Content), &object); err != nil {
 				message = fmt.Sprintf("does not parse (%v)", err)
 			}
-		} else if strings.HasSuffix(a.Path, ".md") && (strings.Contains(filepath.ToSlash(a.Path), "/agent/") || strings.Contains(filepath.ToSlash(a.Path), "/command/")) {
+		} else if strings.HasSuffix(a.Path, ".md") && (filepath.Base(filepath.Dir(a.Path)) == "agent" || filepath.Base(filepath.Dir(a.Path)) == "command") {
 			fields, _, err := claudesource.Fields(string(a.Content))
 			if err != nil {
 				message = fmt.Sprintf("frontmatter does not parse (%v)", err)
 			} else if strings.TrimSpace(fields["description"]) == "" {
 				message = "empty description; OpenCode filters it out and the role/command goes silent"
-			} else if strings.Contains(filepath.ToSlash(a.Path), "/agent/") && fields["mode"] != expectedOpenCodeMode(a) {
+			} else if filepath.Base(filepath.Dir(a.Path)) == "agent" && fields["mode"] != expectedOpenCodeMode(a) {
 				message = fmt.Sprintf("mode %q is not %s; the compiler only emits %s roles", fields["mode"], expectedOpenCodeMode(a), expectedOpenCodeMode(a))
 			}
 		}
 		if message != "" {
-			diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Finding, State: reconcile.Invalid, Path: a.Path, Message: fmt.Sprintf("%s %s — %s", reconcile.Invalid, a.Path, message)})
+			diagnostics = append(diagnostics, diag.Diagnostic{Severity: func() diag.Severity {
+				if filepath.Base(filepath.Dir(a.Path)) == "command" && strings.TrimSpace(message) == "empty description; OpenCode filters it out and the role/command goes silent" {
+					return diag.Warning
+				}
+				return diag.Finding
+			}(), State: reconcile.Invalid, Path: a.Path, Message: fmt.Sprintf("%s %s — %s", reconcile.Invalid, a.Path, message)})
 		}
 	}
 	return diagnostics

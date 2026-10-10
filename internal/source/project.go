@@ -47,6 +47,7 @@ type directory struct {
 }
 type Project struct {
 	SourceHome                   string
+	SourceCommandDir             string
 	MachineCommands              bool
 	AgentSourceDir               string
 	CodexHomes, ClaudeConfigDirs []string
@@ -104,8 +105,20 @@ func LoadProject(root, home string, cfg config.Config) Project {
 			p.Children = append(p.Children, Project{Root: child, Scope: ProjectScope})
 		}
 	}
-	for _, dir := range []string{filepath.Join(root, ".claude", "commands"), filepath.Join(root, "templates", "global", "commands"), filepath.Join(home, ".claude", "commands")} {
-		for _, e := range p.Markdown(dir, nil, report) {
+	claudeDir := cfg.ClaudeConfigDir
+	if claudeDir == "" {
+		claudeDir = filepath.Join(home, ".claude")
+	}
+	p.SourceCommandDir = filepath.Join(claudeDir, "commands")
+	if cfg.Codex.GlobalCommands && !p.Workbench {
+		p.Markdown(p.SourceCommandDir, nil, report)
+	}
+	dirs := []string{filepath.Join(root, ".claude", "commands")}
+	for _, rel := range cfg.CommandDirs {
+		dirs = append(dirs, filepath.Join(root, filepath.FromSlash(rel)))
+	}
+	for _, dir := range dirs {
+		for _, e := range p.Markdown(dir, cfg.Codex.ExcludeDirs, report) {
 			path := e.Path
 			if e.SkillDir {
 				path = filepath.Join(path, "SKILL.md")
@@ -133,7 +146,7 @@ func LoadProject(root, home string, cfg config.Config) Project {
 // Read snapshots source content, including named read failures.
 func (p *Project) Read(path string) ([]byte, error) {
 	if p == nil {
-		return os.ReadFile(path)
+		return paths.ReadRegular(path)
 	}
 	if doc, ok := p.documents[path]; ok {
 		return doc.Raw, doc.Err
@@ -141,7 +154,7 @@ func (p *Project) Read(path string) ([]byte, error) {
 	if p.frozen {
 		return nil, os.ErrNotExist
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := paths.ReadRegular(path)
 	front, body, parseErr := Parse(string(raw))
 	if p.documents == nil {
 		p.documents = map[string]document{}
@@ -151,7 +164,7 @@ func (p *Project) Read(path string) ([]byte, error) {
 }
 func (p *Project) Frontmatter(path string) (Frontmatter, string, error) {
 	if p == nil {
-		raw, err := os.ReadFile(path)
+		raw, err := paths.ReadRegular(path)
 		if err != nil {
 			return Frontmatter{}, "", err
 		}
@@ -175,7 +188,7 @@ func (p *Project) Markdown(dir string, excludes []string, report Reporter) []Ent
 		collect := Reporter{Problem: func(s string) { cached.Problems = append(cached.Problems, s) }, Warning: func(s string) { cached.Warnings = append(cached.Warnings, s) }, Dangling: func(path, rel string, err error) {
 			cached.Unresolved = append(cached.Unresolved, Unresolved{Path: path, Rel: rel, Target: LinkTarget(path), Err: err})
 		}}
-		cached.Entries = Markdown(dir, nil, collect)
+		cached.Entries = Markdown(dir, excludes, collect)
 		p.directories[dir] = cached
 	}
 	for _, s := range cached.Problems {
@@ -212,7 +225,7 @@ func SkillDirectories(dir string, report Reporter) []Entry {
 		path := filepath.Join(dir, item.Name())
 		info, err := os.Stat(path)
 		if err != nil {
-			if item.Type()&os.ModeSymlink != 0 {
+			if os.IsNotExist(err) && item.Type()&os.ModeSymlink != 0 {
 				report.Dangling(path, item.Name(), err)
 				entries = append(entries, Entry{Path: path, Rel: item.Name(), Target: LinkTarget(path)})
 			} else {

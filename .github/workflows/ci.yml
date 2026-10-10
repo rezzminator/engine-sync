@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -33,6 +35,7 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           LEAK_TERMS_CONTENT: ${{ secrets.LEAK_TERMS }}
+          CHECK_TREE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
           LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt" scripts/check-tree.sh
@@ -46,7 +49,9 @@ jobs:
       - name: test
         run: go test ./...
       - name: install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        run: |
+          version=$(awk '$1 == "claude-code" { print $2 }' scripts/tool-versions.txt)
+          npm install -g @anthropic-ai/claude-code@"$version"
       - name: validate the marketplace
         run: claude plugin validate --strict .
       - name: validate the plugin
@@ -59,3 +64,17 @@ jobs:
         run: |
           printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
           LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt" scripts/leak-check.sh
+
+  release-version:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: execute native release asset and verify its version
+        run: scripts/build-release.sh --native-only --out "$RUNNER_TEMP/release"

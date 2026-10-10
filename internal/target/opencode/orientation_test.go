@@ -16,7 +16,7 @@ func TestOpenCodeMirrorCopyConflictNamesTheRemedy(t *testing.T) {
 
 	result, err := Compile(Options{Root: root, Home: home, Mode: ModeCheck})
 	want := "CONFLICT " + copyPath + " — differs from " + filepath.Join(root, "LICENSE") +
-		" and engine-sync cannot prove it wrote it; delete it and rebuild"
+		" and engine-sync cannot prove it wrote it; preserved; move it aside before rebuilding"
 	if err != nil || result.OK || !containsProblem(result.Problems, want) {
 		t.Fatalf("problems=%q err=%v, want %q", result.Problems, err, want)
 	}

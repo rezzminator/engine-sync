@@ -31,7 +31,11 @@ func Markdown(dir string, excludes []string, report Reporter) []Entry {
 	walk = func(current, relative string) {
 		resolved, evalErr := filepath.EvalSymlinks(current)
 		if evalErr != nil {
-			report.Dangling(current, "", evalErr)
+			if os.IsNotExist(evalErr) {
+				report.Dangling(current, relative, evalErr)
+			} else {
+				report.Problem(fmt.Sprintf("resolve %s: %v", current, evalErr))
+			}
 			return
 		}
 		if visited[resolved] {
@@ -39,6 +43,7 @@ func Markdown(dir string, excludes []string, report Reporter) []Entry {
 			return
 		}
 		visited[resolved] = true
+		defer delete(visited, resolved)
 		read, err := os.ReadDir(current)
 		if err != nil {
 			report.Problem(fmt.Sprintf("read %s: %v", current, err))
@@ -57,7 +62,11 @@ func Markdown(dir string, excludes []string, report Reporter) []Entry {
 			info, statErr := os.Stat(path)
 			if item.Type()&os.ModeSymlink != 0 {
 				if statErr != nil {
-					report.Dangling(path, rel, statErr)
+					if os.IsNotExist(statErr) {
+						report.Dangling(path, rel, statErr)
+					} else {
+						report.Problem(fmt.Sprintf("stat %s: %v", path, statErr))
+					}
 					continue
 				}
 			}
@@ -74,6 +83,10 @@ func Markdown(dir string, excludes []string, report Reporter) []Entry {
 				continue
 			}
 			if strings.HasSuffix(name, ".md") && name != "README.md" {
+				if !info.Mode().IsRegular() {
+					report.Problem(fmt.Sprintf("source %s: not a regular file", path))
+					continue
+				}
 				entries = append(entries, Entry{Path: path, Rel: rel})
 			}
 		}
@@ -87,7 +100,7 @@ func Excluded(exclusions []string, relative, name string) bool {
 	relative = filepath.ToSlash(relative)
 	for _, value := range exclusions {
 		value = filepath.ToSlash(value)
-		if value == name || value == relative || strings.HasPrefix(relative, value+"/") {
+		if value == name || value == relative || strings.HasPrefix(relative, value+"/") || strings.Contains("/"+relative, "/"+value+"/") {
 			return true
 		}
 	}
@@ -98,6 +111,9 @@ func Projects(root string, listed, excludes []string, report Reporter, markers .
 	projects := []string{"."}
 	if listed != nil {
 		for _, project := range listed {
+			if Excluded(excludes, project, project) {
+				continue
+			}
 			if project != "." {
 				if found, err := paths.HasWorkbenchManifest(filepath.Join(root, project), markers...); err != nil {
 					report.Problem(err.Error())
@@ -107,7 +123,12 @@ func Projects(root string, listed, excludes []string, report Reporter, markers .
 					continue
 				}
 			}
-			if project != "." && HasOrientation(filepath.Join(root, project)) {
+			if project != "." {
+				info, e := os.Stat(filepath.Join(root, project, "CLAUDE.md"))
+				if e != nil || !info.Mode().IsRegular() {
+					report.Problem(fmt.Sprintf("listed project %s: no regular CLAUDE.md (%v)", filepath.Join(root, project), e))
+					continue
+				}
 				projects = append(projects, project)
 			}
 		}
@@ -121,6 +142,10 @@ func Projects(root string, listed, excludes []string, report Reporter, markers .
 				report.Problem(err.Error())
 				continue
 			} else if found {
+				continue
+			}
+			if _, e := os.Stat(filepath.Join(root, entry.Name(), "CLAUDE.md")); e != nil && !os.IsNotExist(e) {
+				report.Problem(fmt.Sprintf("inspect project %s: %v", entry.Name(), e))
 				continue
 			}
 			if HasOrientation(filepath.Join(root, entry.Name())) {

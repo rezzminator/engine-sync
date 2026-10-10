@@ -2,9 +2,7 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"github.com/rezzminator/engine-sync/internal/testjail"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -54,7 +52,7 @@ func TestOpenCodeDanglingCommandWarnsOnceInBuildAndIsAProblemInCheck(t *testing.
 			}
 
 			var stdout, stderr bytes.Buffer
-			code := RunOpenCodeCommand(
+			code := invokeOpenCodeCLI(
 				[]string{action, root, "--home", home},
 				func() (string, error) { return root, nil },
 				home,
@@ -97,7 +95,7 @@ func TestOpenCodeDanglingCommandWarnsOnceInBuildAndIsAProblemInCheck(t *testing.
 
 // A broken source skips that one entry the way a dangling one does: build
 // warns and writes every healthy output, check and doctor fail naming it.
-func TestOpenCodeBrokenSourceIsSkippedInBuildAndIsAProblemInCheck(t *testing.T) {
+func TestOpenCodeBrokenSourceFailsBuildAndCheck(t *testing.T) {
 	const agent, agentOut = ".claude/agents/broken.md", ".opencode/agent/broken.md"
 	writes := func(content string) func(*testing.T, string) {
 		return func(t *testing.T, path string) { cliWriteTestFile(t, path, content) }
@@ -130,7 +128,7 @@ func TestOpenCodeBrokenSourceIsSkippedInBuildAndIsAProblemInCheck(t *testing.T) 
 				door.plant(t, broken)
 
 				var stdout, stderr bytes.Buffer
-				code := RunOpenCodeCommand(
+				code := invokeOpenCodeCLI(
 					[]string{action, root, "--home", home},
 					func() (string, error) { return root, nil },
 					home,
@@ -143,28 +141,10 @@ func TestOpenCodeBrokenSourceIsSkippedInBuildAndIsAProblemInCheck(t *testing.T) 
 						named = line
 					}
 				}
-				if action == "check" {
-					if code != 1 || named == "" || strings.Contains(named, "warning:") {
-						t.Fatalf("check: code=%d stderr=%q", code, stderr.String())
-					}
-					return
+				if code != 1 || named == "" || strings.Contains(named, "warning:") {
+					t.Fatalf("%s: code=%d stderr=%q", action, code, stderr.String())
 				}
-				if code != 0 || !strings.Contains(named, "engine-sync opencode: warning: SKIP ") {
-					t.Fatalf("build: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-				}
-				for _, path := range []string{
-					filepath.Join(root, ".opencode", "command", "review.md"),
-					filepath.Join(root, ".opencode", "agent", "worker.md"),
-					filepath.Join(root, ".opencode", "opencode.jsonc"),
-				} {
-					if _, err := os.Stat(path); err != nil {
-						t.Fatalf("build skipped healthy output %s: %v", path, err)
-					}
-				}
-				output := filepath.Join(root, filepath.FromSlash(door.output))
-				if _, err := os.Stat(output); !errors.Is(err, fs.ErrNotExist) {
-					t.Fatalf("build wrote an output for the broken source %s: %v", broken, err)
-				}
+
 			})
 		}
 	}

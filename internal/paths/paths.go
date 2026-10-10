@@ -22,15 +22,6 @@ func Home() (string, error) {
 	return home, nil
 }
 
-// WorkbenchManifest is empty unless the integration names a marker.
-func WorkbenchManifest(dir string) string {
-	marker := os.Getenv("ENGINE_SYNC_WORKBENCH_MARKER")
-	if marker == "" {
-		return ""
-	}
-	return filepath.Join(dir, filepath.FromSlash(marker))
-}
-
 // HasWorkbenchManifest never follows a symlink in a configured marker path.
 func HasWorkbenchManifest(dir string, markers ...string) (bool, error) {
 	marker := ""
@@ -57,7 +48,7 @@ func HasWorkbenchManifest(dir string, markers ...string) (bool, error) {
 			return false, fmt.Errorf("inspect workbench %s: %w", current, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return false, nil
+			return false, fmt.Errorf("inspect workbench %s: symlink marker refused", current)
 		}
 		if current == path && !info.Mode().IsRegular() {
 			return false, fmt.Errorf("inspect workbench %s: not a regular file", path)
@@ -77,7 +68,7 @@ func GlobalAgentsSource(home, repo string, configDirs ...string) string {
 	if repo == "" {
 		return filepath.Join(GlobalSourceRoot(home, repo, configDirs...), "agents")
 	}
-	return filepath.Join(repo, "templates", "global", "agents")
+	return filepath.Join(repo, "agents")
 }
 func GlobalSourceRoot(home, repo string, configDirs ...string) string {
 	if repo == "" {
@@ -90,7 +81,7 @@ func GlobalSourceRoot(home, repo string, configDirs ...string) string {
 }
 
 // PhysicalPath resolves the deepest existing ancestor and keeps a missing tail.
-func PhysicalPath(path string) string {
+func PhysicalPath(path string) (string, error) {
 	candidate := filepath.Clean(path)
 	var missing []string
 	for {
@@ -99,11 +90,11 @@ func PhysicalPath(path string) string {
 			for i := len(missing) - 1; i >= 0; i-- {
 				physical = filepath.Join(physical, missing[i])
 			}
-			return filepath.Clean(physical)
+			return filepath.Clean(physical), nil
 		}
 		parent := filepath.Dir(candidate)
 		if !errors.Is(err, os.ErrNotExist) || parent == candidate {
-			return filepath.Clean(path)
+			return "", fmt.Errorf("resolve physical path %s: %w", path, err)
 		}
 		missing = append(missing, filepath.Base(candidate))
 		candidate = parent
@@ -111,8 +102,16 @@ func PhysicalPath(path string) string {
 }
 
 // SameEntry compares parent directories physically without following the leaf link.
-func SameEntry(first, second string) bool {
-	return filepath.Base(first) == filepath.Base(second) && PhysicalPath(filepath.Dir(first)) == PhysicalPath(filepath.Dir(second))
+func SameEntry(first, second string) (bool, error) {
+	a, e := PhysicalPath(filepath.Dir(first))
+	if e != nil {
+		return false, e
+	}
+	b, e := PhysicalPath(filepath.Dir(second))
+	if e != nil {
+		return false, e
+	}
+	return filepath.Base(first) == filepath.Base(second) && a == b, nil
 }
 
 // GeneratedCodexAgentsDir is where engine-sync compiles the machine-global Codex
@@ -126,7 +125,7 @@ func LegacyGeneratedCodexAgentsDir(home string) string {
 }
 
 // GeneratedClaudeAgentsDir is where engine-sync renders the machine-global Claude
-// agent VARIANTS templates/global/agents/variants.json declares
+// agent VARIANTS the configured variants registry declares
 // (codex.RunGlobalAgents) — one source agent re-emitted under another name
 // with overridden frontmatter. An original agent is linked straight from the
 // clone and never lands here; only a variant's `{config}/agents/<name>.md`

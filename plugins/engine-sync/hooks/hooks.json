@@ -7,7 +7,8 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/libexec/engine-sync",
-            "args": ["hook", "claude", "mark"]
+            "args": ["hook", "claude", "mark"],
+            "timeout": 20
           }
         ]
       }

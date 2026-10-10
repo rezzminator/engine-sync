@@ -50,5 +50,5 @@ func schemaType(t reflect.Type) map[string]any {
 	}
 }
 func Effective(cfg Config) MachineFile {
-	return MachineFile{Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, MCP: cfg.MCP, WorkbenchMarker: cfg.WorkbenchMarker, Rewrites: cfg.Rewrites, Machine: cfg.Machine}
+	return MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, MCP: cfg.MCP, WorkbenchMarker: cfg.WorkbenchMarker, Rewrites: cfg.Rewrites, Machine: cfg.Machine}
 }

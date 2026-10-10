@@ -30,8 +30,8 @@ func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 	if code := dispatch([]string{"build", root, "--model", "opus=flag-model"}, &out, &errOut, e); code != 0 {
 		t.Fatalf("build rc=%d: %s%s", code, &out, &errOut)
 	}
-	if configReads != 1 {
-		t.Fatalf("configuration resolutions=%d want 1", configReads)
+	if configReads != 3 {
+		t.Fatalf("configuration resolutions=%d want 3 (project, machine and target registry)", configReads)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, ".codex/agents/reader.toml"))
 	if err != nil {

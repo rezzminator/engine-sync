@@ -56,12 +56,12 @@ func assertUnresolvedTwinKept(t *testing.T, build Result, source, target, twin s
 	if !bytes.Equal(have, seeded) {
 		t.Fatalf("twin %s was rewritten:\nhave %q\nwant %q", twin, have, seeded)
 	}
-	want := "source unresolvable: " + source + " → " + target + "; twin kept"
+	want := "source unresolvable: " + source + " → " + target + "; output kept"
 	if !containsFinding(build.Warnings, want) {
 		t.Fatalf("build warnings lack %q: %#v", want, build.Warnings)
 	}
 	if build.Deleted != 0 {
-		t.Fatalf("build.Deleted = %d, want 0 with the twin kept: %#v", build.Deleted, build)
+		t.Fatalf("build.Deleted = %d, want 0 with the output kept: %#v", build.Deleted, build)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestUnresolvableCommandDirectoryKeepsTwins(t *testing.T) {
 	if got := readCodexFixture(t, twin); !bytes.Equal(got, seeded) {
 		t.Fatalf("command directory twin changed: got %q, want %q", got, seeded)
 	}
-	warning := "source unresolvable: " + source + " → " + target + "; twin kept"
+	warning := "source unresolvable: " + source + " → " + target + "; output kept"
 	if !contains(result.Warnings, warning) {
 		t.Fatalf("warnings = %q, want %q", result.Warnings, warning)
 	}
@@ -171,7 +171,7 @@ func TestUnresolvableSkillDirectoryKeepsTwin(t *testing.T) {
 	if got, err := os.Readlink(twin); err != nil || got != seeded {
 		t.Fatalf("skill twin = %q, %v, want %q, nil", got, err, seeded)
 	}
-	if !contains(result.Warnings, "source unresolvable: "+source+" → "+target+"; twin kept") {
+	if !contains(result.Warnings, "source unresolvable: "+source+" → "+target+"; output kept") {
 		t.Fatalf("warnings = %q, want named twin-kept warning", result.Warnings)
 	}
 }
@@ -193,7 +193,7 @@ func TestRealCommandSourceWinsOverKeptDirectoryTwin(t *testing.T) {
 		t.Fatalf("build: %#v, %v", result, err)
 	}
 	assertCodexContains(t, filepath.Join(root, ".codex", "skills", "git-commit", "SKILL.md"), "Commit.")
-	if containsFinding(result.Warnings, "twin kept") {
+	if containsFinding(result.Warnings, "output kept") {
 		t.Fatalf("real source reported as kept: %q", result.Warnings)
 	}
 }
@@ -218,7 +218,7 @@ func TestAbsentAgentSourceStillDeletesItsTwin(t *testing.T) {
 	if build.Deleted != 1 {
 		t.Fatalf("build.Deleted = %d, want 1: %#v", build.Deleted, build)
 	}
-	if containsFinding(build.Warnings, "twin kept") {
+	if containsFinding(build.Warnings, "output kept") {
 		t.Fatalf("an absent source claimed a kept twin: %#v", build.Warnings)
 	}
 }
@@ -306,7 +306,7 @@ func TestUnresolvableCommandFormsKeepAllTwins(t *testing.T) {
 						t.Fatalf("prompt twin removed: %v", err)
 					}
 				}
-				if !containsFinding(got.Warnings, "twin kept") {
+				if !containsFinding(got.Warnings, "output kept") {
 					t.Fatalf("warnings: %q", got.Warnings)
 				}
 			})

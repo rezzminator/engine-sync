@@ -63,7 +63,11 @@ func TestMachineDoctorRows(t *testing.T) {
 			if tc.stage != nil {
 				tc.stage(t)
 			}
-			if got := Doctor(tc.options); !reflect.DeepEqual(got, tc.want) {
+			got := []Row{}
+			for _, status := range InspectRegistries(tc.options) {
+				got = append(got, Row{status.Level(), "global-agents " + status.Describe()})
+			}
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("rows\n got %#v\nwant %#v", got, tc.want)
 			}
 		})

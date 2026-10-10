@@ -43,7 +43,7 @@ func TestPlanListsExactlyWhatTheApplyDoes(t *testing.T) {
 		t.Fatalf("role %s = %q, %v; want a generated role file", role, raw, err)
 	}
 	link := filepath.Join(home, ".claude", "agents", "gamma.md")
-	if target, err := os.Readlink(link); err != nil || target != filepath.Join(repo, "templates", "global", "agents", "gamma.md") {
+	if target, err := os.Readlink(link); err != nil || target != filepath.Join(repo, "agents", "gamma.md") {
 		t.Fatalf("claude link %s -> %q, %v", link, target, err)
 	}
 	variant := filepath.Join(paths.GeneratedClaudeAgentsDir(home), "gamma-deep.md")

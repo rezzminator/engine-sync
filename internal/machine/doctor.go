@@ -65,12 +65,13 @@ type Row struct {
 // SourceRepo is the no-clone state, the clone a first install would use being
 // {Home}/.claude.
 type DoctorOptions struct {
-	Config          *config.Config
-	Home            string
-	SourceRepo      string
-	ClaudeConfigDir string
-	CodexHomes      []string
-	ClaudeAbsent    bool
+	Config           *config.Config
+	Home             string
+	SourceRepo       string
+	ClaudeConfigDirs []string
+	ClaudeConfigDir  string
+	CodexHomes       []string
+	ClaudeAbsent     bool
 }
 
 // Describe renders the one operator-facing line of a status; every
@@ -127,6 +128,31 @@ func Doctor(options DoctorOptions) []Row {
 	for _, status := range statuses {
 		rows = append(rows, Row{Level: status.Level(), Message: "global-agents " + status.Describe()})
 	}
+	if !options.ClaudeAbsent {
+		plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, Plan: true})
+		for _, event := range plan.Events {
+			if event.Verb == VerbChange || event.Verb == VerbRetire || event.Verb == VerbConflict {
+				rows = append(rows, Row{Level: LevelFail, Message: event.Message})
+			}
+		}
+		if plan.Err != nil {
+			rows = append(rows, Row{Level: LevelFail, Message: plan.Err.Error()})
+		}
+	}
+
+	failed := false
+	for _, row := range rows {
+		failed = failed || row.Level == LevelFail
+	}
+	if failed {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row.Level != LevelOK {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
 	return rows
 }
 
@@ -158,7 +184,7 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	}
 	var sources []string
 	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".md") {
+		if strings.HasSuffix(entry.Name(), ".md") && !strings.EqualFold(entry.Name(), "README.md") {
 			sources = append(sources, filepath.Join(agentsDir, entry.Name()))
 		}
 	}
@@ -166,14 +192,21 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsNoSources}}
 	}
 	sort.Strings(sources)
-	variants, err := source.LoadGlobalAgentVariants(agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants)
+	variants, err := source.LoadGlobalAgentVariants(agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
 	if err != nil {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
 	}
 	for _, variant := range variants {
 		sources = append(sources, variant.Path)
 	}
-	statuses := []AgentsStatus{inspectStore(store, paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), sources)}
+	dirs := options.ClaudeConfigDirs
+	if len(dirs) == 0 {
+		dirs = []string{store}
+	}
+	statuses := []AgentsStatus{}
+	for _, dir := range dirs {
+		statuses = append(statuses, inspectStore(dir, paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), sources))
+	}
 	roles, err := CompileGlobalRoles(home, repo, cfg)
 	if err != nil {
 		return append(statuses, AgentsStatus{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()})
@@ -235,7 +268,13 @@ func inspectStore(store, repo string, sources []string) AgentsStatus {
 	registry := filepath.Join(store, "agents")
 	var conflicting, missing []string
 	for _, source := range sources {
-		if paths.SameEntry(filepath.Join(registry, filepath.Base(source)), source) {
+		same, e := paths.SameEntry(filepath.Join(registry, filepath.Base(source)), source)
+		if e != nil {
+			status.State = AgentsUnreadable
+			status.Error = e.Error()
+			return status
+		}
+		if same {
 			continue
 		}
 		name := strings.TrimSuffix(filepath.Base(source), ".md")

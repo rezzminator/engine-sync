@@ -17,13 +17,13 @@ var plainScalar = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 // is carried through byte-identical, and so is the body but for the swaps,
 // each applied in key order to text that must occur in the body exactly once.
 func RenderVariant(source, name, markerSource string, overrides, swaps map[string]string) (string, error) {
-	lines := strings.Split(source, "\n")
-	if len(lines) == 0 || lines[0] != "---" {
+	lines := strings.Split(normalizeFrontmatter(source), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return "", fmt.Errorf("no frontmatter")
 	}
 	end := -1
 	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
+		if strings.TrimSpace(lines[i]) == "---" {
 			end = i
 			break
 		}

@@ -21,5 +21,3 @@ var ErrGlobalRoleNotRegular = reconciler.ErrGlobalRoleNotRegular
 var ReadGlobalRoleFile = reconciler.ReadGlobalRoleFile
 
 var ClassifyGlobalRole = reconciler.ClassifyGlobalRole
-
-var ApplyGlobalRole = reconciler.ApplyGlobalRole

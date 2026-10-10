@@ -66,7 +66,7 @@ func (cfg Config) WithCodexOverrides(cli CodexOverrides) (Config, error) {
 		mark("suffixPrefix", "suffix-prefix")
 	}
 	if err := Validate(cfg); err != nil {
-		return Config{}, fmt.Errorf("config %s: %w", cfg.Source, err)
+		return Config{}, fmt.Errorf("config %s: %w", sourceForError(cfg, err), err)
 	}
 	return prepareTemplates(cfg)
 }

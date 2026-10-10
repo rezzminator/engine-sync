@@ -30,7 +30,13 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	}
 	resolvedHome, err := absoluteHome(*home, e)
 	if err != nil {
-		fmt.Fprintf(stderr, "engine-sync doctor: resolve home: %v\n", err)
+		if *asJSON {
+			if writeErr := json.NewEncoder(stdout).Encode(map[string]any{"ok": false, "rows": []machine.Row{}, "configSources": []config.SourceRow{}, "error": err.Error()}); writeErr != nil {
+				fmt.Fprintln(stderr, writeErr)
+			}
+		} else {
+			fmt.Fprintf(stderr, "engine-sync doctor: resolve home: %v\n", err)
+		}
 		return 1
 	}
 	policy, err := e.policy("", resolvedHome, stderr)
@@ -42,10 +48,23 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 		}
 		return 1
 	}
-	rows := machine.Doctor(machine.DoctorOptions{
-		Config: policy, Home: resolvedHome, SourceRepo: *sourceRepo, ClaudeConfigDir: *claudeConfig,
-		CodexHomes: []string(codexHomes), ClaudeAbsent: *claudeAbsent,
+	var cds repeatString
+	if *claudeConfig != "" {
+		cds = append(cds, *claudeConfig)
+	}
+	options, err := globalOptions(e, resolvedHome, *sourceRepo, "", cds, codexHomes, false)
+	if err != nil {
+		return reportRunFailure("engine-sync doctor", *asJSON, err, stdout, stderr)
+	}
+	var rows []machine.Row
+	_, guardErr := guarded(e, optionGuardRoots(options), false, func() int {
+		rows = machine.Doctor(machine.DoctorOptions{Config: policy, Home: resolvedHome, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, ClaudeAbsent: *claudeAbsent})
+		return 0
 	})
+	if guardErr != nil {
+		rows = append(rows, machine.Row{Level: machine.LevelFail, Message: guardErr.Error()})
+	}
+
 	failed := false
 	for _, row := range rows {
 		failed = failed || row.Level == machine.LevelFail

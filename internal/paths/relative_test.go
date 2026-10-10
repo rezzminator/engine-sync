@@ -5,7 +5,7 @@ import (
 )
 
 func TestRelativePathsStayInsideRoot(t *testing.T) {
-	for _, value := range []string{"", "..", "../outside", "/absolute"} {
+	for _, value := range []string{"", "..", "../outside", "/absolute", "~/x", "skip/", " x", "x/../wb.json"} {
 		if RelativePath(value, "mirrorFiles") == nil {
 			t.Fatal(value)
 		}

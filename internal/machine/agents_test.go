@@ -11,7 +11,7 @@ import (
 func TestMachineUnmappedAliasProducesUnpinnedRole(t *testing.T) {
 	home := testjail.Scratch(t)
 	repo := filepath.Join(home, "clone")
-	path := filepath.Join(repo, "templates", "global", "agents", "reader.md")
+	path := filepath.Join(repo, "agents", "reader.md")
 	writeAgentFixture(t, path, "---\nname: reader\ndescription: Reads.\nmodel: unknown\n---\nRead.\n")
 	cfg, err := config.Resolve("", home, func(string) string { return "" })
 	if err != nil {

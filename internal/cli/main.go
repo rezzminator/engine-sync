@@ -4,13 +4,13 @@
 package cli
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/target"
 	"io"
 	"os"
-	"path/filepath"
+	"time"
 
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/guard"
@@ -23,6 +23,7 @@ var Version = "0.2.0-alpha"
 
 // env is the process environment one run reads.
 type env struct {
+	lockWait time.Duration
 	get      paths.Env
 	stdin    io.Reader
 	notices  map[string]bool
@@ -30,10 +31,7 @@ type env struct {
 	sources  map[string]*source.Project
 }
 
-type policyResult struct {
-	config *config.Config
-	err    error
-}
+type policyResult = config.CachedResult
 
 // Main is the process adapter; all compiler stages are driven by run.
 func Main(args []string, stdout, stderr io.Writer, stdin io.Reader, release string) int {
@@ -129,73 +127,13 @@ func writerPath() string {
 	return exe
 }
 
-// guarded runs write under the lock of every output root it writes, taken in
-// the order given, once the version guard, consulted while the locks are held,
-// admits it; then it records this binary as each root's writer: a newer writer
-// that held a lock while this one waited refuses it. A check (write == false)
-// consults the guard but takes no lock and records nothing. Every caller
-// names a repository root before the home's "global:" root, so two writers
-// never wait on each other's locks.
-func guarded(e env, roots []string, writes bool, body func() int) (int, error) {
-	home, err := e.home()
-	if err != nil {
-		return 1, err
-	}
-	state := e.state(home)
-	keys := make([]string, len(roots))
-	for i, root := range roots {
-		keys[i] = filepath.Clean(root)
-	}
-	if !writes {
-		for _, key := range keys {
-			if err := guard.Check(state, key, Version); err != nil {
-				return 1, err
-			}
-		}
-		return body(), nil
-	}
-	var releases []func() error
-	releaseAll := func() error {
-		var errs []error
-		for i := len(releases) - 1; i >= 0; i-- {
-			errs = append(errs, releases[i]())
-		}
-		return errors.Join(errs...)
-	}
-	for _, key := range keys {
-		release, err := guard.Lock(state, key)
-		if err != nil {
-			return 1, errors.Join(err, releaseAll())
-		}
-		releases = append(releases, release)
-	}
-	for _, key := range keys {
-		if err := guard.Check(state, key, Version); err != nil {
-			return 1, errors.Join(err, releaseAll())
-		}
-	}
-	code := body()
-	var saveErr error
-	if code == 0 {
-		for _, key := range keys {
-			saveErr = errors.Join(saveErr, guard.Save(state, key, Version, writerPath()))
-		}
-	}
-	if err := releaseAll(); err != nil {
-		saveErr = errors.Join(saveErr, err)
-	}
-	if saveErr != nil {
-		return 1, saveErr
-	}
-	return code, nil
-}
-
 // globalRoot is the guard root of a home's machine-level outputs: its Codex
 // roles, Claude agent links and global commands.
 func globalRoot(home string) string { return "global:" + home }
 
 func (e env) source(root, home string, cfg config.Config) *source.Project {
-	key := root + "\x00" + home
+	raw, _ := json.Marshal(cfg)
+	key := root + "\x00" + home + "\x00" + string(raw)
 	if p := e.sources[key]; p != nil {
 		return p
 	}
@@ -213,4 +151,12 @@ func containsFlag(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+func guarded(e env, roots []string, writes bool, body func() int) (int, error) {
+	home, err := e.home()
+	if err != nil {
+		return 1, err
+	}
+	return guard.WithWriterGuard(e.state(home), roots, Version, writerPath, writes, e.lockWait, body)
 }

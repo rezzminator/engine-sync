@@ -37,21 +37,21 @@ func markdownSources(dir string, excludes []string, result *Result) []claudesour
 	return entries
 }
 
-// keptTwin is the output standing for an unresolvable source's twin at path.
-func keptTwin(path string, source claudesource.Entry) artifact.Artifact {
+// keptArtifact is the output standing for an unresolvable source's twin at path.
+func keptArtifact(path string, source claudesource.Entry) artifact.Artifact {
 	return artifact.Artifact{Path: path, Kept: &artifact.SourceLink{Path: source.Path, Target: source.Target}}
 }
 
-// keptCommandTwin is keptTwin at the repo command skill compileCommandFile
+// keptCommandArtifact is keptArtifact at the repo command skill compileCommandFile
 // writes for entry.
-func keptCommandTwin(root string, entry claudesource.Entry) artifact.Artifact {
-	return keptTwin(
+func keptCommandArtifact(root string, entry claudesource.Entry) artifact.Artifact {
+	return keptArtifact(
 		filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.Rel)), skillFileName),
 		entry,
 	)
 }
 
-func keptDirTwins(root string, entry claudesource.Entry, problem func(string)) []artifact.Artifact {
+func keptDirArtifacts(root string, entry claudesource.Entry, problem func(string)) []artifact.Artifact {
 	prefix := ""
 	if !entry.SkillDir {
 		prefix = strings.ReplaceAll(filepath.ToSlash(entry.Rel), "/", "-") + "-"
@@ -59,9 +59,9 @@ func keptDirTwins(root string, entry claudesource.Entry, problem func(string)) [
 	return []artifact.Artifact{{Path: filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.Rel))), Kept: &artifact.SourceLink{Path: entry.Path, Target: entry.Target, Prefix: prefix}}}
 }
 
-// keptGlobalCommandTwins preserves both global surfaces of an unresolved command.
-func keptGlobalCommandTwins(home string, entry claudesource.Entry, problem func(string)) []artifact.Artifact {
-	outputs := keptDirTwins(home, entry, problem)
+// keptGlobalCommandArtifacts preserves both global surfaces of an unresolved command.
+func keptGlobalCommandArtifacts(home string, entry claudesource.Entry, problem func(string)) []artifact.Artifact {
+	outputs := keptDirArtifacts(home, entry, problem)
 	if entry.SkillDir {
 		return outputs
 	}

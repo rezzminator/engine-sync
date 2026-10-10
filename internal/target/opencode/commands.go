@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/rewrite"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"io/fs"
@@ -21,6 +22,10 @@ func discoverOpenCodeCommandRoster(
 	for _, entry := range discoverOpenCodeMarkdown(root, problem, dangling, models...) {
 		colon := strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(entry.Rel), ".md"), "/", ":")
 		flat := openCodeFlatName(entry.Rel)
+		if err := paths.ValidateName(flat); err != nil {
+			problem("%s: %v", entry.Path, err)
+			continue
+		}
 		if colon != flat {
 			roster[colon] = "/" + flat
 		}
@@ -56,7 +61,7 @@ func compileOpenCodeCommands(
 	keepDangling := func(path string, err error) {
 		dangling(path, err)
 		name := filepath.Base(path)
-		if sourceLabel != ".claude/commands" || !strings.HasSuffix(name, ".md") || name == "README.md" ||
+		if !strings.HasSuffix(name, ".md") || name == "README.md" ||
 			name == "SKILL.md" {
 			return
 		}
@@ -81,14 +86,14 @@ func compileOpenCodeCommands(
 			if errors.Is(err, fs.ErrNotExist) {
 				dangling(file, err)
 			} else {
-				skip("read %s: %v", file, err)
+				problem("read %s: %v", file, err)
 			}
 			continue
 		}
 		front, body, parseErr := model.Frontmatter(file)
 		fields := front.Fields
 		if parseErr != nil {
-			skip("parse %s: %v", file, parseErr)
+			problem("parse %s: %v", file, parseErr)
 			continue
 		}
 		policy := config.Default()
@@ -98,8 +103,12 @@ func compileOpenCodeCommands(
 		chain := append(rewrite.Builtins(), rewrite.Configured(policy.Rewrites)...)
 		ctx := rewrite.Context{Engine: "opencode", Kind: "command", Source: file, Roster: roster}
 		flat := openCodeFlatName(entry.Rel)
+		if err := paths.ValidateName(flat); err != nil {
+			problem("%s: %v", entry.Path, err)
+			continue
+		}
 		relSource := filepath.ToSlash(filepath.Join(sourceLabel, entry.Rel))
-		content := "---\n# " + generatedMarker(
+		content := "---\n" + artifact.Marker(artifact.YAMLFront,
 			relSource,
 		) + "\ndescription: " + quoteOpenCodeYAML(
 			chain.Apply(strings.TrimSpace(fields["description"]), ctx),

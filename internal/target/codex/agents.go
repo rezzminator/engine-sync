@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/rewrite"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"path/filepath"
@@ -20,47 +22,35 @@ func compileAgents(
 	result *Result,
 ) {
 	options.Kind = "agent"
-	seen := map[string]bool{}
+	seen := map[string]string{}
 	for _, project := range projects {
 		dir := filepath.Join(root, project, ".claude", "agents")
 		for _, entry := range markdownSources(dir, nil, result) {
 			if entry.SkillDir || entry.DirLink {
 				continue
 			}
-			name := strings.TrimSuffix(filepath.Base(entry.Path), ".md")
-			if project != "." {
-				suffix := project
-				switch cfg.SuffixMode {
-				case suffixModeNone:
-					suffix = ""
-				case suffixModeStripPrefix:
-					suffix = strings.TrimPrefix(project, cfg.SuffixPrefix)
-				}
-				if suffix == "" && cfg.SuffixMode != suffixModeNone {
-					problem(
-						fmt.Sprintf("project %s has an empty agent suffix under %s policy", project, cfg.SuffixMode),
-					)
-					continue
-				}
-				if suffix != "" {
-					name += "-" + suffix
-				}
+			base := strings.TrimSuffix(filepath.Base(entry.Path), ".md")
+			name, register, err := claudesource.RoleName(base, project, cfg)
+			if err != nil {
+				problem(fmt.Sprintf("%s: %v", entry.Path, err))
+				continue
 			}
-			if contains(cfg.NeverRegister, strings.TrimSuffix(filepath.Base(entry.Path), ".md")) ||
-				contains(cfg.NeverRegister, name) {
+			if !register {
 				warn("skip agent " + entry.Path + " — never-register policy")
 				continue
 			}
-			if seen[name] {
-				warn("skip agent " + entry.Path + " — name already registered")
+			key := paths.FoldName(strings.ReplaceAll(name, "-", "_"))
+			if previous, ok := seen[key]; ok {
+				problem(fmt.Sprintf("%s role name %s from %s and %s", reconcile.Conflict, name, previous, entry.Path))
 				continue
 			}
-			seen[name] = true
+			seen[key] = entry.Path
+
 			if entry.Target != "" {
-				add(keptTwin(filepath.Join(root, ".codex", "agents", name+".toml"), entry))
+				add(keptArtifact(filepath.Join(root, ".codex", "agents", name+".toml"), entry))
 				continue
 			}
-			_, err := options.Source.Read(entry.Path)
+			_, err = options.Source.Read(entry.Path)
 			if err != nil {
 				problem(fmt.Sprintf("read %s: %v", entry.Path, err))
 				continue
@@ -82,11 +72,15 @@ func compileAgents(
 				warn(fmt.Sprintf("unmapped Codex model alias %q in %s — model omitted", modelAlias, entry.Path))
 			}
 			tomlName := strings.ReplaceAll(name, "-", "_")
-			instructions, _ := config.RenderTemplate(cfg.AgentPreamble, config.TemplateData{Name: tomlName, Engine: "Codex", Source: filepath.ToSlash(rel), Root: "AGENTS.md"})
+			instructions, err := config.RenderTemplate(cfg.AgentPreamble, config.TemplateData{Name: tomlName, Engine: "Codex", Source: filepath.ToSlash(rel), Root: "AGENTS.md"})
+			if err != nil {
+				problem(fmt.Sprintf("render codex.agentPreamble for %s: %v", entry.Path, err))
+				continue
+			}
 			instructions += transformMarkdown(strings.TrimSpace(body), options)
-			toml := "# " + generatedLine(filepath.ToSlash(rel)) + "\n"
+			toml := artifact.Marker(artifact.TOML, filepath.ToSlash(rel)) + "\n"
 			if role.Model != "" {
-				toml += "# tier: " + tomlEscape(role.Model)
+				toml += "# model: " + tomlEscape(role.Model)
 				if modelAlias != "" && modelAlias != role.Model {
 					toml += " (Claude alias: " + tomlEscape(modelAlias) + ")"
 				}
@@ -125,6 +119,13 @@ func codexRoleSettings(fields, modelMap map[string]string, source string) (codex
 		}
 
 		role.Model = mapped
+	}
+	if role.Effort != "" {
+		if mapped, ok := codeReviewEfforts[role.Effort]; ok {
+			role.Effort = mapped
+		} else {
+			return codexRole{}, fmt.Errorf("%s: invalid effort %q", source, role.Effort)
+		}
 	}
 	if override, ok := fields["codex-effort"]; ok {
 		role.Effort = strings.TrimSpace(override)
@@ -185,6 +186,9 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 	if name == "" || description == "" {
 		return "", "", fmt.Errorf("%s: frontmatter needs both name: and description", mdPath)
 	}
+	if err := paths.ValidateName(name); err != nil {
+		return "", "", fmt.Errorf("%s: %w", mdPath, err)
+	}
 	body = strings.TrimSpace(body)
 
 	cfg := config.Default()
@@ -192,7 +196,9 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 		cfg = policies[0]
 	}
 	ctx := rewrite.Context{Engine: "codex", Kind: "agent", Source: mdPath}
-	rules := rewrite.Builtins(rewrite.Func(func(text string, _ rewrite.Context) string { return rewriteCodeReview(text, cfg.Machine.ModelMap) }))
+	rules := rewrite.Builtins(rewrite.Func(func(text string, _ rewrite.Context) string {
+		return rewriteCodeReview(text, cfg.Machine.ModelMap, cfg.Codex.Review)
+	}))
 	description = rules.Apply(description, ctx)
 	rules = append(rules, rewrite.Configured(cfg.Machine.Rewrites)...)
 	rules = append(rules, rewrite.Configured(cfg.Rewrites)...)
@@ -203,7 +209,7 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 		return "", "", err
 	}
 
-	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
+	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir, cfg.Machine.AgentMarkerDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n"
 	if role.Model != "" {
@@ -225,8 +231,12 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 // only ever existed in the engine-sync-owned generated directory. It is deliberately
 // clone-relative — a host-absolute path in a marker says nothing an operator
 // on another machine can act on.
-func globalAgentMarkerSource(mdPath, agentsDir string) string {
-	const relDir = "templates/global/agents/"
+func globalAgentMarkerSource(mdPath, agentsDir string, markers ...string) string {
+	relDir := filepath.Base(agentsDir)
+	if len(markers) > 0 && markers[0] != "" {
+		relDir = markers[0]
+	}
+	relDir = filepath.ToSlash(relDir) + "/"
 	if filepath.Dir(mdPath) == filepath.Clean(agentsDir) {
 		return relDir + filepath.Base(mdPath)
 	}
@@ -236,18 +246,12 @@ func globalAgentMarkerSource(mdPath, agentsDir string) string {
 // globalAgentEscape is for a TOML basic string — build-codex.mjs:151.
 // Only a backslash and a raw quote need neutralising; name/description are
 // always a single frontmatter line, so no literal newline ever reaches it.
-func globalAgentEscape(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	return strings.ReplaceAll(s, `"`, `\"`)
-}
+func globalAgentEscape(s string) string { return tomlEscape(s) }
 
 // globalAgentEscapeMultiline is for a TOML multi-line basic string —
 // build-codex.mjs:153. Only a backslash and a literal triple-quote need
 // neutralising; TOML tolerates a raw newline inside """ ... """.
-func globalAgentEscapeMultiline(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	return strings.ReplaceAll(s, `"""`, `\"\"\"`)
-}
+func globalAgentEscapeMultiline(s string) string { return strings.TrimSuffix(tomlMultiline(s), "\n") }
 
 const claudeInheritModel = "inherit"
 

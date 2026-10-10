@@ -8,10 +8,11 @@ import (
 // agent body, agent description and AGENTS.md passes through.
 func TestTransformMarkdownRewritesCodeReview(t *testing.T) {
 	got := transformMarkdown("Read CLAUDE.md, then `/code-review high`.", TransformOptions{
-		ModelMap:          map[string]string{"opus": "gpt-frontier"},
+		Review:            reviewFixturePolicy,
+		ModelMap:          map[string]string{codeReviewModelAlias: "gpt-frontier"},
 		ReplaceClaudeFile: true,
 	})
-	want := "Read AGENTS.md, then `" + codexReviewShellCommand("gpt-frontier", "high") + "`."
+	want := "Read AGENTS.md, then `" + codexReviewShellCommand("gpt-frontier", "high", reviewFixturePolicy) + "`."
 	if got != want {
 		t.Fatalf("transformMarkdown = %q, want %q", got, want)
 	}

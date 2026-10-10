@@ -1,6 +1,6 @@
 # engine-sync
 
-**Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
+**Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after marked Write/Edit turns**
 
 ## Install
 
@@ -10,14 +10,16 @@
 
 ## What it does
 
-- After a turn that wrote a Claude source (anything under `.claude/`, a `CLAUDE.md`, a `.mcp.json`, a global command), the `Stop` hook rebuilds and checks the Codex mirror (`AGENTS.md`, `.codex/`) and the OpenCode mirror (`.opencode/`). A mirror that fails its check blocks the turn's end, naming the failing stage, so the model repairs it.
-- At session start it rebuilds a mirror a `git pull` left stale, and refreshes the machine-level Codex roles when `~/.config/engine-sync/targets.json` names them.
+- After Write or Edit marks an in-scope Claude source (anything under `.claude/`, a `CLAUDE.md`, a `.mcp.json`, a global command), the `Stop` hook rebuilds and checks the Codex mirror (`AGENTS.md`, `.codex/`) and the OpenCode mirror (`.opencode/`). A mirror that fails its check blocks the turn's end, naming the failing stage, so the model repairs it.
+- At session start it rebuilds a mirror a `git pull` left stale, and refreshes the machine-level Codex roles using the common machine target resolver, including default destinations.
 - A project is in scope when it carries `.claude/engine-sync.json`, the legacy `.claude/codex-build.json`, or a mirror engine-sync generated; every other project is left alone.
 
 ## The binary
 
-Every hook runs `libexec/engine-sync`, a POSIX sh wrapper. It runs `$ENGINE_SYNC_BIN` when that names an executable, else the cached binary for this plugin version under `${ENGINE_SYNC_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/engine-sync}/versions/`, else downloads the release binary and checks it against `libexec/SHA256SUMS`. `bin/engine-sync` beside the cache is a stable path to the newest version the wrapper resolved, for callers outside Claude Code.
+Every hook runs `libexec/engine-sync`, a POSIX sh wrapper. It runs an explicit `$ENGINE_SYNC_BIN` as a child when it names an executable regular file, warns on an unusable override, else adopts a checksum-reverified cached binary for this plugin version under `${ENGINE_SYNC_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/engine-sync}/versions/`, else downloads the release binary and checks it against `libexec/SHA256SUMS`. `bin/engine-sync` beside the cache is a stable path to the newest version the wrapper resolved, for callers outside Claude Code.
 
 Source, design and issues: [github.com/rezzminator/engine-sync](https://github.com/rezzminator/engine-sync).
 
 Built and maintained with [Professor](https://github.com/rezzminator/professor).
+
+Hook children preserve stdin and the wrapper exits zero even after a child failure. Stop validates child JSON. A failed download backs off for 60 seconds, and download locks never wait; PostToolUse has a 20-second bound. When no binary is available, Stop reports that mirrors were not checked and source edits await an equipped turn. Bash-driven source edits need an explicit build/check because the automatic marker matches Write and Edit.

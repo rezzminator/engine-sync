@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"github.com/rezzminator/engine-sync/internal/config"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"path/filepath"
@@ -8,10 +9,17 @@ import (
 	"testing"
 )
 
-var reviewTestModel = defaultConfig().ModelMap[codeReviewModelAlias]
+const (
+	codeReviewModelAlias   = "review-tier"
+	codeReviewPrompt       = "Review only the current task files."
+	codeReviewFlightPrompt = "Review only the selected flight files."
+)
+
+var reviewFixturePolicy = config.Review{ModelAlias: codeReviewModelAlias, DefaultEffort: "low", Prompt: codeReviewPrompt, SlotPrompt: codeReviewFlightPrompt}
+var reviewTestModel = config.Default().Codex.ModelMap[codeReviewModelAlias]
 
 func codexReviewWant(effort string) string {
-	return codexReviewShellCommand(reviewTestModel, effort)
+	return codexReviewShellCommand(reviewTestModel, effort, reviewFixturePolicy)
 }
 
 func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
@@ -64,11 +72,11 @@ func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got := rewriteCodeReview(testCase.in, nil)
+			got := rewriteCodeReview(testCase.in, nil, reviewFixturePolicy)
 			if got != testCase.want {
 				t.Fatalf("rewriteCodeReview(%q) = %q, want %q", testCase.in, got, testCase.want)
 			}
-			if again := rewriteCodeReview(got, nil); again != got {
+			if again := rewriteCodeReview(got, nil, reviewFixturePolicy); again != got {
 				t.Fatalf("rewriteCodeReview is not idempotent: second pass = %q, first = %q", again, got)
 			}
 		})
@@ -81,8 +89,8 @@ func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
 // slot the surrounding prose tells the lander to fill — a baked effort would
 // silently review a 40-file flight at the cheapest tier.
 func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T) {
-	got := rewriteCodeReview("Run `/code-review "+codeReviewSlot+"` over the flight's diff.", nil)
-	want := "Run `" + codexReviewShellCommand(reviewTestModel, codeReviewSlot) + "` over the flight's diff."
+	got := rewriteCodeReview("Run `/code-review "+codeReviewSlot+"` over the flight's diff.", nil, reviewFixturePolicy)
+	want := "Run `" + codexReviewShellCommand(reviewTestModel, codeReviewSlot, reviewFixturePolicy) + "` over the flight's diff."
 	if got != want {
 		t.Fatalf("slot form = %q, want %q", got, want)
 	}
@@ -92,10 +100,10 @@ func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T)
 	if !strings.Contains(got, codeReviewFlightPrompt) || strings.Contains(got, codeReviewPrompt) {
 		t.Fatalf("slot form carries the task-scoped prompt, want the flight-scoped one: %q", got)
 	}
-	if again := rewriteCodeReview(got, nil); again != got {
+	if again := rewriteCodeReview(got, nil, reviewFixturePolicy); again != got {
 		t.Fatalf("slot rewrite is not idempotent: second pass = %q, first = %q", again, got)
 	}
-	level := rewriteCodeReview("/code-review low", nil)
+	level := rewriteCodeReview("/code-review low", nil, reviewFixturePolicy)
 	if !strings.Contains(level, codeReviewPrompt) || strings.Contains(level, codeReviewSlot) {
 		t.Fatalf("a written level must stay task-scoped at a baked effort: %q", level)
 	}
@@ -106,14 +114,14 @@ func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T)
 // fleet prompt, the global-role compiler) still gets the compiler default
 // rather than an empty model codex-cli would reject.
 func TestRewriteCodeReviewReadsTheModelFromTheTierMap(t *testing.T) {
-	got := rewriteCodeReview("/code-review low", map[string]string{codeReviewModelAlias: "gpt-test-model"})
-	if want := codexReviewShellCommand("gpt-test-model", "low"); got != want {
+	got := rewriteCodeReview("/code-review low", map[string]string{codeReviewModelAlias: "gpt-test-model"}, reviewFixturePolicy)
+	if want := codexReviewShellCommand("gpt-test-model", "low", reviewFixturePolicy); got != want {
 		t.Fatalf("rewrite with a mapped tier = %q, want %q", got, want)
 	}
-	if model := codeReviewModel(map[string]string{"sonnet": "other"}); model != reviewTestModel {
+	if model := codeReviewModel(map[string]string{"sonnet": "other"}, reviewFixturePolicy); model != reviewTestModel {
 		t.Fatalf("model for a map without the review alias = %q, want the compiler default %q", model, reviewTestModel)
 	}
-	if got := rewriteCodeReview("/code-review low", nil); strings.Contains(got, "review_model=") || strings.Contains(got, "-c model=") {
+	if got := rewriteCodeReview("/code-review low", nil, reviewFixturePolicy); strings.Contains(got, "review_model=") || strings.Contains(got, "-c model=") {
 		t.Fatalf("neutral review pinned a model: %s", got)
 	}
 }
@@ -136,7 +144,7 @@ func TestCompiledCommandFrontmatterStaysParseableAroundTheReview(t *testing.T) {
 		filepath.Join(root, ".claude", "commands", "folded.md"),
 		"---\ndescription: >-\n  Lands it; closes\n  with /code-review high.\n---\n\nBody.\n",
 	)
-	if result, err := RunProject(Options{Root: root, Home: home, Mode: ModeBuild}); err != nil || !result.OK {
+	if result, err := RunProject(Options{Root: root, Home: home, Mode: ModeBuild, Config: func() *config.Config { c := config.Default(); c.Codex.Review = reviewFixturePolicy; return &c }()}); err != nil || !result.OK {
 		t.Fatalf("build: result=%#v err=%v", result, err)
 	}
 	for _, command := range []struct{ name, effort string }{{"quoted", "low"}, {"folded", "high"}} {
@@ -162,8 +170,21 @@ func TestCompiledCommandFrontmatterStaysParseableAroundTheReview(t *testing.T) {
 // review. The composed prompt itself is pfm's (its fleet-prompt package
 // asserts the composed bytes); this pins the rewrite those bytes go through.
 func TestCodeReviewFixtureTailMapsToTheShellReview(t *testing.T) {
-	mapped := rewriteCodeReview("- Your last step is `"+codeReviewCommand+" low` over your own change.\n", nil)
+	mapped := rewriteCodeReview("- Your last step is `"+codeReviewCommand+" low` over your own change.\n", nil, reviewFixturePolicy)
 	if strings.Contains(mapped, codeReviewCommand) || !strings.Contains(mapped, codexReviewWant("low")) {
 		t.Fatalf("the compose-time mapping left a fixture tail unmapped:\n%s", mapped)
+	}
+}
+
+func TestReviewNeutralAndConfiguredPolicy(t *testing.T) {
+	if got := rewriteCodeReview("/code-review", nil); got != "codex review" {
+		t.Errorf("default policy carries scope: %s", got)
+	}
+	cfg := config.Default()
+	cfg.Codex.Review = config.Review{ModelAlias: "review-tier", DefaultEffort: "low", Prompt: "Review own changed files.", SlotPrompt: "Review the selected set."}
+	cfg.Machine.ModelMap["review-tier"] = "sample-model"
+	_, text, err := renderGlobalAgentTOML("reader.md", "---\nname: reader\ndescription: Reads.\n---\n/code-review\n", "agents", cfg)
+	if err != nil || !strings.Contains(text, "sample-model") || !strings.Contains(text, "Review own changed files.") {
+		t.Errorf("policy not restored: %s %v", text, err)
 	}
 }

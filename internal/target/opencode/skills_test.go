@@ -62,3 +62,22 @@ func TestSymlinkedGlobalCommandsAndCycle(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewDanglingSkillKeepsItsMirror(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	skill := filepath.Join(root, ".claude", "skills", "sample")
+	writeOpenCodeFixture(t, filepath.Join(skill, "SKILL.md"), "---\ndescription: Sample.\n---\nSample.\n")
+	if result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild}); err != nil || !result.OK {
+		t.Fatalf("seed=%#v %v", result, err)
+	}
+	if err := os.RemoveAll(skill); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../missing-skill", skill); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if _, readErr := os.Lstat(filepath.Join(root, ".opencode", "skills", "sample")); readErr != nil || err != nil || !result.OK {
+		t.Fatalf("dangling source erased mirror: result=%#v error=%v lstat=%v", result, err, readErr)
+	}
+}

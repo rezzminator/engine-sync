@@ -5,12 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/artifact"
-	"github.com/rezzminator/engine-sync/internal/atomicfile"
-	"io"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"syscall"
 )
 
 type GlobalRoleInstalled struct {
@@ -32,30 +29,14 @@ var ErrGlobalRoleNotRegular = errors.New("not a regular file — Codex refuses t
 // descriptor. A caller that used os.ReadFile instead would follow the symlink,
 // read the bytes Codex never sees, and certify a role that cannot spawn.
 func ReadGlobalRoleFile(path string) ([]byte, error) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		// O_NOFOLLOW on a symlink is ELOOP on both supported platforms;
-		// surface it as the refusal it is rather than a raw errno.
-		if errors.Is(err, syscall.ELOOP) {
-			return nil, fmt.Errorf("open %s: %w", path, ErrGlobalRoleNotRegular)
-		}
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	// The read is the whole purpose; a close error on a read-only descriptor
-	// tells the caller nothing it can act on, so it is deliberately dropped.
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat %s: %w", path, err)
+	info, e := os.Lstat(path)
+	if e != nil {
+		return nil, fmt.Errorf("inspect %s: %w", path, e)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("inspect %s: %w", path, ErrGlobalRoleNotRegular)
 	}
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	return content, nil
+	return paths.ReadRegular(path)
 }
 
 // GlobalRoleState is the on-disk shape found at one desired role file,
@@ -98,17 +79,19 @@ func ClassifyGlobalRole(target string, want []byte, ownedLinkDirs []string) (Glo
 			return "", "", fmt.Errorf("read symlink %s: %w", target, readErr)
 		}
 		resolved := ResolveLink(target, raw)
-		for _, dir := range ownedLinkDirs {
-			if WithinLinkRoot(resolved, dir) {
-				return GlobalRoleOwnedLink, resolved, nil
-			}
+		owned, e := Claimable(target, nil)
+		if e != nil {
+			return "", "", e
+		}
+		if owned {
+			return GlobalRoleOwnedLink, resolved, nil
 		}
 		return GlobalRoleForeign, resolved, nil
 	}
 	if !info.Mode().IsRegular() {
 		return GlobalRoleForeign, "", nil
 	}
-	found, err := os.ReadFile(target)
+	found, err := ReadGlobalRoleFile(target)
 	if err != nil {
 		return "", "", fmt.Errorf("read %s: %w", target, err)
 	}
@@ -119,36 +102,6 @@ func ClassifyGlobalRole(target string, want []byte, ownedLinkDirs []string) (Glo
 		return GlobalRoleCurrent, "", nil
 	}
 	return GlobalRoleStale, "", nil
-}
-
-// ApplyGlobalRole performs the filesystem change ClassifyGlobalRole's state
-// recommends. Current and Foreign are both no-ops — the first because nothing
-// is wrong, the second because a role engine-sync does not own is never touched.
-// Missing, Stale and OwnedLink all end the same way: whatever is there is
-// cleared and the compiled bytes are written as a regular file.
-func ApplyGlobalRole(target string, content []byte, state GlobalRoleState) error {
-	switch state {
-	case GlobalRoleCurrent, GlobalRoleForeign:
-		return nil
-	case GlobalRoleMissing, GlobalRoleStale:
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
-		}
-		// Remove first: a symlink left in place would be followed by
-		// os.WriteFile, writing through to the link's target and leaving the
-		// registry entry a symlink Codex still refuses.
-		if state != GlobalRoleMissing {
-			if err := os.Remove(target); err != nil {
-				return fmt.Errorf("remove %s: %w", target, err)
-			}
-		}
-		if err := atomicfile.Write(target, content, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", target, err)
-		}
-		return nil
-	default:
-		return fmt.Errorf("apply global role %s: unknown state %q", target, state)
-	}
 }
 
 // Describe renders the one operator-facing line every caller shows for a

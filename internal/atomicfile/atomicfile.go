@@ -21,8 +21,7 @@ var removeScratch = os.Remove
 // Write replaces path with content in one rename: a scratch file beside path
 // (".<name>.tmp-*", so the rename never crosses a filesystem) is written, given
 // mode's permission bits, synced and closed, then renamed over path. A missing
-// parent directory is created 0o700; a caller that wants a wider directory
-// creates it first.
+// parent directory is created 0o755; existing directory modes are preserved.
 func Write(path string, content []byte, mode fs.FileMode) (err error) {
 	return publish(path, mode, func(scratch *os.File) error {
 		_, err := scratch.Write(content)
@@ -70,7 +69,7 @@ func WriteFrom(path string, r io.Reader, mode fs.FileMode, limit int64) (written
 // path; any failure removes the scratch and leaves path as it was.
 func publish(path string, mode fs.FileMode, fill func(*os.File) error, exclusive ...bool) (err error) {
 	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return fmt.Errorf("write %s: create directory: %w", path, err)
 	}
 	scratch, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
@@ -110,12 +109,22 @@ func publish(path string, mode fs.FileMode, fill func(*os.File) error, exclusive
 			return fmt.Errorf("create %s: remove scratch: %w", path, err)
 		}
 		published = true
-		return nil
+		return syncDirectory(directory)
 	}
 	if err := os.Rename(scratchPath, path); err != nil {
 		return fmt.Errorf("write %s: replace: %w", path, err)
 	}
 	published = true
+	return syncDirectory(directory)
+}
+func syncDirectory(directory string) error {
+	d, err := os.Open(directory)
+	if err != nil {
+		return fmt.Errorf("sync directory %s: %w", directory, err)
+	}
+	if err := errors.Join(d.Sync(), d.Close()); err != nil {
+		return fmt.Errorf("sync directory %s: %w", directory, err)
+	}
 	return nil
 }
 
@@ -123,7 +132,7 @@ func publish(path string, mode fs.FileMode, fill func(*os.File) error, exclusive
 // cleanup. The file is never published over a durable target, so it needs no
 // rename or directory sync.
 func WriteScratch(directory, pattern string, content []byte) (path string, cleanup func(), err error) {
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", nil, fmt.Errorf("create scratch directory %s: %w", directory, err)
 	}
 	file, err := os.CreateTemp(directory, pattern)
@@ -158,7 +167,16 @@ func Symlink(target, path string) error {
 		}
 		return err
 	}
-	return nil
+	return syncDirectory(filepath.Dir(path))
 }
 
-func Move(from, to string) error { return os.Rename(from, to) }
+func Move(from, to string) error {
+	if err := os.Rename(from, to); err != nil {
+		return err
+	}
+	err := syncDirectory(filepath.Dir(to))
+	if filepath.Dir(from) != filepath.Dir(to) {
+		err = errors.Join(err, syncDirectory(filepath.Dir(from)))
+	}
+	return err
+}

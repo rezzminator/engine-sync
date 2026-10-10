@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"io"
-	"os"
 )
 
 func runConfig(args []string, stdout, stderr io.Writer, e env) int {
@@ -14,7 +13,8 @@ func runConfig(args []string, stdout, stderr io.Writer, e env) int {
 		return 2
 	}
 	if args[0] == "schema" {
-		if len(args) != 1 {
+		if len(args) != 1 && !(len(args) == 2 && args[1] == "--json") {
+			fmt.Fprintln(stderr, "usage: engine-sync config schema [--json]")
 			return 2
 		}
 		_, err := stdout.Write(config.Schema())
@@ -25,6 +25,7 @@ func runConfig(args []string, stdout, stderr io.Writer, e env) int {
 		return 0
 	}
 	if args[0] != "show" && args[0] != "validate" {
+		fmt.Fprintln(stderr, "usage: engine-sync config show|validate|schema [--json] [root]")
 		return 2
 	}
 	flags := NewFlagSet("config", "usage: engine-sync config show|validate [--json] [root]", stderr)
@@ -36,10 +37,7 @@ func runConfig(args []string, stdout, stderr io.Writer, e env) int {
 	if len(rest) > 1 {
 		return 2
 	}
-	root, err := os.Getwd()
-	if len(rest) == 1 {
-		root = rest[0]
-	}
+	root, err := repoRoot(rest, e)
 	home, homeErr := e.home()
 	if err == nil {
 		err = homeErr

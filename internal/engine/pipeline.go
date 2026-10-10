@@ -6,6 +6,8 @@ import (
 	"github.com/rezzminator/engine-sync/internal/diag"
 	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/source"
+	"path/filepath"
+	"strings"
 )
 
 // Execute runs every target and scope through the same artifact and diagnostic stages.
@@ -37,14 +39,30 @@ func Execute(p source.Project, cfg config.Config, mode reconcile.Mode,
 	if mode == reconcile.Build && len(result.Problems) > 0 {
 		return result, false
 	}
-	reconciled := reconcile.Run(artifacts, mode, roots(p, cfg))
+	managed := roots(p, cfg)
+	for i := range managed {
+		if managed[i].Boundary != "" {
+			continue
+		}
+		managed[i].Boundary = p.Root
+		if p.Scope == source.MachineScope || !pathWithin(p.Root, managed[i].Path) {
+			managed[i].Boundary = p.Home
+			for _, base := range append(append([]string{}, p.CodexHomes...), p.ClaudeConfigDirs...) {
+				if pathWithin(base, managed[i].Path) {
+					managed[i].Boundary = base
+					break
+				}
+			}
+		}
+	}
+	reconciled := reconcile.Run(artifacts, mode, managed)
 	result.Warnings = append(result.Warnings, reconciled.Warnings...)
 	result.Problems = append(result.Problems, reconciled.Problems...)
 	result.Rebuildable = reconciled.Rebuildable
 	result.Wrote, result.Unchanged, result.Deleted = reconciled.Wrote, reconciled.Unchanged, reconciled.Deleted
 	result.Actions = reconciled.Actions
 	if mode != reconcile.Build {
-		existing, problems := reconcile.Inspect(roots(p, cfg), artifacts)
+		existing, problems := reconcile.Inspect(managed, artifacts)
 		result.Problems = append(result.Problems, problems...)
 		for _, d := range validate(existing) {
 			if d.Severity == diag.Warning {
@@ -55,4 +73,9 @@ func Execute(p source.Project, cfg config.Config, mode reconcile.Mode,
 		}
 	}
 	return result, len(result.Problems) == 0
+}
+
+func pathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

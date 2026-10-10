@@ -4,16 +4,33 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+### Added
+
+- One cached source model, rewrite chain, target registry and artifact reconciler serve project and machine scopes. Added `plan`, `--engine`, build-only `--dry-run`, `config show|validate|schema`, JSON Schema, permanent goldens and mechanical tree gates with pinned staticcheck and Claude Code validation.
+- Configurable machine source/marker directories, command rosters and Codex review model, effort and scope prompts; the standalone defaults contain no integrator protocol or layout. Project and machine policy report their provenance.
+
 ### Changed
 
-- Development builds report `0.2.0-alpha` so a released binary refuses their roots as `NEWER-WRITER`.
-- One source model, rewrite chain, target registry and artifact reconciler serve project and machine scopes. Added `plan`, `--engine`, `--dry-run`, `config show|validate|schema`, tracked JSON Schema, permanent goldens and mechanical tree gates with pinned staticcheck.
+- Unmapped Codex models warn and omit the model pin; configure a model map to retain a pin. The historical agent-name sandbox exemption is removed: use explicit `codex-sandbox: inherit` when write access is intended. Removing `.mcp.json` removes its managed MCP fence while preserving hand-written keeper content.
+- Layered OpenCode permission patterns retain denies from either layer; a deny wins equal-pattern conflicts and more specific patterns follow broad rules. Missing policies and empty rule sets deny access. Project `bash` entries no longer erase machine git-write denies.
+- Codex keeper MCP regions retain the unbranded legacy script fence syntax readable by 0.1.0 on a fresh machine; the immediately preceding development fence remains accepted for migration.
+- Download locks recover dead owners immediately and expire after 120 seconds. Unavailable hooks save a project-scoped deferred refresh; the next equipped hook in that project runs SessionStart recovery. Hook children are bounded and Stop notices include busy-lock details.
 
-- Standalone defaults for both engines and global roles; project policy lives in validated `.claude/engine-sync.json`, in symmetric `codex` and `opencode` sections, with one-release compatibility for the previous Codex configuration file.
-- Native ordered OpenCode permissions and per-agent overrides, configurable preambles, root-file mirrors, MCP server knowledge and workbench markers. Machine policy lives beside targets in `config.json`; doctor reports the source of each resolved value. Global agent stores and retirements are machine-only settings; literal `rewrites` support engine and artifact scopes.
-- Global roles default to the Claude configuration directory. `codex agents` accepts `--source-repo`; `codex-sandbox` frontmatter controls sandbox exceptions for any role name.
-- Generated markers and rebuild hints name engine-sync; rebuilding recognizes and migrates existing owned mirrors.
-- Checks inspect only generated surfaces and native configuration files, leaving unrelated engine-home files alone. Inspection skips sockets, FIFOs and devices while reporting regular-file read and directory-walk errors.
+- Development builds report `0.2.0-alpha`; the version gate requires a prerelease newer than the plugin manifest. Release builds and four native CI jobs execute assets to verify the reported version matches their names.
+- Neutral model maps, adapters, agent preambles, MCP knowledge, retirement lists and generated-store defaults replace integrator-specific defaults. Configure previous values to retain their bytes; changed defaults intentionally alter unconfigured mirrors.
+- Global commands render only from machine sources and policy, under machine guards, including during project builds. One resolver selects explicit homes, CODEX_HOME, targets, configured homes and defaults; an explicit empty roster disables Codex homes.
+- Configured Go agent-preamble templates now interpolate fields; legacy root adapters retain literal shell-style placeholders. Project command references also use the configured machine roster, so known global slash commands translate in project bodies. Dotted filenames are preserved instead of being mistaken for commands.
+- Native OpenCode model pins and reserved permission keys are quoted; absent policies and empty permission rule sets deny access. Agent names, suffixes and exclusions are shared across engines, with full Unicode case/NFC collision checks and path validation. Codex effort aliases map max/ultra to xhigh; TOML control characters are escaped.
+- Codex model comments say `model` instead of `tier`. Unresolvable-source notices say `output kept`. Generated markers and rebuild hints name engine-sync; JSONC markers identify configuration and MCP sources. Complete historical headers remain recognized.
+- Native ordered OpenCode permissions and agent overrides come from configuration. Lower bare actions survive as leading wildcard rules, JSONC preserves user keys, and a missing command description warns per file. BOM, CRLF and spaced frontmatter fences are parsed; malformed or non-UTF-8 sources fail visibly.
+- Generated ownership requires a complete header or a recorded link receipt. Unproven copies and hand-made aliases are preserved, including historical links whose location alone does not prove ownership. Garbage collection preserves foreign children, scratch files and unresolvable outputs. New parents use 0755; keeper modes and contained keeper links survive updates. Replacing changed generated content emits a notice.
+- Source reads are limited to 8 MiB and ownership reads to a header; special files fail before open. Canonical bounded roots, ancestor checks, bounded hook locks and partial-write records prevent escapes and repeated obsolete writes.
+- The wrapper rechecks cached checksums, backs off downloads, serializes stable-link changes, preserves stdin, rejects invalid Stop JSON and always exits zero for hooks. Dirty flags remain durable throughout Stop stages and concurrent edits survive flag cleanup.
+
+### Fixed
+
+- Multi-home retargeting, machine doctor/installer disagreement, silent write/config/discovery errors, invalid dry-run success, contradictory usage and ownership diagnostics, output collisions, template failures, and release/gate producer errors. Baselines may only shrink, including ordinary CI checks; empty enumerations and missing publication inputs report ERROR.
+- Dead duplicate CLI/config/reconcile adapters and their tests were removed; surviving OpenCode CLI tests use the production route. Documentation now states current scope, recovery, byte changes and the checks actually enforced.
 
 ## [0.1.0] - 2026-10-09
 

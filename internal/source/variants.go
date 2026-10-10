@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -59,8 +60,8 @@ func LoadGlobalAgentVariants(agentsDir, outputDir string, registry ...string) ([
 			declPath = filepath.Join(agentsDir, declPath)
 		}
 	}
-	raw, err := os.ReadFile(declPath)
-	if errors.Is(err, fs.ErrNotExist) {
+	raw, err := paths.ReadRegular(declPath)
+	if errors.Is(err, fs.ErrNotExist) && (len(registry) == 0 || registry[0] == "") {
 		return nil, nil
 	}
 	if err != nil {
@@ -122,11 +123,15 @@ func LoadGlobalAgentVariants(agentsDir, outputDir string, registry ...string) ([
 			)
 		}
 		sourcePath := filepath.Join(agentsDir, from+".md")
-		source, err := os.ReadFile(sourcePath)
+		source, err := paths.ReadRegular(sourcePath)
 		if err != nil {
 			return nil, fmt.Errorf("%s: variant %q: read source agent: %w", declPath, name, err)
 		}
-		content, err := RenderVariant(string(source), name, "templates/global/agents/"+from+".md + "+GlobalAgentVariantsFile, overrides, swaps)
+		markerDir := filepath.Base(agentsDir)
+		if len(registry) > 1 && registry[1] != "" {
+			markerDir = registry[1]
+		}
+		content, err := RenderVariant(string(source), name, filepath.ToSlash(filepath.Join(markerDir, from+".md"))+" + "+filepath.Base(declPath), overrides, swaps)
 		if err != nil {
 			return nil, fmt.Errorf("%s: variant %q from %s: %w", declPath, name, sourcePath, err)
 		}

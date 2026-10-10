@@ -15,8 +15,9 @@ func TestMachineRoleRepairPublishesRegularFile(t *testing.T) {
 	if err != nil || state != reconcile.GlobalRoleMissing {
 		t.Fatal(state, err)
 	}
-	if err := reconcile.ApplyGlobalRole(path, content, state); err != nil {
-		t.Fatal(err)
+	result := reconcile.Run([]artifact.Artifact{{Path: path, Content: content}}, reconcile.Build, []artifact.Root{{Path: filepath.Dir(path)}})
+	if len(result.Problems) > 0 {
+		t.Fatal(result.Problems)
 	}
 	got, err := reconcile.ReadGlobalRoleFile(path)
 	if err != nil || string(got) != string(content) {

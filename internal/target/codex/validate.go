@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"fmt"
 	"github.com/BurntSushi/toml"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"regexp"
@@ -9,19 +10,46 @@ import (
 )
 
 func tomlEscape(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	value = strings.ReplaceAll(value, "\r", `\r`)
-	return strings.ReplaceAll(value, "\n", `\n`)
-}
-
-func tomlMultiline(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"""`, `\"\"\"`)
-	if !strings.HasSuffix(value, "\n") {
-		value += "\n"
+	var out strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\\':
+			out.WriteString(`\\`)
+		case '"':
+			out.WriteString(`\"`)
+		case '\r':
+			out.WriteString(`\r`)
+		case '\n':
+			out.WriteString(`\n`)
+		case '\t':
+			out.WriteString(`\t`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&out, `\u%04X`, r)
+			} else {
+				out.WriteRune(r)
+			}
+		}
 	}
-	return value
+	return out.String()
+}
+func tomlMultiline(value string) string {
+	var out strings.Builder
+	for _, r := range value {
+		switch {
+		case r == '\\':
+			out.WriteString(`\\`)
+		case (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f:
+			fmt.Fprintf(&out, `\u%04X`, r)
+		default:
+			out.WriteRune(r)
+		}
+	}
+	result := strings.ReplaceAll(out.String(), `"""`, `\"\"\"`)
+	if !strings.HasSuffix(result, "\n") {
+		result += "\n"
+	}
+	return result
 }
 
 func tomlKey(key string) string {

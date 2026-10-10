@@ -9,10 +9,6 @@ func generatedHeader(source string) string {
 	return artifact.Marker(artifact.Markdown, source)
 }
 
-func generatedLine(source string) string {
-	return artifact.Line(source)
-}
-
 func compileSourceMarkdown(source string, options TransformOptions, problem func(string)) (string, bool) {
 	raw, err := options.Source.Read(source)
 	if err != nil {

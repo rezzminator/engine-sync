@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"github.com/rezzminator/engine-sync/internal/artifact"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"path/filepath"
 )
@@ -15,7 +16,12 @@ func compileOpenCodeSkills(
 ) {
 	dir := filepath.Join(root, ".claude", "skills")
 	for _, entry := range model.SkillsIn(dir, openCodeReporter(problem, dangling)) {
+		if err := paths.ValidateName(entry.Rel); err != nil {
+			problem("%s: %v", entry.Path, err)
+			continue
+		}
 		if entry.Target != "" {
+			add(artifact.Artifact{Path: filepath.Join(root, ".opencode", "skills", entry.Rel), Kept: &artifact.SourceLink{Path: entry.Path, Target: entry.Target}})
 			continue
 		}
 		dst := filepath.Join(root, ".opencode", "skills", entry.Rel)

@@ -3,21 +3,29 @@
 import os, pathlib, subprocess, tempfile, shutil
 script=pathlib.Path(__file__).with_name('check-tree.py').resolve()
 ids=['size-src','size-test','size-cmd','negation-dirs','doc-go','test-mirror','testjail','dup-functions','facade-write','facade-env','facade-exec','facade-marker','facade-frontmatter','spelling-professor','spelling-states','registry-parity','orientation-truth','publication']
-base=pathlib.Path('/tmp/engine-sync/p2');base.mkdir(parents=True,exist_ok=True)
+base=pathlib.Path(os.environ.get('TMPDIR','/tmp'));base.mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory(prefix='tree-tests-',dir=base) as tmp:
+ from tree_test_fixture import git_enumerator
+ git_enumerator(tmp)
  root=pathlib.Path(tmp)
  def put(p,s):
   f=root/p;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(s);return f
  for check in ids:
   case=root/check;case.mkdir();r=root;root=case
   for name in ids:put('scripts/baselines/'+name+'.txt','')
+  put('internal/fixture/doc.go','// Package fixture seeds a complete enumeration.\npackage fixture\n')
+  put('cmd/engine-sync/main.go','// Package main is the fixture command.\npackage main\n')
+  put('cmd/engine-sync/main_test.go','package main\n')
+  put('internal/cli/main.go','// Package cli runs the fixture.\npackage cli\nvar Version = "1.1.0-alpha"\n')
+  put('internal/cli/main_test.go','package cli\n')
+  put('plugins/engine-sync/.claude-plugin/plugin.json','{"version":"1.0.0"}')
   binary=put('schema','#\x21/bin/sh\nprintf \'{}\\n\'\n');binary.chmod(0o755);put('docs/engine-sync.schema.json','{}\n')
   env=dict(os.environ);terms=put('terms','fixture-private-token\n');env['LEAK_TERMS']=str(terms)
   if check=='size-src':put('internal/unit/big.go','package unit\n'+'\n'*511)
   elif check=='size-test':put('internal/unit/big_test.go','package unit\n'+'\n'*911)
   elif check=='size-cmd':
    for n in range(3):put(f'cmd/engine-sync/part{n}.go','package main\n'+'\n'*301)
-  elif check=='negation-dirs':(root/'internal/helpers').mkdir(parents=True)
+  elif check=='negation-dirs':put('internal/helpers/plant.go','package helpers\n')
   elif check=='doc-go':put('internal/unit/unit.go','package unit\n')
   elif check=='test-mirror':put('internal/unit/unit.go','// Package unit compiles fixtures.\npackage unit\n')
   elif check=='testjail':put('internal/unit/unit_test.go','package unit\nfunc TestScratch(){ t.TempDir() }\n')
@@ -29,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='tree-tests-',dir=base) as tmp:
   elif check=='spelling-professor':put('internal/unit/unit.go','package unit\nconst name = "professor"\n')
   elif check=='spelling-states':put('internal/unit/unit.go','package unit\nconst state = "STALE"\n')
   elif check=='registry-parity':
-   put('internal/cli/main.go','package cli\nvar commands = []entry{{"build", run}}\n');put('README.md','## Commands\n\n| `check` | Check |\n');put('docs/interface.md','## Commands\n\n| `build` | Build |\n')
+   put('internal/cli/main.go','// Package cli runs the fixture.\npackage cli\nvar Version = "1.1.0-alpha"\nvar commands = []entry{{"build", run}}\n');put('README.md','## Commands\n\n| `check` | Check |\n');put('docs/interface.md','## Commands\n\n| `build` | Build |\n')
   elif check=='orientation-truth':put('CLAUDE.md','Read `internal/absent/file.go`.\n')
   elif check=='publication':put('scripts/leak-check.sh','echo "fixture:1"; echo "leak-check: FAILED — 1 hit(s)"; exit 1\n')
   done=subprocess.run(['python3',str(script),'--root',str(root),'--only',check,'--binary',str(binary)],env=env,text=True,capture_output=True)

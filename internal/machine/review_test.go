@@ -15,7 +15,7 @@ const codeReviewCommand = "/code-review"
 var reviewTestModel = fixtureMachinePolicy().Codex.ModelMap["opus"]
 
 func machineReviewWant(effort string) string {
-	return codex.ReviewShellCommand(reviewTestModel, effort)
+	return codex.ReviewShellCommand(reviewTestModel, effort, fixtureMachinePolicy().Codex.Review)
 }
 
 // Door 2 for the lander's own road: a machine-global role compiled by
@@ -25,11 +25,11 @@ func TestCompiledGlobalRoleCarriesTheFlightScopedReview(t *testing.T) {
 	home := testjail.Scratch(t)
 	writeAgentFixture(
 		t,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "gate.md"),
+		filepath.Join(home, "source-repo", "agents", "gate.md"),
 		"---\nname: gate\ndescription: Gates one flight.\ntools: Read\nmodel: opus\n---\n\n"+
 			"Run `/code-review "+codeReviewSlot+"` over the flight's diff.\n",
 	)
-	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home}); err != nil {
+	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home}); err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
 	path := filepath.Join(filepath.Join(home, ".codex", "agents"), "gate.toml")
@@ -37,7 +37,7 @@ func TestCompiledGlobalRoleCarriesTheFlightScopedReview(t *testing.T) {
 	if strings.Contains(got, codeReviewCommand) {
 		t.Fatalf("%s still spells %s:\n%s", path, codeReviewCommand, got)
 	}
-	want := codex.ReviewShellCommand(reviewTestModel, codeReviewSlot)
+	want := codex.ReviewShellCommand(reviewTestModel, codeReviewSlot, fixtureMachinePolicy().Codex.Review)
 	escaped := strings.ReplaceAll(want, `"`, `\"`)
 	if !strings.Contains(got, want) && !strings.Contains(got, escaped) {
 		t.Fatalf("%s carries no flight-scoped review at the effort slot:\n%s", path, got)
@@ -68,7 +68,7 @@ func TestEveryCompiledCodexArtifactCarriesTheShellReview(t *testing.T) {
 	)
 	writeAgentFixture(
 		t,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "gamma.md"),
+		filepath.Join(home, "source-repo", "agents", "gamma.md"),
 		"---\nname: gamma\ndescription: Global role; reviews with /code-review low.\ntools: Read\nmodel: sonnet\n"+
 			"---\n\nClose with `/code-review xhigh`.\n",
 	)
@@ -76,7 +76,7 @@ func TestEveryCompiledCodexArtifactCarriesTheShellReview(t *testing.T) {
 	if result, err := codex.RunProject(codex.Options{Root: root, Home: home, Mode: codex.ModeBuild, Config: &policy}); err != nil || !result.OK {
 		t.Fatalf("build: result=%#v err=%v", result, err)
 	}
-	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home}); err != nil {
+	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home}); err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
 	cases := []struct {

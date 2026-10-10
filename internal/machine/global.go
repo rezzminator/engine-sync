@@ -71,15 +71,6 @@ func (r *run) add(verb, message, path string) {
 func (r *run) ok(message string)   { r.add(VerbOK, message, "") }
 func (r *run) skip(message string) { r.add(VerbSkip, message, "") }
 
-// change lists one write and, under an apply, performs it.
-func (r *run) change(message string, action func() error) error {
-	r.add(VerbChange, message, "")
-	if r.options.Plan || action == nil {
-		return nil
-	}
-	return action()
-}
-
 // retire removes one file or link engine-sync's installer would have retired: a real
 // directory is refused, an absent path is nothing to do.
 func (r *run) retire(path, reason string) error {
@@ -90,16 +81,27 @@ func (r *run) retire(path, reason string) error {
 	if err != nil {
 		return fmt.Errorf("inspect %s: %w", path, err)
 	}
-	if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("refuse to retire directory %s", path)
+	_ = info
+	owned, e := reconciler.Claimable(path, nil)
+	if e != nil {
+		return e
 	}
-	r.add(VerbRetire, "retire "+path+" ("+reason+")", path)
-	if r.options.Plan {
+	if !owned {
+		r.skip(path + " is not engine-sync owned; preserved")
 		return nil
 	}
-	if err := reconciler.Remove(path); err != nil {
-		return fmt.Errorf("retire %s: %w", path, err)
+	mode := reconciler.Build
+	if r.options.Plan {
+		mode = reconciler.Plan
 	}
+	retired := reconciler.RetireOwned(path, mode, r.retirementBoundary(path))
+	for _, a := range retired.Actions {
+		r.add(VerbRetire, "retire "+a.Path+" ("+reason+")", a.Path)
+	}
+	if len(planBlockers(retired.Problems)) > 0 {
+		return fmt.Errorf("retire %s: %s", path, strings.Join(retired.Problems, "; "))
+	}
+
 	return nil
 }
 
@@ -138,9 +140,12 @@ func RunMachine(options Options) Report {
 		return r.report
 	}
 	r.policy = *cfg
-	steps := []func() error{r.retireRenamedCodexAgents, r.wireAgents, r.globalCommands}
+	if options.Uninstall && len(r.options.CodexHomes) == 0 {
+		r.options.CodexHomes = []string{filepath.Join(options.Home, ".codex")}
+	}
+	steps := []func() error{r.retireRenamedCodexAgents, r.wireAgents, r.globalCommands, r.openCodeCommands}
 	if options.Uninstall {
-		steps = []func() error{r.globalCommands, r.unwireGeneratedAgents}
+		steps = []func() error{r.globalCommands, r.openCodeCommands, r.unwireGeneratedAgents}
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
@@ -179,22 +184,22 @@ func (r *run) wireAgents() error {
 	if err != nil {
 		return fmt.Errorf("plan engine-sync codex agents: %w", err)
 	}
-	for _, action := range plan.Actions {
-		message := action.Kind + " " + action.Path
-		if action.Target != "" {
-			message += " -> " + action.Target
+	if r.options.Plan {
+		for _, action := range plan.Actions {
+			message := action.Kind + " " + action.Path
+			if action.Target != "" {
+				message += " -> " + action.Target
+			}
+			r.add(VerbChange, message, "")
 		}
-		r.add(VerbChange, message, "")
 	}
 	for _, warning := range plan.Warnings {
 		r.skip(warning)
 	}
 	for _, problem := range plan.Problems {
-		r.skip(problem)
+		r.add(VerbConflict, problem, "")
 	}
-	if err := r.retireOrphanCodexRoles(plan.Roles); err != nil {
-		return err
-	}
+
 	if err := r.retireOrphanGlobalAgents(plan.Installed); err != nil {
 		return err
 	}
@@ -207,24 +212,17 @@ func (r *run) wireAgents() error {
 	if err != nil {
 		return fmt.Errorf("run engine-sync codex agents: %w", err)
 	}
-	r.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
-	return nil
-}
-
-// retireOrphanCodexRoles retires every generated role in a Codex registry
-// whose name no current source declares.
-func (r *run) retireOrphanCodexRoles(roles []GlobalRoleInstalled) error {
-	keep := make(map[string]bool, len(roles))
-	for _, role := range roles {
-		keep[strings.TrimSuffix(filepath.Base(role.Path), ".toml")] = true
-	}
-	generated := filepath.Join(r.options.Home, r.policy.Machine.LegacyCodexAgentsDir)
-	legacyDir := source.AgentsDirectory(r.options.Home, r.options.SourceRepo, r.policy)
-	for _, codexHome := range r.codexHomes() {
-		if err := r.retireCodexRoles(filepath.Join(codexHome, "agents"), generated, legacyDir, keep); err != nil {
-			return err
+	for _, action := range result.Actions {
+		message := action.Kind + " " + action.Path
+		if action.Target != "" {
+			message += " -> " + action.Target
 		}
+		r.add(VerbChange, message, "")
 	}
+	if len(result.Problems) > 0 {
+		return fmt.Errorf("global agents: %s", strings.Join(result.Problems, "; "))
+	}
+	r.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
 	return nil
 }
 
@@ -246,7 +244,8 @@ func (r *run) retireCodexRoles(registry, generated, legacyDir string, keep map[s
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("inspect Codex global agent %s: %w", path, err)
+			r.skip(fmt.Sprintf("inspect Codex global agent %s: %v; preserved", path, err))
+			continue
 		}
 		owned := false
 		switch {
@@ -263,7 +262,8 @@ func (r *run) retireCodexRoles(registry, generated, legacyDir string, keep map[s
 		case info.Mode().IsRegular():
 			content, err := codex.ReadGlobalRoleFile(path)
 			if err != nil {
-				return fmt.Errorf("inspect Codex global agent %s: %w", path, err)
+				r.skip(fmt.Sprintf("inspect Codex global agent %s: %v; preserved", path, err))
+				continue
 			}
 			owned = codex.GeneratedGlobalRole(content)
 		}
@@ -351,7 +351,7 @@ func (r *run) retireRenamedCodexAgents() error {
 	for _, home := range r.codexHomes() {
 		for _, name := range r.policy.Machine.RetiredAgents {
 			path := filepath.Join(home, "agents", name+".toml")
-			content, err := os.ReadFile(path)
+			content, err := codex.ReadGlobalRoleFile(path)
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
@@ -373,74 +373,6 @@ func (r *run) retireRenamedCodexAgents() error {
 // globalCommands mirrors {source home}/.claude/commands into {home}/.codex
 // (prompts and skills), then retires configured files and their backups;
 // uninstall compiles from an empty source, so it only ever retires.
-func (r *run) globalCommands() error {
-	if len(r.codexHomes()) == 0 && !r.options.Uninstall {
-		r.skip("no Codex accounts configured — command mirror has nothing to write")
-		r.skip("no Codex accounts configured — agent mirror has nothing to write")
-		return nil
-	}
-	sourceHome := r.options.SourceHome
-
-	homes := r.codexHomes()
-	if r.options.Uninstall && len(homes) == 0 {
-		homes = []string{filepath.Join(r.options.Home, ".codex")}
-	}
-	commands := codex.GlobalCommandsOptions{Config: &r.policy, Home: r.options.Home, SourceHome: sourceHome, Uninstall: r.options.Uninstall, CodexHomes: homes, Mode: codex.ModeCheck}
-	plan, err := codex.RunGlobalCommands(commands)
-	if err != nil {
-		return fmt.Errorf("plan Codex global commands: %w", err)
-	}
-	for _, action := range plan.Actions {
-		message := action.Kind + " " + action.Path
-		if action.Target != "" {
-			message += " -> " + action.Target
-		}
-		r.add(VerbChange, message, "")
-	}
-	if blockers := planBlockers(plan.Problems); len(blockers) != 0 {
-		for _, blocker := range blockers {
-			r.add(VerbConflict, blocker, "")
-		}
-		if r.options.Plan {
-			// The conflict events clear OK; the plan goes on listing.
-			return r.retireConfiguredFiles()
-		}
-		return fmt.Errorf("reconcile Codex global commands: %s", strings.Join(blockers, "; "))
-	}
-	if !r.options.Plan {
-		commands.Mode = codex.ModeBuild
-		result, err := codex.RunGlobalCommands(commands)
-		if err != nil {
-			return fmt.Errorf("reconcile Codex global commands: %w", err)
-		}
-		if !result.OK {
-			return fmt.Errorf("reconcile Codex global commands: %s", strings.Join(result.Problems, "; "))
-		}
-		r.ok(fmt.Sprintf(
-			"Codex global commands wrote=%d unchanged=%d deleted=%d", result.Wrote, result.Unchanged, result.Deleted,
-		))
-	}
-	if r.options.Uninstall {
-		return nil
-	}
-	return r.retireConfiguredFiles()
-}
-
-// planBlockers keeps the problems a build cannot repair: a missing, stale or
-// orphaned mirror file is what the build is for.
-func planBlockers(problems []string) []string {
-	blockers := make([]string, 0)
-	for _, problem := range problems {
-		if strings.HasPrefix(problem, string(reconciler.Missing)+" ") || strings.HasPrefix(problem, string(reconciler.Stale)+" ") ||
-			strings.HasPrefix(problem, string(reconciler.Orphan)+" ") {
-			continue
-		}
-		blockers = append(blockers, problem)
-	}
-	return blockers
-}
-
-// retireConfiguredFiles retires each configured path and its timestamped backups.
 func (r *run) retireConfiguredFiles() error {
 	for _, rel := range r.policy.Machine.RetiredFiles {
 		target := filepath.Join(r.options.Home, filepath.FromSlash(rel))
@@ -463,6 +395,31 @@ func (r *run) retireConfiguredFiles() error {
 // unwireGeneratedAgents is uninstall's half: the rendered variant store, every
 // generated role in every Codex home, and the retired generated role store.
 func (r *run) unwireGeneratedAgents() error {
+	for _, dir := range r.claudeConfigDirs() {
+		entries, e := os.ReadDir(filepath.Join(dir, "agents"))
+		if e != nil && !errors.Is(e, fs.ErrNotExist) {
+			return e
+		}
+		for _, entry := range entries {
+			path := filepath.Join(dir, "agents", entry.Name())
+			info, e := os.Lstat(path)
+			if e != nil {
+				return e
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				owned, e := reconciler.Claimable(path, nil)
+				if e != nil {
+					return e
+				}
+				if owned {
+					if e := r.retire(path, "uninstall created Claude agent link"); e != nil {
+						return e
+					}
+				}
+			}
+		}
+	}
+
 	if err := r.removeDir(filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir), "generated Claude agents directory"); err != nil {
 		return err
 	}
@@ -482,14 +439,29 @@ func (r *run) removeDir(dir, label string) error {
 	} else if err != nil {
 		return fmt.Errorf("inspect %s %s: %w", label, dir, err)
 	}
-	return r.change("remove "+dir, func() error {
-		if err := reconciler.RemoveAll(dir); err != nil {
-			return fmt.Errorf("remove %s %s: %w", label, dir, err)
-		}
-		return nil
-	})
+	mode := reconciler.Build
+	if r.options.Plan {
+		mode = reconciler.Plan
+	}
+	result := reconciler.RetireOwned(dir, mode, r.retirementBoundary(dir))
+	for _, a := range result.Actions {
+		r.add(VerbRetire, "retire "+a.Path+" ("+label+")", a.Path)
+	}
+	if len(planBlockers(result.Problems)) > 0 {
+		return fmt.Errorf("retire %s: %s", dir, strings.Join(result.Problems, "; "))
+	}
+	return nil
 }
 
 func within(target, dir string) bool {
 	return target == dir || strings.HasPrefix(target, dir+string(filepath.Separator))
+}
+
+func (r *run) retirementBoundary(path string) string {
+	for _, root := range append([]string{r.options.Home}, append(r.codexHomes(), r.claudeConfigDirs()...)...) {
+		if within(path, root) {
+			return root
+		}
+	}
+	return filepath.Dir(path)
 }

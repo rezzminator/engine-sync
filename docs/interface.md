@@ -15,7 +15,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 
 ## Binary and exits
 
-Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync 0.1.0`.
+Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.2.0-alpha` for development, the plugin manifest version for release assets.
 
 Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error. Hooks preserve the hook protocol described below. `--json` prints exactly one stdout object for exits 0 and 1; usage errors print no JSON. Legacy-config deprecation notices go to stderr even with `--json`.
 
@@ -45,7 +45,7 @@ Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error
 
 Repeatable Codex flags are `--model`, `--exclude-dir`, `--exclude-project`, `--never-register`. Flags may precede or follow the positional root. Both engines run even if the first fails; `doctor` runs Codex check then OpenCode doctor.
 
-Without an explicit root, resolve the nearest ancestor holding `.claude/engine-sync.json`, the environment workbench marker or `.git`, else the first regular `CLAUDE.md`. A workbench suppresses global command writes and is excluded from its parent's project discovery. `ENGINE_SYNC_WORKBENCH_MARKER` overrides the resolved marker.
+Without an explicit root, resolve the nearest ancestor holding `.claude/engine-sync.json`, the configured workbench marker, `.git`, or a regular `CLAUDE.md`. A workbench suppresses global command writes and is excluded from its parent's project discovery. `ENGINE_SYNC_WORKBENCH_MARKER` overrides the resolved marker.
 
 Project JSON result:
 
@@ -55,15 +55,13 @@ Project JSON result:
 
 Project commands also accept `--engine codex|opencode`; the neutral selection runs every target in the registry. `build --dry-run` runs the same read-only plan as `plan`. Plan exits 0 for repairable findings, 1 for conflicts or invalid artifacts, and 2 for usage errors. Plan JSON adds `actions`, an array of `{ "kind": "write|link|delete", "path": "…", "target": "…" }`; target is omitted when empty. Doctor JSON adds `configSources`, an array of `{ "key": "…", "value": "…", "source": "…" }`, and human doctor prints `CONFIG` rows. The existing result fields stay present.
 
-Project commands also accept `--engine codex|opencode`; the neutral selection runs every target in the registry. `build --dry-run` runs the same read-only plan as `plan`. Plan exits 0 for repairable findings, 1 for conflicts or invalid artifacts, and 2 for usage errors. Plan JSON adds `actions`, an array of `{ "kind": "write|link|delete", "path": "…", "target": "…" }`; target is omitted when empty. Doctor JSON adds `configSources`, an array of `{ "key": "…", "value": "…", "source": "…" }`, and human doctor prints `CONFIG` rows. The existing result fields stay present.
-
 `rebuildable` is the multiset subset of `problems` that build repairs. `error` is a run failure, with `ok` false.
 
 ## Policy resolution and schemas
 
-One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission` and each `opencode.agent.{name}.permission`, tools merge by name, and a layer that names a tool replaces that tool's whole ordered rule set in place, keeping tool order: a project adding one `bash` rule restates every `bash` rule it keeps. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
+One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission` and each `opencode.agent.{name}.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`; the release remains `0.1.0`.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.2.0-alpha`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .
@@ -76,40 +74,47 @@ engine-sync config schema
 | Key | Neutral default | Meaning |
 | --- | --- | --- |
 | `version` | `1` | Required in each file. |
-| `codex.globalCommands` | `true` |  |
+| `commandDirs` | `[]` | Additional project-relative command source directories. |
+| `codex.review.modelAlias` | `""` | Review model alias; empty inherits the engine model. |
+| `codex.review.defaultEffort` | `""` | Effort for a bare review invocation; empty inherits. |
+| `codex.review.prompt` | `""` | Optional review scope prompt. |
+| `codex.review.slotPrompt` | `""` | Optional scope prompt for the effort slot. |
+| `machine.sourceAgentsDir` | `"agents"` | Agents directory relative to an explicit source repository. |
+| `machine.agentMarkerDir` | `""` | Marker source directory; empty derives from the source. |
+| `codex.globalCommands` | `true` | Include machine Claude commands in the project mirror. |
 | `codex.modelMap` | `{}` | Unmapped aliases warn; roles omit model and inherit the engine default. |
-| `codex.rootAdapter` | `Go template (text below)` |  |
-| `codex.agentPreamble` | `Go template (text below)` |  |
-| `codex.excludeDirs` | `[]` |  |
+| `codex.rootAdapter` | `Go template (text below)` | Go template appended to the generated root orientation. |
+| `codex.agentPreamble` | `Go template (text below)` | Go template prepended to project role instructions. |
+| `codex.excludeDirs` | `[]` | Source command subtrees excluded from discovery. |
 | `codex.projects` | `Automatic discovery` | Omitted: discover children; explicit empty list: root only. |
-| `codex.excludeProjects` | `[]` |  |
-| `codex.neverRegister` | `[]` |  |
-| `codex.suffixMode` | `"project"` |  |
-| `codex.suffixPrefix` | `""` |  |
+| `codex.excludeProjects` | `[]` | Child project names excluded from automatic discovery. |
+| `codex.neverRegister` | `[]` | Role basenames omitted from native role registration. |
+| `codex.suffixMode` | `"project"` | Role naming: project, none, or strip-prefix. |
+| `codex.suffixPrefix` | `""` | Prefix removed in strip-prefix mode. |
 | `opencode.modelMap` | `{}` | Unmapped aliases warn; roles omit model. |
-| `opencode.agentPreamble` | `Go template (text below)` |  |
-| `opencode.permission` | `{"*":"allow"}` | Native action or ordered tool rules; preserve pattern order (last match wins). |
+| `opencode.agentPreamble` | `Go template (text below)` | Go template prepended to OpenCode role instructions. |
+| `opencode.permission` | `"deny"` | Native action or ordered tool rules; preserve pattern order (last match wins). |
 | `opencode.agent` | `{}` | Overrides keyed by agent name, each with a native `permission` value. |
-| `opencode.mirrorFiles` | `[]` |  |
-| `workbenchMarker` | `""` |  |
-| `mcp.globalServers` | `[]` |  |
-| `mcp.renamed` | `{}` |  |
+| `opencode.mirrorFiles` | `[]` | Root-relative regular files mirrored into .opencode. |
+| `workbenchMarker` | `""` | Optional root-relative workbench marker; empty disables it. |
+| `mcp.globalServers` | `[]` | Additional machine-level MCP server names available to roles. |
+| `mcp.renamed` | `{}` | Old server name to current server name; project-local old names remain valid. |
 | `rewrites` | `[]` | Ordered literal rules; lists replace between layers. |
-| `machine.modelMap` | `{}` |  |
+| `machine.modelMap` | `{}` | Alias to native Codex model for machine roles. |
 | `machine.claudeAgentsDir` | `{Claude config dir}/agents` | Defaults to the resolved Claude config directory plus `/agents`; home-relative or absolute. |
-| `machine.legacyCodexAgentsDir` | `".local/state/engine-sync/generated/codex-agents"` |  |
-| `machine.retiredAgents` | `[]` |  |
+| `machine.legacyCodexAgentsDir` | `".local/state/engine-sync/generated/codex-agents"` | Home-relative owned store retired during migration. |
+| `machine.retiredAgents` | `[]` | Obsolete machine role names retired from owned registries. |
 | `machine.retiredFiles` | `[]` | Home-relative paths, including backups; configured retired skill paths suppress model-invocable command skills. |
 | `machine.rewrites` | `[]` | Ordered rules applied at machine scope. |
 | `machine.codexHomes` | `[]` | Unconfigured: environment/default Codex home; configured empty list: no homes. |
 | `machine.variants` | `""` | Optional variants declaration, absolute or relative to the agents source directory; empty uses `variants.json`. |
 | `machine.generatedAgentsDir` | `".local/state/engine-sync/generated/claude-agents"` | Home-relative generated variant store; separate from source agents. |
 
-Adapters and preambles use Go `text/template` fields `{{.Name}}`, `{{.Engine}}` (`Codex` or `OpenCode`), `{{.Source}}`, and `{{.Root}}` (`AGENTS.md`). Unknown fields and malformed templates fail at entry. Legacy `${name}` is converted by the loader with one deprecation notice. The neutral preamble is shared by both targets:
+Adapters and preambles use Go `text/template` fields `{{.Name}}`, `{{.Engine}}` (`Codex` or `OpenCode`), `{{.Source}}`, and `{{.Root}}` (`AGENTS.md`). Unknown fields and malformed templates fail at entry. Legacy `${name}` in a preamble is converted with one deprecation notice; in `codex.rootAdapter` it remains literal for compatibility. The neutral preamble is shared by both targets:
 
 ```text
 You are the {{.Name}} role in this repository, running as a native {{.Engine}} subagent.
-First action: read the repository root {{.Root}} in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.
+Read the repository root {{.Root}} before starting your task.
 ```
 
 The neutral root adapter is:
@@ -134,9 +139,9 @@ A machine example:
 {"version":1,"machine":{"claudeAgentsDir":".claude/agents","generatedAgentsDir":".local/state/engine-sync/generated/claude-agents","legacyCodexAgentsDir":".local/state/engine-sync/generated/codex-agents","codexHomes":["/example/codex"],"modelMap":{"smart":"example-model"},"retiredAgents":["old-reader"],"retiredFiles":[".codex/skills/old-workflow"],"variants":"variants.json","rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"old protocol","replace":"current protocol"}]}}
 ```
 
-Global roles use the Claude configuration directory by default; `--source-repo R` selects `R/templates/global/agents/`. Agent frontmatter `codex-model`, `codex-effort`, and `codex-sandbox` override role settings. Sandbox accepts `inherit`, `read-only`, or `workspace-write`; otherwise a tools list without write tools selects read-only. No role name has special treatment.
+Global roles use the Claude configuration directory by default; `--source-repo R` selects `R/{machine.sourceAgentsDir}/`. Agent frontmatter `codex-model`, `codex-effort`, and `codex-sandbox` override role settings. Sandbox accepts `inherit`, `read-only`, or `workspace-write`; otherwise a tools list without Write, Edit, MultiEdit or NotebookEdit selects read-only; Bash alone does not declare write intent. Use `codex-sandbox: inherit` for a role that writes through Bash. No role name has special treatment.
 
-All generated markers and rebuild hints name `engine-sync build`. Previous markers remain ownership evidence; rebuilding migrates owned mirrors in place and preserves unmarked foreign files.
+Generated file markers and rebuild hints name `engine-sync build`. MCP regions retain the unbranded legacy script fence understood by 0.1.0, including on a machine without writer records. Complete historical ownership headers remain evidence; partial marker phrases do not claim a file; rebuilding migrates owned mirrors in place and preserves unmarked foreign files.
 
 ## Global commands
 
@@ -148,7 +153,7 @@ engine-sync doctor --machine [--home H] [--source-repo R] [--claude-config-dir C
                             [--codex-home X]… [--claude-absent] [--json]
 ```
 
-Global role sources default to `machine.claudeAgentsDir`, whose neutral value is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/` for all three commands. Explicit `--source-repo R` selects `R/templates/global/agents/`; targets may select the repository for `global` and machine doctor. Global commands resolve only the machine policy file; a source repository supplies templates, never project policy. `--home` defaults to `$HOME`.
+Global role sources default to `machine.claudeAgentsDir`, whose neutral value is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/` for all three commands. Explicit `--source-repo R` selects `R/{machine.sourceAgentsDir}/`; targets may select the repository for `global` and machine doctor. Global commands resolve only the machine policy file; a source repository supplies templates, never project policy. `--home` defaults to `$HOME`.
 
 `global` plans or applies role TOMLs, rendered variants, Claude agent links, retirements and the global command mirror. Codex role TOMLs are marker-owned regular files: Codex refuses symlinked roles. A source already in its destination Claude registry stays a regular file. With no source directory, global reports a skip; doctor names `NO-SOURCES` without clone-specific wording.
 
@@ -178,21 +183,21 @@ OpenCode agent frontmatter accepts `opencode-model` as an explicit native model 
 
 ## Generated ownership
 
-Current markers are rendered by `internal/artifact/marker.go`: `Generated by engine-sync from {source} — edit the source, then run: engine-sync build`. Markdown uses an HTML comment, TOML and YAML frontmatter use `#`, and JSONC uses `//`. Codex MCP fences begin `# BEGIN mcp_servers — generated by engine-sync from .mcp.json — edit the source, then run: engine-sync build` and end `# END mcp_servers — generated`.
+Current markers are rendered by `internal/artifact/marker.go`: `Generated by engine-sync from {source} — edit the source, then run: engine-sync build`. Markdown uses an HTML comment, TOML and YAML frontmatter use `#`, and JSONC uses `//`. Codex MCP fences begin `# BEGIN mcp_servers — generated by .claude/scripts/build-codex.mjs from .mcp.json; do not edit inside this fence` and end `# END mcp_servers — generated`.
 
-The old `Generated by pfm codex build`, `Generated by pfm opencode build`, and `.claude/scripts/build-{codex,opencode}.mjs` markers remain ownership evidence. Old Codex MCP begin fences are recognized and replaced too. Global role ownership is anchored to its first line. Rebuild migrates old owned files in place; unmarked foreign files remain conflicts.
+Complete historical compiler headers remain ownership evidence; a quoted or partial marker does not. Links require a receipt proving engine-sync created that exact link; location or byte equality alone does not establish ownership. Old Codex MCP begin fences are recognized and replaced too. Global role ownership is anchored to its first line. Rebuild migrates old owned files in place; unmarked foreign files remain conflicts.
 
 Writer records and locks live under `{engine-sync state}/writers/`. A root written by a newer binary refuses an older writer with `NEWER-WRITER`. Global writes use the `global:{home}` root.
 
 ## Claude hooks
 
-`hook claude mark|stop|start` reads a hook JSON payload on stdin. Scope is a project having a new or legacy configuration, or an output carrying a recognized generated marker. Every hook exits 0; runtime failures appear in diagnostics or the hook response.
+`hook claude mark|stop|start` reads a hook JSON payload on stdin. Scope is a project having a new or legacy configuration, or an output carrying a recognized generated marker. Registered hooks and the wrapper exit 0; direct CLI usage errors exit 2; runtime failures appear in diagnostics or the hook response.
 
-`mark` handles `tool_input.file_path` under a `.claude` directory, a `CLAUDE.md`, a `.mcp.json`, or the home's global commands. Root is `$CLAUDE_PROJECT_DIR`, else the file's Git superproject or toplevel. It sets `{engine-sync state}/dirty/{project}-{key}`.
+`mark` handles `tool_input.file_path` under a `.claude` directory, a `CLAUDE.md`, a `.mcp.json`, or the home's global commands. Root is the physical session root for sources inside it, otherwise the edited file's nearest configured marker, `.git`, or regular `CLAUDE.md`. A second project is marked independently; HOME and its ancestors are refused. It sets `{engine-sync state}/dirty/{project}-{key}`.
 
-`stop` claims a dirty flag and runs Codex build, Codex check, OpenCode build, OpenCode check. Success clears only the claimed flag, preserving concurrent marks. Failure retains dirtiness and prints `{"decision":"block","reason":"…"}`; with `stop_hook_active`, prints `{"systemMessage":"…"}`. Reasons name the failed stages, binary and neutral repair commands.
+`stop` keeps its dirty flag durable while running build/check for each registered target. Success clears only the unchanged generation, under the dirty-store lock, preserving concurrent marks and process termination. Failure retains dirtiness and prints `{"decision":"block","reason":"…"}`; with `stop_hook_active`, prints `{"systemMessage":"…"}`. Reasons name the failed stages, binary and neutral repair commands.
 
-`start` checks and repairs stale project mirrors and refreshes machine targets when present. The plugin wrapper's unavailable-binary Stop response is a `systemMessage`; dirty flags remain.
+`start` checks and repairs stale project mirrors and refreshes the common machine roster, including defaults. The wrapper runs hook binaries as children, preserves stdin and always exits zero. Child failure or invalid Stop JSON yields a named diagnostic and a Stop `systemMessage`. An unavailable binary reports that mirrors were not checked; it makes no claim that a dirty flag exists. Unavailable hooks save a deferred refresh for the physical session root; the next equipped hook in that project runs SessionStart recovery before handling its payload. Hook children terminate within 16 seconds. Failed downloads back off for 60 seconds; dead download owners and locks older than 120 seconds are reclaimed without waiting. Hook writer-lock waits are bounded to 250 ms and report BUSY without blocking the turn.
 
 ## Environment
 
@@ -207,3 +212,11 @@ Writer records and locks live under `{engine-sync state}/writers/`. A root writt
 | `CODEX_HOME` | Default machine Codex target when absolute |
 | `CLAUDE_PROJECT_DIR` | Hook project root |
 | `HOME` | Default source/output home |
+
+## Recovery
+
+A NEWER-WRITER refusal names the binary and version last admitted to the canonical root. Use that binary or a newer compatible build. Development is newer than the published plugin; a released plugin cannot safely take over its roots. Writer records are proof, so removing them is an operator decision after confirming that a downgrade can consume the current format.
+
+A conflict preserves the named file or link. Move a foreign output aside only after inspecting it. Keeper symlinks are retained; a fenced region is edited through a link only when its target stays inside the managed root. Garbage collection removes marker-owned files or recorded links, then empty directories; remaining foreign children are a conflict in plan as well as build. Source reads require regular files and are bounded to 8 MiB; ownership probes read at most 4 KiB.
+
+Machine destination precedence is explicit roster flags (including an empty roster), absolute CODEX_HOME, targets.json, explicitly configured machine.codexHomes (including []), then the default Codex home. An explicit roster permits recovery past a broken targets file. Unknown or duplicate keys and relative registry paths are errors. Doctor, global, agents and SessionStart share this resolver and the writer guard. Home OpenCode commands are machine outputs under their own shared destination guard. Project policy never renders or collects those outputs.

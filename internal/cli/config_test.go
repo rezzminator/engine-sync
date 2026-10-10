@@ -46,7 +46,7 @@ func TestUnifiedConfigEntryValidation(t *testing.T) {
 					}
 					return ""
 				}}
-				commands := [][]string{{"build", root}, {"opencode", "build", root}, {"doctor", root}, {"hook", "claude", "mark"}}
+				commands := [][]string{{"build", root}, {"opencode", "build", root}, {"doctor", root}}
 				if layer == "machine" {
 					commands = append(commands, []string{"global", "--source-repo", root, "--plan"}, []string{"doctor", "--machine"}, []string{"codex", "agents"})
 				}

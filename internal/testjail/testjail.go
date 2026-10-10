@@ -37,20 +37,7 @@ func RunTests(m *testing.M) int {
 // canonicalBase is a short temp root with every symlink resolved (macOS's
 // /tmp is /private/tmp): a test comparing a path it built with one a tool
 // printed sees the same spelling.
-func canonicalBase() (string, error) {
-	if err := os.MkdirAll("/tmp/engine-sync/p2", 0700); err != nil {
-		return "", err
-	}
-	base, err := filepath.EvalSymlinks("/tmp/engine-sync/p2")
-	if err == nil {
-		return base, nil
-	}
-	fallback, fallbackErr := filepath.EvalSymlinks(os.TempDir())
-	if fallbackErr != nil {
-		return "", errors.Join(err, fallbackErr)
-	}
-	return fallback, nil
-}
+func canonicalBase() (string, error) { return filepath.EvalSymlinks(os.TempDir()) }
 
 func runJailedTests(tests func() int, base string) int {
 	realHome, err := paths.Home()

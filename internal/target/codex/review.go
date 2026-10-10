@@ -1,52 +1,22 @@
 package codex
 
 import (
+	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/rewrite"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"slices"
 	"strings"
 )
 
-// Claude's /code-review is a BUILT-IN skill, so swapCommands — which only
-// knows the command roster it discovered — passes it through untouched. A
-// Codex seat that reads the untouched spelling has no such command and falls
-// through to Codex's own /review, which reviews the whole branch diff against
-// the base branch at the seat's own tier: one flight paid 103M tokens over 38
-// such threads where a review scoped to the task's own files costs ~2.6M. So
-// every door that hands Claude-authored prompt text to Codex rewrites the
-// invocation into the shell command below.
-//
-// The scope lives in the PROMPT because codex-cli (0.154.0) refuses
-// --uncommitted, --base and --commit alongside a prompt ("cannot be used with
-// '[PROMPT]'") — a scoped review is prompt-only.
+// Review policy supplies the scope, model alias and default effort. Explicit
+// invocation levels are translated even when the integration sets no policy.
 const (
-	codeReviewCommand = "/code-review"
-	// codeReviewModelAlias is the Claude tier whose Codex model the review
-	// runs on. The model itself is read from the tier map, never spelled a
-	// second time here.
-	codeReviewModelAlias = "opus"
-	codeReviewPrompt     = "Review the uncommitted changes only in your task's own files (name them, space " +
-		"separated). Ignore every other path. Report correctness bugs only, most severe first."
-	// codeReviewSlot is the second source form: written in place of a level, it
-	// says the caller decides both the scope and the effort at run time. The
-	// flight lander is its one caller — it sizes the effort from the diff it is
-	// about to review, so a level baked at compile time would review a whole
-	// flight at whatever tier the prompt happened to spell.
-	codeReviewSlot = "{effort}"
-	// codeReviewFlightPrompt is the slot form's scope: the whole flight's diff,
-	// which spans every task's files, against codeReviewPrompt's one task.
-	codeReviewFlightPrompt = "Review the uncommitted changes only in the flight's files (name them, space " +
-		"separated). Ignore every other path. Report correctness bugs only, most severe first."
-	// codeReviewBareEffort is what a bare /code-review — no level written
-	// after it — runs at: the cheapest, which is what the fleet's own prompts
-	// ask for wherever they do name a level.
+	codeReviewCommand    = "/code-review"
+	codeReviewSlot       = "{effort}"
 	codeReviewBareEffort = "low"
-	// codeReviewTopEffort is the highest effort codex-cli accepts.
-	codeReviewTopEffort = "xhigh"
-	// codexMediumEffort and codexHighEffort are the two codex-cli efforts
-	// between the bare and the top one.
-	codexMediumEffort = "medium"
-	codexHighEffort   = "high"
+	codeReviewTopEffort  = "xhigh"
+	codexMediumEffort    = "medium"
+	codexHighEffort      = "high"
 )
 
 // codeReviewEfforts maps the level written after /code-review onto Codex's
@@ -74,13 +44,14 @@ var codeReviewFlags = []string{"--fix", "--comment", "--post", "--no-post"}
 // rewriteCodeReview replaces every /code-review invocation in text with the
 // Codex shell review command, leaving the prose around it exactly as it was.
 // modelMap is the compiler's tier map; a caller with no config of its own (the
-// fleet prompt, the global-role compiler) passes nil and gets the same model a
+// root prompt, the global-role compiler) passes nil and gets the same model a
 // project build emits.
-func rewriteCodeReview(text string, modelMap map[string]string) string {
+func rewriteCodeReview(text string, modelMap map[string]string, policies ...config.Review) string {
+	policy := reviewPolicy(policies)
 	if !strings.Contains(text, codeReviewCommand) {
 		return text
 	}
-	model := codeReviewModel(modelMap)
+	model := codeReviewModel(modelMap, policy)
 	var out strings.Builder
 	for index := 0; index < len(text); {
 		width, effort, ok := codeReviewInvocationAt(text, index)
@@ -89,7 +60,10 @@ func rewriteCodeReview(text string, modelMap map[string]string) string {
 			index++
 			continue
 		}
-		out.WriteString(codexReviewShellCommand(model, effort))
+		if effort == "" {
+			effort = policy.DefaultEffort
+		}
+		out.WriteString(codexReviewShellCommand(model, effort, policy))
 		index += width
 	}
 	return out.String()
@@ -103,7 +77,7 @@ func rewriteCodeReview(text string, modelMap map[string]string) string {
 // whole command down instead of cheapening one review. A plain scalar and the
 // indented lines of a block scalar take the text as it is — neither gives a
 // quote any meaning, and the replacement carries no ": " or " #" either.
-func rewriteCodeReviewFrontmatter(text string, modelMap map[string]string) string {
+func rewriteCodeReviewFrontmatter(text string, modelMap map[string]string, policies ...config.Review) string {
 	if !strings.Contains(text, codeReviewCommand) {
 		return text
 	}
@@ -114,7 +88,7 @@ func rewriteCodeReviewFrontmatter(text string, modelMap map[string]string) strin
 		}
 		match := claudesource.ScalarField(line)
 		if len(match) != 3 || !isQuotedYAMLScalar(match[2]) {
-			lines[index] = rewriteCodeReview(line, modelMap)
+			lines[index] = rewriteCodeReview(line, modelMap, policies...)
 			continue
 		}
 		value, err := claudesource.UnquoteScalar(match[2])
@@ -125,7 +99,7 @@ func rewriteCodeReviewFrontmatter(text string, modelMap map[string]string) strin
 			// decode would produce YAML nobody can read back.
 			continue
 		}
-		lines[index] = match[1] + ": " + singleQuotedYAMLScalar(rewriteCodeReview(value, modelMap))
+		lines[index] = match[1] + ": " + singleQuotedYAMLScalar(rewriteCodeReview(value, modelMap, policies...))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -155,7 +129,7 @@ func codeReviewInvocationAt(text string, index int) (int, string, bool) {
 	if index+width < len(text) && isCommandSuffixChar(text[index+width]) {
 		return 0, "", false
 	}
-	effort := codeReviewBareEffort
+	effort := ""
 	if strings.HasPrefix(text[index+width:], " "+codeReviewSlot) {
 		// The slot is not a word codeReviewWord can read — it opens with a
 		// brace — and it is not a level, so it never enters codeReviewEfforts.
@@ -195,35 +169,40 @@ func codeReviewWord(rest string) (string, bool) {
 	return word[:end], true
 }
 
-// codeReviewModel is the Codex model the review runs on: the tier map's entry
-// for the review alias. A map that does not carry the alias falls back to the
-// compiler's own defaults rather than emitting an empty model, which codex-cli
-// would reject at parse time.
-func codeReviewModel(modelMap map[string]string) string {
-	if model := strings.TrimSpace(modelMap[codeReviewModelAlias]); model != "" {
-		return model
+func reviewPolicy(policies []config.Review) config.Review {
+	if len(policies) > 0 {
+		return policies[0]
 	}
-	return ""
+	return config.Review{}
 }
-
-// codexReviewShellCommand is the one spelling of the replacement: a
-// prompt-only `codex review` pinned to the review model and effort. The effort
-// carries the scope: the slot form emits the flight-scoped prompt and keeps the
-// slot in model_reasoning_effort, so the reader fills both at run time.
-func codexReviewShellCommand(model, effort string) string {
-	prompt := codeReviewPrompt
+func codeReviewModel(models map[string]string, policy config.Review) string {
+	return strings.TrimSpace(models[policy.ModelAlias])
+}
+func shellDoubleQuote(value string) string {
+	value = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`").Replace(value)
+	return `"` + value + `"`
+}
+func codexReviewShellCommand(model, effort string, policies ...config.Review) string {
+	policy := reviewPolicy(policies)
+	prompt := policy.Prompt
 	if effort == codeReviewSlot {
-		prompt = codeReviewFlightPrompt
+		prompt = policy.SlotPrompt
 	}
-	if model == "" {
-		return `codex review -c model_reasoning_effort="` + effort + `" "` + prompt + `"`
+	command := "codex review"
+	if model != "" {
+		command += " -c model=" + shellDoubleQuote(model) + " -c review_model=" + shellDoubleQuote(model)
 	}
-	return `codex review -c model="` + model + `" -c review_model="` + model +
-		`" -c model_reasoning_effort="` + effort + `" "` + prompt + `"`
+	if effort != "" {
+		command += " -c model_reasoning_effort=" + shellDoubleQuote(effort)
+	}
+	if prompt != "" {
+		command += " " + shellDoubleQuote(prompt)
+	}
+	return command
 }
-
-func ReviewShellCommand(model, effort string) string { return codexReviewShellCommand(model, effort) }
-
-func RewriteReview(text string, models map[string]string) string {
-	return rewriteCodeReview(text, models)
+func ReviewShellCommand(model, effort string, policies ...config.Review) string {
+	return codexReviewShellCommand(model, effort, policies...)
+}
+func RewriteReview(text string, models map[string]string, policies ...config.Review) string {
+	return rewriteCodeReview(text, models, policies...)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"path/filepath"
 	"sort"
@@ -28,7 +29,7 @@ func compileConfigWithSource(model *claudesource.Project, root string, add func(
 		if len(raw) > 0 {
 			var object map[string]json.RawMessage
 			if err := json.Unmarshal(parseOpenCodeJSONC(raw), &object); err != nil {
-				warnings = append(warnings, fmt.Sprintf("unparseable %s (%v) — regenerating from sources; adopter keys could not be preserved", path, err))
+				return nil, nil, []string{fmt.Sprintf("%s %s (%v) — preserved; repair JSONC before rebuilding", reconcile.Unparseable, path, err)}
 			}
 			for key, value := range object {
 				if key != "$schema" && key != "permission" && key != "mcp" {
@@ -44,7 +45,7 @@ func compileConfigWithSource(model *claudesource.Project, root string, add func(
 func serializeOpenCodeConfig(extra map[string]json.RawMessage, mcp map[string]any, hasMCP bool, policies ...config.OpenCode) string {
 	var body bytes.Buffer
 	body.WriteString(
-		artifact.Marker(artifact.JSONC, "engine-sync opencode build + .mcp.json") + "\n",
+		artifact.Marker(artifact.JSONC, "configuration + .mcp.json") + "\n",
 	)
 	body.WriteString("// Sources: this compiler owns $schema, permission, and mcp. Other keys survive regeneration.\n")
 	body.WriteString("{\n  \"$schema\": \"https://opencode.ai/config.json\"")
@@ -90,37 +91,77 @@ func quoteOpenCodeJSON(value string) string {
 func quoteOpenCodeYAML(value string) string { return quoteOpenCodeJSON(value) }
 
 func parseOpenCodeJSONC(raw []byte) []byte {
-	var out bytes.Buffer
-	inString, escaped := false, false
+	out := make([]byte, 0, len(raw))
+	quoted, escaped := false, false
 	for i := 0; i < len(raw); i++ {
 		c := raw[i]
-		if inString {
-			out.WriteByte(c)
-			switch {
-			case escaped:
+		if quoted {
+			out = append(out, c)
+			if escaped {
 				escaped = false
-			case c == '\\':
+			} else if c == '\\' {
 				escaped = true
-			case c == '"':
-				inString = false
+			} else if c == '"' {
+				quoted = false
 			}
 			continue
 		}
 		if c == '"' {
-			inString = true
-			out.WriteByte(c)
+			quoted = true
+			out = append(out, c)
 			continue
 		}
-		if c == '/' && i+1 < len(raw) && raw[i+1] == '/' {
-			for i < len(raw) && raw[i] != '\n' {
+		if c == '/' && i+1 < len(raw) {
+			if raw[i+1] == '/' {
+				for i < len(raw) && raw[i] != '\n' {
+					i++
+				}
+				out = append(out, '\n')
+				continue
+			}
+			if raw[i+1] == '*' {
+				i += 2
+				for i+1 < len(raw) && !(raw[i] == '*' && raw[i+1] == '/') {
+					if raw[i] == '\n' {
+						out = append(out, '\n')
+					}
+					i++
+				}
+				if i+1 == len(raw) {
+					return raw
+				}
 				i++
+				out = append(out, ' ')
+				continue
 			}
-			if i < len(raw) {
-				out.WriteByte('\n')
+		}
+		out = append(out, c)
+	}
+	quoted, escaped = false, false
+	for i, c := range out {
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				quoted = false
 			}
 			continue
 		}
-		out.WriteByte(c)
+		if c == '"' {
+			quoted = true
+			continue
+		}
+		if c == ',' {
+			j := i + 1
+			for j < len(out) && (out[j] == ' ' || out[j] == '\n' || out[j] == '\r' || out[j] == '\t') {
+				j++
+			}
+			if j < len(out) && (out[j] == '}' || out[j] == ']') {
+				out[i] = ' '
+			}
+		}
 	}
-	return out.Bytes()
+	return out
 }

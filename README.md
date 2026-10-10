@@ -30,7 +30,7 @@ Exit codes: 0 pass, 1 a finding or failure, 2 a usage error. The complete flag a
 
 ## The plugin
 
-`plugins/engine-sync/` is the Claude Code plugin: after a turn that wrote a Claude source, `Stop` rebuilds and checks both mirrors and blocks the turn's end on a failing stage; `SessionStart` rebuilds a mirror a `git pull` left stale. Its wrapper, `libexec/engine-sync`, finds the binary for the plugin's version (`$ENGINE_SYNC_BIN`, the cache, then a release download checked against `libexec/SHA256SUMS`).
+`plugins/engine-sync/` is the Claude Code plugin: after Write or Edit marked an in-scope Claude source, `Stop` rebuilds and checks both mirrors and blocks the turn's end on a failing stage; `SessionStart` rebuilds a mirror a `git pull` left stale. Its wrapper, `libexec/engine-sync`, finds the binary for the plugin's version (`$ENGINE_SYNC_BIN`, a cache reverified on every adoption, then a bounded release download checked against `libexec/SHA256SUMS`).
 
 ## Where things live
 
@@ -50,13 +50,13 @@ go build -o engine-sync ./cmd/engine-sync
 ./engine-sync global --plan
 ```
 
-No project configuration is required. Global roles come from `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/`; `global` and `doctor --machine` use the same source. `--source-repo R` selects `R/templates/global/agents/` instead, including for `codex agents`. Sources already in their destination registry stay regular files; they are never replaced by links to themselves.
+No project configuration is required. Global roles come from `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/`; `global` and `doctor --machine` use the same source. `--source-repo R` selects `R/{machine.sourceAgentsDir}/` instead, including for `codex agents`. Sources already in their destination registry stay regular files; they are never replaced by links to themselves.
 
 ## Configuration
 
-One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission` and each `opencode.agent.{name}.permission`, tools merge by name, and a layer that names a tool replaces that tool's whole ordered rule set in place, keeping tool order: a project adding one `bash` rule restates every `bash` rule it keeps. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
+One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission` and each `opencode.agent.{name}.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`; the release remains `0.1.0`.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.2.0-alpha`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .
@@ -69,40 +69,47 @@ engine-sync config schema
 | Key | Neutral default | Meaning |
 | --- | --- | --- |
 | `version` | `1` | Required in each file. |
-| `codex.globalCommands` | `true`  Include machine Claude commands in the project mirror. |
+| `commandDirs` | `[]` | Additional project-relative command source directories. |
+| `codex.review.modelAlias` | `""` | Review model alias; empty inherits the engine model. |
+| `codex.review.defaultEffort` | `""` | Effort for a bare review invocation; empty inherits. |
+| `codex.review.prompt` | `""` | Optional review scope prompt. |
+| `codex.review.slotPrompt` | `""` | Optional scope prompt for the effort slot. |
+| `machine.sourceAgentsDir` | `"agents"` | Agents directory relative to an explicit source repository. |
+| `machine.agentMarkerDir` | `""` | Marker source directory; empty derives from the source. |
+| `codex.globalCommands` | `true` | Include machine Claude commands in the project mirror. |
 | `codex.modelMap` | `{}` | Unmapped aliases warn; roles omit model and inherit the engine default. |
-| `codex.rootAdapter` | `Go template (text below)`  Go template appended to the generated root orientation. |
-| `codex.agentPreamble` | `Go template (text below)`  Go template prepended to project role instructions. |
-| `codex.excludeDirs` | `[]`  Source command subtrees excluded from discovery. |
+| `codex.rootAdapter` | `Go template (text below)` | Go template appended to the generated root orientation. |
+| `codex.agentPreamble` | `Go template (text below)` | Go template prepended to project role instructions. |
+| `codex.excludeDirs` | `[]` | Source command subtrees excluded from discovery. |
 | `codex.projects` | `Automatic discovery` | Omitted: discover children; explicit empty list: root only. |
-| `codex.excludeProjects` | `[]`  Child project names excluded from automatic discovery. |
-| `codex.neverRegister` | `[]`  Role basenames omitted from native role registration. |
-| `codex.suffixMode` | `"project"`  Role naming: project, none, or strip-prefix. |
-| `codex.suffixPrefix` | `""`  Prefix removed in strip-prefix mode. |
+| `codex.excludeProjects` | `[]` | Child project names excluded from automatic discovery. |
+| `codex.neverRegister` | `[]` | Role basenames omitted from native role registration. |
+| `codex.suffixMode` | `"project"` | Role naming: project, none, or strip-prefix. |
+| `codex.suffixPrefix` | `""` | Prefix removed in strip-prefix mode. |
 | `opencode.modelMap` | `{}` | Unmapped aliases warn; roles omit model. |
-| `opencode.agentPreamble` | `Go template (text below)`  Go template prepended to OpenCode role instructions. |
-| `opencode.permission` | `{"*":"allow"}` | Native action or ordered tool rules; preserve pattern order (last match wins). |
+| `opencode.agentPreamble` | `Go template (text below)` | Go template prepended to OpenCode role instructions. |
+| `opencode.permission` | `"deny"` | Native action or ordered tool rules; preserve pattern order (last match wins). |
 | `opencode.agent` | `{}` | Overrides keyed by agent name, each with a native `permission` value. |
-| `opencode.mirrorFiles` | `[]`  Root-relative regular files mirrored into .opencode. |
-| `workbenchMarker` | `""`  Optional root-relative workbench marker; empty disables it. |
-| `mcp.globalServers` | `[]`  Additional machine-level MCP server names available to roles. |
-| `mcp.renamed` | `{}`  Old server name to current server name; project-local old names remain valid. |
+| `opencode.mirrorFiles` | `[]` | Root-relative regular files mirrored into .opencode. |
+| `workbenchMarker` | `""` | Optional root-relative workbench marker; empty disables it. |
+| `mcp.globalServers` | `[]` | Additional machine-level MCP server names available to roles. |
+| `mcp.renamed` | `{}` | Old server name to current server name; project-local old names remain valid. |
 | `rewrites` | `[]` | Ordered literal rules; lists replace between layers. |
-| `machine.modelMap` | `{}`  Alias to native Codex model for machine roles. |
+| `machine.modelMap` | `{}` | Alias to native Codex model for machine roles. |
 | `machine.claudeAgentsDir` | `{Claude config dir}/agents` | Defaults to the resolved Claude config directory plus `/agents`; home-relative or absolute. |
-| `machine.legacyCodexAgentsDir` | `".local/state/engine-sync/generated/codex-agents"`  Home-relative owned store retired during migration. |
-| `machine.retiredAgents` | `[]`  Obsolete machine role names retired from owned registries. |
+| `machine.legacyCodexAgentsDir` | `".local/state/engine-sync/generated/codex-agents"` | Home-relative owned store retired during migration. |
+| `machine.retiredAgents` | `[]` | Obsolete machine role names retired from owned registries. |
 | `machine.retiredFiles` | `[]` | Home-relative paths, including backups; configured retired skill paths suppress model-invocable command skills. |
 | `machine.rewrites` | `[]` | Ordered rules applied at machine scope. |
 | `machine.codexHomes` | `[]` | Unconfigured: environment/default Codex home; configured empty list: no homes. |
 | `machine.variants` | `""` | Optional variants declaration, absolute or relative to the agents source directory; empty uses `variants.json`. |
 | `machine.generatedAgentsDir` | `".local/state/engine-sync/generated/claude-agents"` | Home-relative generated variant store; separate from source agents. |
 
-Adapters and preambles use Go `text/template` fields `{{.Name}}`, `{{.Engine}}` (`Codex` or `OpenCode`), `{{.Source}}`, and `{{.Root}}` (`AGENTS.md`). Unknown fields and malformed templates fail at entry. Legacy `${name}` is converted by the loader with one deprecation notice. The neutral preamble is shared by both targets:
+Adapters and preambles use Go `text/template` fields `{{.Name}}`, `{{.Engine}}` (`Codex` or `OpenCode`), `{{.Source}}`, and `{{.Root}}` (`AGENTS.md`). Unknown fields and malformed templates fail at entry. Legacy `${name}` in a preamble is converted with one deprecation notice; in `codex.rootAdapter` it remains literal for compatibility. The neutral preamble is shared by both targets:
 
 ```text
 You are the {{.Name}} role in this repository, running as a native {{.Engine}} subagent.
-First action: read the repository root {{.Root}} in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.
+Read the repository root {{.Root}} before starting your task.
 ```
 
 The neutral root adapter is:
@@ -127,9 +134,9 @@ A machine example:
 {"version":1,"machine":{"claudeAgentsDir":".claude/agents","generatedAgentsDir":".local/state/engine-sync/generated/claude-agents","legacyCodexAgentsDir":".local/state/engine-sync/generated/codex-agents","codexHomes":["/example/codex"],"modelMap":{"smart":"example-model"},"retiredAgents":["old-reader"],"retiredFiles":[".codex/skills/old-workflow"],"variants":"variants.json","rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"old protocol","replace":"current protocol"}]}}
 ```
 
-Global roles use the Claude configuration directory by default; `--source-repo R` selects `R/templates/global/agents/`. Agent frontmatter `codex-model`, `codex-effort`, and `codex-sandbox` override role settings. Sandbox accepts `inherit`, `read-only`, or `workspace-write`; otherwise a tools list without write tools selects read-only. No role name has special treatment.
+Global roles use the Claude configuration directory by default; `--source-repo R` selects `R/{machine.sourceAgentsDir}/`. Agent frontmatter `codex-model`, `codex-effort`, and `codex-sandbox` override role settings. Sandbox accepts `inherit`, `read-only`, or `workspace-write`; otherwise a tools list without Write, Edit, MultiEdit or NotebookEdit selects read-only; Bash alone does not declare write intent. Use `codex-sandbox: inherit` for a role that writes through Bash. No role name has special treatment.
 
-All generated markers and rebuild hints name `engine-sync build`. Previous markers remain ownership evidence; rebuilding migrates owned mirrors in place and preserves unmarked foreign files.
+Generated file markers and rebuild hints name `engine-sync build`. MCP regions retain the unbranded legacy script fence understood by 0.1.0, including on a machine without writer records. Complete historical ownership headers remain evidence; partial marker phrases do not claim a file; rebuilding migrates owned mirrors in place and preserves unmarked foreign files.
 
 ## Develop
 
@@ -139,3 +146,5 @@ claude plugin validate --strict . && claude plugin validate --strict plugins/eng
 ```
 
 Built and maintained with [Professor](https://github.com/rezzminator/professor).
+
+Machine command mirrors use machine policy and the common destination roster, independently of project policy. Native output directories cannot redirect writes through symlinks. Orphan cleanup removes owned files and empty directories; foreign children remain with a named conflict. See the [caller interface](docs/interface.md) for recovery and target precedence.

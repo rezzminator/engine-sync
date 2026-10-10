@@ -105,16 +105,16 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	home := testjail.Scratch(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	writeAgentFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"children are Explore+haiku (never\nyour own type)","replace":"children are spawned via spawn_agent as the `+"`explorer`"+` role (never your own type)"}]}}`)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\ntools: Read\nmodel: sonnet\n---\n\n"+
 			"Delegate to children are Explore+haiku (never\nyour own type) for search fan-out.\n")
 	writeAgentFixture(
 		t,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "beta.md"),
+		filepath.Join(home, "source-repo", "agents", "beta.md"),
 		"---\nname: beta\ndescription: Beta role for testing.\ntools: Read\nmodel: haiku\n---\n\nBeta body, unrelated.\n",
 	)
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
@@ -152,8 +152,8 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	}
 
 	for _, expect := range []struct{ target, source string }{
-		{filepath.Join(home, ".claude", "agents", "alpha.md"), filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")},
-		{filepath.Join(home, ".claude", "agents", "beta.md"), filepath.Join(home, ".professor", "templates", "global", "agents", "beta.md")},
+		{filepath.Join(home, ".claude", "agents", "alpha.md"), filepath.Join(home, "source-repo", "agents", "alpha.md")},
+		{filepath.Join(home, ".claude", "agents", "beta.md"), filepath.Join(home, "source-repo", "agents", "beta.md")},
 	} {
 		assertGlobalSymlink(t, expect.target, expect.source)
 	}
@@ -164,7 +164,7 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	// No .toml is ever written beside the .md source inside the clone —
 	// the whole point of this move.
 	for _, name := range []string{"alpha.toml", "beta.toml"} {
-		inClone := filepath.Join(home, ".professor", "templates", "global", "agents", name)
+		inClone := filepath.Join(home, "source-repo", "agents", name)
 		if _, err := os.Lstat(inClone); !os.IsNotExist(err) {
 			t.Fatalf("expected no .toml written inside the clone at %s, lstat err=%v", inClone, err)
 		}
@@ -190,12 +190,12 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 	home := testjail.Scratch(t)
 	writeAgentFixture(
 		t,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.md"),
+		filepath.Join(home, "source-repo", "agents", "quirky.md"),
 		"---\nname: quirky\ndescription: Uses \"walker fast\" and \"map it now\" verbatim.\ntools: Read\nmodel: opus # pinned\neffort: high\n---\n\n"+
 			"Body has a literal triple quote \"\"\" and a backslash \\ standalone.\n",
 	)
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 	got := string(
 		readAgentFixture(t, filepath.Join(filepath.Join(home, ".codex", "agents"), "quirky.toml")),
 	)
-	head := ("# " + artifact.Prefix) + "templates/global/agents/quirky.md" +
+	head := ("# " + artifact.Prefix) + "agents/quirky.md" +
 		" — edit the source, then run: engine-sync build\n" +
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
@@ -233,18 +233,18 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 	home := testjail.Scratch(t)
 	writeAgentFixture(
 		t,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "quoted.md"),
+		filepath.Join(home, "source-repo", "agents", "quoted.md"),
 		"---\nname: quoted\ndescription: 'a: b, \"c\"'\n---\n\nBody.\n",
 	)
 
-	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home}); err != nil {
+	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home}); err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
 	got := string(readAgentFixture(
 		t,
 		filepath.Join(filepath.Join(home, ".codex", "agents"), "quoted.toml"),
 	))
-	head := ("# " + artifact.Prefix) + "templates/global/agents/quoted.md" +
+	head := ("# " + artifact.Prefix) + "agents/quoted.md" +
 		" — edit the source, then run: engine-sync build\n" +
 		"name = \"quoted\"\n" +
 		"description = \"a: b, \\\"c\\\"\"\n" +
@@ -258,7 +258,7 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 // tracked-twin comparison: wave 9b retired the tracked `.toml` twins from
 // git (root CLAUDE.md — "nothing generated is written into the clone"), so
 // there is no on-disk artifact left to diff against. What remains true and
-// worth pinning for every `templates/global/agents/*.md` shape: the
+// worth pinning for every `agents/*.md` shape: the
 // compiler succeeds, is deterministic (two renders byte-equal), the output
 // independently parses as TOML (via the same BurntSushi/toml parser
 // validateTOML already depends on — no new dependency), carries the
@@ -290,13 +290,13 @@ func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
 			// The description reaches the compiled role verbatim but for the
 			// one rewrite a Codex lead needs: Claude's /code-review names a
 			// command no Codex seat has (review.go).
-			wantDescription := rewriteCodeReview(strings.TrimSpace(fields["description"]), fixtureMachinePolicy().Machine.ModelMap)
+			wantDescription := rewriteCodeReview(strings.TrimSpace(fields["description"]), fixtureMachinePolicy().Machine.ModelMap, fixtureMachinePolicy().Codex.Review)
 
-			_, first, err := renderFixtureMachineAgent(source, string(raw), testjail.Scratch(t))
+			_, first, err := renderFixtureMachineAgent(source, string(raw), agentsDir)
 			if err != nil {
 				t.Fatalf("renderGlobalAgentTOML: %v", err)
 			}
-			_, second, err := renderFixtureMachineAgent(source, string(raw), testjail.Scratch(t))
+			_, second, err := renderFixtureMachineAgent(source, string(raw), agentsDir)
 			if err != nil {
 				t.Fatalf("renderGlobalAgentTOML (second render): %v", err)
 			}
@@ -362,24 +362,24 @@ func TestGlobalAgentEscapeMultilineNeutralisesTripleQuoteCollision(t *testing.T)
 
 func TestGlobalAgentsMissingFrontmatterFieldIsAHardError(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "broken.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "broken.md"),
 		"---\nname: broken\n---\n\nno description field.\n")
 
-	_, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	_, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err == nil || !strings.Contains(err.Error(), "needs both name: and description") {
 		t.Fatalf("RunGlobalAgents: got %v, want a frontmatter error", err)
 	}
 }
 
-func TestGlobalAgentsNoSourcesIsAHardError(t *testing.T) {
+func TestGlobalAgentsAcceptsEmptySourceRegistry(t *testing.T) {
 	home := testjail.Scratch(t)
-	if err := os.MkdirAll(filepath.Join(home, ".professor", "templates", "global", "agents"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "source-repo", "agents"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
-	if err == nil || !strings.Contains(err.Error(), "no agent .md files in") {
-		t.Fatalf("RunGlobalAgents: got %v, want a no-sources error", err)
+	_, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
+	if err != nil {
+		t.Fatalf("empty source registry: %v", err)
 	}
 }
 
@@ -389,9 +389,9 @@ func TestGlobalAgentsNoSourcesIsAHardError(t *testing.T) {
 // just because check mode looked.
 func TestGlobalAgentsCheckReportsMissingBeforeInstall(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home, Mode: ModeCheck})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home, Mode: ModeCheck})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,9 +434,9 @@ func TestGlobalAgentsCodexRosterNilDefaultsEmptyPlansNoRole(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := testjail.Scratch(t)
-			source := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")
+			source := filepath.Join(home, "source-repo", "agents", "alpha.md")
 			writeAgentFixture(t, source, "---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-			options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home, CodexHomes: tc.roster, Mode: ModeCheck}
+			options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home, CodexHomes: tc.roster, Mode: ModeCheck}
 			plan, err := runFixtureMachineAgents(options)
 			if err != nil {
 				t.Fatalf("RunGlobalAgents check: %v", err)
@@ -470,16 +470,16 @@ func TestGlobalAgentsCodexRosterNilDefaultsEmptyPlansNoRole(t *testing.T) {
 // can actually open.
 func TestGlobalAgentsInstallLinksClaudeAndWritesTheCodexRole(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
 
-	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home}); err != nil {
+	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home}); err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
 
 	assertGlobalSymlink(t,
 		filepath.Join(home, ".claude", "agents", "alpha.md"),
-		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
+		filepath.Join(home, "source-repo", "agents", "alpha.md"))
 	assertGlobalRoleFile(t, filepath.Join(home, ".codex", "agents", "alpha.toml"))
 }
 
@@ -490,11 +490,11 @@ func TestGlobalAgentsInstallLinksClaudeAndWritesTheCodexRole(t *testing.T) {
 // stranger's file.
 func TestGlobalAgentsInstallReplacesAnOwnedCopyWithASymlink(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
 	writeAgentFixture(t, filepath.Join(home, ".claude", "agents", "alpha.md"), artifact.Marker(artifact.Markdown, "alpha.md")+"\nstale copy from the old installer\n")
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
@@ -503,18 +503,18 @@ func TestGlobalAgentsInstallReplacesAnOwnedCopyWithASymlink(t *testing.T) {
 	}
 	assertGlobalSymlink(t,
 		filepath.Join(home, ".claude", "agents", "alpha.md"),
-		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
+		filepath.Join(home, "source-repo", "agents", "alpha.md"))
 }
 
-// TestGlobalAgentsInstallRepointsAStaleInRepoSymlink covers a symlink that
+// TestGlobalAgentsPreservesHandmadeInRepoSymlink covers a symlink that
 // already points somewhere INSIDE the source repository, just not at the
-// current desired source (a rename, a re-rostered agent) — still ours,
-// repointed rather than reported as a conflict.
-func TestGlobalAgentsInstallRepointsAStaleInRepoSymlink(t *testing.T) {
+// current desired source. Without a creation receipt it is foreign,
+// preserved and reported as a conflict.
+func TestGlobalAgentsPreservesHandmadeInRepoSymlink(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-	staleSource := filepath.Join(home, ".professor", "templates", "global", "retired-alpha.md")
+	staleSource := filepath.Join(home, "source-repo", "templates", "global", "retired-alpha.md")
 	writeAgentFixture(t, staleSource, "a since-renamed agent source\n")
 	claudeDest := filepath.Join(home, ".claude", "agents")
 	if err := os.MkdirAll(claudeDest, 0o755); err != nil {
@@ -524,29 +524,26 @@ func TestGlobalAgentsInstallRepointsAStaleInRepoSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
-	if len(result.Problems) != 0 {
-		t.Fatalf("a stale in-repo symlink was reported as a conflict: %#v", result.Problems)
+	if len(result.Problems) == 0 {
+		t.Fatalf("a stale in-repo symlink was not reported as a conflict: %#v", result.Problems)
 	}
 	assertGlobalSymlink(t,
 		filepath.Join(home, ".claude", "agents", "alpha.md"),
-		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
+		staleSource)
 }
 
-// TestGlobalAgentsRepointsALinkStillTargetingTheOldInCloneTOML is the
-// migration case this wave exists for: an existing ~/.codex/agents/alpha.toml
-// symlink still points at the retired in-clone
-// {SourceRepo}/templates/global/agents/alpha.toml. pfm wrote that link, so it
-// is ours to migrate: the run replaces it with the real role file instead of
-// reporting a conflict.
-func TestGlobalAgentsMigratesALinkStillTargetingTheOldInCloneTOML(t *testing.T) {
+// TestGlobalAgentsPreservesHandmadeInCloneRoleLink covers a hand-made link
+// to an old in-clone TOML. Its location does not establish ownership: without
+// a creation receipt it is preserved and reported as a conflict.
+func TestGlobalAgentsPreservesHandmadeInCloneRoleLink(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-	oldInCloneTOML := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")
+	oldInCloneTOML := filepath.Join(home, "source-repo", "agents", "alpha.toml")
 	writeAgentFixture(t, oldInCloneTOML, "name = \"alpha\"\ndescription = \"stale tracked twin\"\n")
 	codexDest := filepath.Join(home, ".codex", "agents")
 	if err := os.MkdirAll(codexDest, 0o755); err != nil {
@@ -556,14 +553,14 @@ func TestGlobalAgentsMigratesALinkStillTargetingTheOldInCloneTOML(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
-	if len(result.Problems) != 0 {
-		t.Fatalf("a link still targeting the old in-clone twin was reported as a conflict: %#v", result.Problems)
+	if len(result.Problems) == 0 {
+		t.Fatalf("a hand-made link to the old in-clone twin was not reported as a conflict: %#v", result.Problems)
 	}
-	assertGlobalRoleFile(t, filepath.Join(home, ".codex", "agents", "alpha.toml"))
+	assertGlobalSymlink(t, filepath.Join(home, ".codex", "agents", "alpha.toml"), oldInCloneTOML)
 }
 
 // TestGlobalAgentsInstallLeavesAForeignSymlinkAlone is the conflict-law pin:
@@ -573,7 +570,7 @@ func TestGlobalAgentsMigratesALinkStillTargetingTheOldInCloneTOML(t *testing.T) 
 // skipped.
 func TestGlobalAgentsInstallLeavesAForeignSymlinkAlone(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
 
 	claudeDest := filepath.Join(home, ".claude", "agents")
@@ -587,7 +584,7 @@ func TestGlobalAgentsInstallLeavesAForeignSymlinkAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
@@ -619,11 +616,11 @@ func TestGlobalAgentsInstallLeavesAForeignSymlinkAlone(t *testing.T) {
 // nothing left to do.
 func TestGlobalAgentsLinkIntoEveryConfiguredClaudeConfigDir(t *testing.T) {
 	home := testjail.Scratch(t)
-	source := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")
+	source := filepath.Join(home, "source-repo", "agents", "alpha.md")
 	writeAgentFixture(t, source, "---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
 	first := filepath.Join(home, ".claude")
 	second := filepath.Join(home, ".claude2")
-	options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home, ClaudeConfigDirs: []string{first, second}}
+	options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home, ClaudeConfigDirs: []string{first, second}}
 
 	options.Mode = ModeCheck
 	plan, err := runFixtureMachineAgents(options)
@@ -656,15 +653,15 @@ func TestGlobalAgentsLinkIntoEveryConfiguredClaudeConfigDir(t *testing.T) {
 	}
 }
 
-// TestGlobalAgentsTolerateAnAliasedAccountRegistry is the real host shape:
+// TestGlobalAgentsPreservesAliasedAccountRegistry is the real host shape:
 // the second account's agents/ registry is itself a directory symlink into
 // the first account's registry. Both desired targets resolve to the same
 // physical file, so build must converge with no error and a recheck must
 // report zero actions and zero problems — never a CONFLICT, and never an
 // "file exists" failure from linking the same physical path twice.
-func TestGlobalAgentsTolerateAnAliasedAccountRegistry(t *testing.T) {
+func TestGlobalAgentsPreservesAliasedAccountRegistry(t *testing.T) {
 	home := testjail.Scratch(t)
-	source := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")
+	source := filepath.Join(home, "source-repo", "agents", "alpha.md")
 	writeAgentFixture(t, source, "---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
 	first := filepath.Join(home, ".claude")
 	second := filepath.Join(home, ".claude2")
@@ -677,20 +674,14 @@ func TestGlobalAgentsTolerateAnAliasedAccountRegistry(t *testing.T) {
 	if err := os.Symlink(filepath.Join(first, "agents"), filepath.Join(second, "agents")); err != nil {
 		t.Fatal(err)
 	}
-	options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home, ClaudeConfigDirs: []string{first, second}, Mode: ModeBuild}
+	options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home, ClaudeConfigDirs: []string{first, second}, Mode: ModeBuild}
 
-	if _, err := runFixtureMachineAgents(options); err != nil {
-		t.Fatalf("RunGlobalAgents build over an aliased registry: %v", err)
+	result, err := runFixtureMachineAgents(options)
+	if err != nil || len(result.Problems) == 0 {
+		t.Fatalf("aliased directory must conflict: %#v err=%v", result, err)
 	}
-	assertGlobalSymlink(t, filepath.Join(second, "agents", "alpha.md"), source)
-
-	options.Mode = ModeCheck
-	settled, err := runFixtureMachineAgents(options)
-	if err != nil {
-		t.Fatalf("RunGlobalAgents recheck: %v", err)
-	}
-	if len(settled.Actions) != 0 || len(settled.Problems) != 0 {
-		t.Fatalf("an aliased registry is not settled: actions=%#v problems=%#v", settled.Actions, settled.Problems)
+	if target, err := os.Readlink(filepath.Join(second, "agents")); err != nil || target != filepath.Join(first, "agents") {
+		t.Fatalf("directory alias changed: %q %v", target, err)
 	}
 }
 
@@ -704,10 +695,10 @@ func TestGlobalAgentsTolerateAnAliasedAccountRegistry(t *testing.T) {
 // role at all — it is a role Codex refuses to load.
 func TestGlobalAgentsInstallsCodexRoleAsRegularFile(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nAlpha body.\n")
 
-	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home}); err != nil {
+	if _, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home}); err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
 
@@ -722,13 +713,13 @@ func TestGlobalAgentsInstallsCodexRoleAsRegularFile(t *testing.T) {
 	assertAgentContains(t, role, ("# " + artifact.Prefix), `name = "alpha"`)
 }
 
-// TestGlobalAgentsMigratesOwnedCodexRoleLinkToRegularFile covers the upgrade
+// TestGlobalAgentsPreservesUnprovenLegacyRoleLink covers the upgrade
 // path every host that ever ran the symlinking installer is on: the link is
 // pfm's own, so it is replaced by the real file rather than reported as a
 // conflict.
-func TestGlobalAgentsMigratesOwnedCodexRoleLinkToRegularFile(t *testing.T) {
+func TestGlobalAgentsPreservesUnprovenLegacyRoleLink(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nAlpha body.\n")
 	legacy := filepath.Join(paths.LegacyGeneratedCodexAgentsDir(home), "alpha.toml")
 	writeAgentFixture(t, legacy, "name = \"alpha\"\n")
@@ -740,20 +731,14 @@ func TestGlobalAgentsMigratesOwnedCodexRoleLinkToRegularFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}
-	info, err := os.Lstat(role)
-	if err != nil {
-		t.Fatalf("expected a migrated role at %s: %v", role, err)
+	if len(result.Problems) == 0 {
+		t.Fatalf("handmade role link must conflict: %#v", result)
 	}
-	if !info.Mode().IsRegular() {
-		t.Fatalf("%s mode=%v — the pfm-owned link was not migrated to a regular file", role, info.Mode())
-	}
-	if len(result.Problems) != 0 {
-		t.Fatalf("problems = %#v, want none: a pfm-owned link is ours to migrate", result.Problems)
-	}
+	assertGlobalSymlink(t, role, legacy)
 }
 
 // TestGlobalAgentsRefusesForeignCodexRoleFile is the other half of ownership:
@@ -762,13 +747,13 @@ func TestGlobalAgentsMigratesOwnedCodexRoleLinkToRegularFile(t *testing.T) {
 // would destroy an operator's own role.
 func TestGlobalAgentsRefusesForeignCodexRoleFile(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nAlpha body.\n")
 	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
 	const foreign = "name = \"alpha\"\ndescription = \"hand-written by the operator\"\n"
 	writeAgentFixture(t, role, foreign)
 
-	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, ".professor"), Home: home})
+	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil {
 		t.Fatalf("RunGlobalAgents: %v", err)
 	}

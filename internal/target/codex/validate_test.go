@@ -40,7 +40,7 @@ func TestProjectAgentCodexRoleSettings(t *testing.T) {
 			}
 			twin := filepath.Join(root, ".codex", "agents", "lab.toml")
 			assertCodexContains(t, twin,
-				"# tier: gpt-fixture-lab (Claude alias: opus)\n",
+				"# model: gpt-fixture-lab (Claude alias: opus)\n",
 				"model = \"gpt-fixture-lab\"\nmodel_reasoning_effort = \"low\"\nsandbox_mode = \"workspace-write\"\n")
 			content := string(readCodexFixture(t, twin))
 			if strings.Contains(content, "read-only") {

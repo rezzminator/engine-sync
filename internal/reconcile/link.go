@@ -3,7 +3,6 @@ package reconcile
 import (
 	"errors"
 	"fmt"
-	"github.com/rezzminator/engine-sync/internal/atomicfile"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -42,7 +41,7 @@ const (
 	// uninstall, a wiped state dir) while the registry link survived. Ours,
 	// but a build cannot silently call this "correct": the link resolving to
 	// the right NAME is not the same as an operator actually having the
-	// agent. ApplyGlobalLink repoints it exactly like Missing/WrongTarget —
+	// agent. Reconciliation reports it as unresolvable —
 	// the recompile step that runs first in RunGlobalAgents' build phase
 	// recreates the missing file before this link is re-applied.
 	GlobalLinkDangling GlobalLinkState = Dangling
@@ -86,47 +85,26 @@ func ClassifyGlobalLink(target, source, sourceRepoRoot string, kind GlobalLinkKi
 			}
 			return GlobalLinkCorrect, resolved, nil
 		}
-		if WithinLinkRoot(resolved, sourceRepoRoot) {
+		owned, e := Claimable(target, nil)
+		if e != nil {
+			return "", "", e
+		}
+		if owned {
 			return GlobalLinkWrongTarget, resolved, nil
 		}
 		return GlobalLinkConflict, resolved, nil
 	}
 	wantDir := kind == GlobalLinkDir
 	if info.IsDir() == wantDir {
-		return GlobalLinkCopy, "", nil
+		owned, e := Claimable(target, nil)
+		if e != nil {
+			return "", "", e
+		}
+		if owned {
+			return GlobalLinkCopy, "", nil
+		}
 	}
 	return GlobalLinkConflict, "", nil
-}
-
-// ApplyGlobalLink performs the filesystem change ClassifyGlobalLink's state
-// recommends. Correct and Conflict are both no-ops — the first because
-// nothing is wrong, the second because a conflict is never touched. Missing,
-// Copy, and WrongTarget all end the same way: whatever is there (nothing, a
-// plain copy, or a stale symlink) is cleared and the desired symlink takes
-// its place. RemoveAll is safe here specifically because Copy only ever
-// classifies an entry whose TYPE matches the desired link's kind (a
-// same-shape copy), and WrongTarget only ever classifies a symlink — never a
-// foreign directory, which conflict leaves alone before this is reached.
-func ApplyGlobalLink(target, source string, state GlobalLinkState) error {
-	switch state {
-	case GlobalLinkCorrect, GlobalLinkConflict:
-		return nil
-	case GlobalLinkMissing, GlobalLinkCopy, GlobalLinkDangling:
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
-		}
-		if state != GlobalLinkMissing {
-			if err := os.RemoveAll(target); err != nil {
-				return fmt.Errorf("remove %s: %w", target, err)
-			}
-		}
-		if err := atomicfile.Symlink(source, target); err != nil {
-			return fmt.Errorf("link %s -> %s: %w", target, source, err)
-		}
-		return nil
-	default:
-		return fmt.Errorf("apply global link %s: unknown state %q", target, state)
-	}
 }
 
 // DescribeGlobalLinkState renders the one operator-facing line every caller
@@ -163,11 +141,15 @@ func ResolveLink(path, raw string) string {
 	return filepath.Clean(target)
 }
 
-func WithinLinkRoot(candidate, root string) bool {
-	candidate = paths.PhysicalPath(candidate)
-	root = paths.PhysicalPath(root)
-	if candidate == root {
-		return true
+func WithinLinkRoot(candidate, root string) (bool, error) {
+	var e error
+	candidate, e = paths.PhysicalPath(candidate)
+	if e != nil {
+		return false, e
 	}
-	return strings.HasPrefix(candidate, root+string(filepath.Separator))
+	root, e = paths.PhysicalPath(root)
+	if e != nil {
+		return false, e
+	}
+	return candidate == root || strings.HasPrefix(candidate, root+string(filepath.Separator)), nil
 }

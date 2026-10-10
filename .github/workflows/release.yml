@@ -8,7 +8,21 @@ permissions:
   contents: write
 
 jobs:
+  version-proof:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: execute native release asset and verify its version
+        run: scripts/build-release.sh --native-only --out "$RUNNER_TEMP/release"
   release:
+    needs: version-proof
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

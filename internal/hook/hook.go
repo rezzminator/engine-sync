@@ -10,12 +10,14 @@ import (
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/atomicfile"
 	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/guard"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type StageRunner func([]string) (int, string)
@@ -32,6 +34,7 @@ type Context struct {
 	Policy  func(string, string, io.Writer) (*config.Config, error)
 	Targets func(string) (bool, error)
 	Writer  func() string
+	Engines []string
 }
 
 const detailLimit = 4000
@@ -43,7 +46,7 @@ func ReadPayload(stdin io.Reader) Payload {
 	if stdin == nil {
 		return payload
 	}
-	raw, err := io.ReadAll(stdin)
+	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
 		return payload
 	}
@@ -65,20 +68,47 @@ func IsClaudeSource(path, home string) bool {
 		strings.HasSuffix(slash, "/.mcp.json")
 }
 
-// ProjectRoot is $CLAUDE_PROJECT_DIR, else dir's git superproject, else its
-// git toplevel: the harness project root, whose .claude/engine-sync.json
-// governs, never a nested submodule's.
-func ProjectRoot(e Context, dir string) string {
-	if root := e.Get("CLAUDE_PROJECT_DIR"); root != "" {
-		return root
+func resolveProjectRoot(e Context, dir string, session bool) (string, error) {
+	home, err := e.Home()
+	if err != nil {
+		return "", err
 	}
-	for _, flag := range []string{"--show-superproject-working-tree", "--show-toplevel"} {
-		out, err := paths.Git("-C", dir, "rev-parse", flag)
-		if root := strings.TrimSpace(string(out)); err == nil && root != "" {
-			return root
+	explicit := e.Get("CLAUDE_PROJECT_DIR")
+	if explicit != "" {
+		root, err := paths.ProjectRoot(explicit, home)
+		if err != nil {
+			return "", err
+		}
+		physical, err := paths.PhysicalPath(dir)
+		if err != nil {
+			return "", err
+		}
+		rel, err := filepath.Rel(root, physical)
+		if err != nil {
+			return "", err
+		}
+		if session || rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) || strings.HasPrefix(physical, filepath.Join(home, ".claude", "commands")+string(filepath.Separator)) {
+			return root, nil
 		}
 	}
-	return ""
+	marker := ""
+	policy, policyErr := e.Policy("", home, io.Discard)
+	if policyErr == nil {
+		marker = policy.WorkbenchMarker
+	}
+	root, err := paths.DiscoverRoot(dir, home, marker)
+	if err != nil && policyErr != nil {
+		return "", errors.Join(policyErr, err)
+	}
+	return root, err
+}
+func hookNotice(stdout, stderr io.Writer, message string) {
+	fmt.Fprintln(stderr, message)
+	if stdout != nil {
+		if err := json.NewEncoder(stdout).Encode(map[string]string{"systemMessage": message}); err != nil {
+			fmt.Fprintln(stderr, err)
+		}
+	}
 }
 
 // InScope reports whether a project opted in: it carries the compiler's
@@ -92,7 +122,7 @@ func InScope(root string) (bool, error) {
 		}
 	}
 	for _, path := range []string{filepath.Join(root, "AGENTS.md"), filepath.Join(root, ".opencode", "opencode.jsonc")} {
-		raw, err := os.ReadFile(path)
+		raw, err := paths.ReadHeader(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -114,7 +144,10 @@ func DirtyFlag(e Context, root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root = filepath.Clean(root)
+	root, err = paths.PhysicalPath(root)
+	if err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256([]byte(root))
 	name := strings.TrimPrefix(filepath.Base(root), ".") + "-" + hex.EncodeToString(sum[:])[:16]
 	return filepath.Join(e.State(home), "dirty", name), nil
@@ -129,12 +162,12 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 	if !IsClaudeSource(path, home) {
 		return 0
 	}
-	root := ProjectRoot(e, filepath.Dir(path))
-	if root == "" {
+	root, rootErr := resolveProjectRoot(e, filepath.Dir(path), false)
+	if rootErr != nil {
+		fmt.Fprintf(stderr, "engine-sync hook claude mark: %v\n", rootErr)
 		return 0
 	}
-	if _, err := e.Policy(root, home, stderr); err != nil {
-		fmt.Fprintln(stderr, err)
+	if root == "" {
 		return 0
 	}
 	if scoped, err := InScope(root); err != nil || !scoped {
@@ -144,6 +177,17 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 		return 0
 	}
 	flag, err := DirtyFlag(e, root)
+	var release func() error
+	if err == nil {
+		release, err = guard.Lock(e.State(home), "dirty:"+root, 250*time.Millisecond)
+	}
+	if release != nil {
+		defer func() {
+			if err := release(); err != nil {
+				fmt.Fprintln(stderr, "engine-sync hook claude mark: release dirty lock:", err)
+			}
+		}()
+	}
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(flag), 0o700)
 	}
@@ -158,42 +202,51 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 
 // stopStages are the four stages a Stop runs, in order, each named as the
 // block reason names it.
-func stopStages(root string) [][]string {
-	return [][]string{
-		{"codex", "build", root}, {"codex", "check", root},
-		{"opencode", "build", root}, {"opencode", "check", root},
+func stopStages(root string, engines []string) [][]string {
+	var stages [][]string
+	for _, engine := range engines {
+		stages = append(stages, []string{engine, "build", root}, []string{engine, "check", root})
 	}
+	return stages
 }
 
 func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunner) int {
 	cwd, err := os.Getwd()
 	if err != nil {
-		cwd = "."
+		hookNotice(stdout, stderr, "engine-sync hook claude stop: getwd: "+err.Error())
+		return 0
 	}
-	root := ProjectRoot(e, cwd)
+	root, rootErr := resolveProjectRoot(e, cwd, true)
+	if rootErr != nil {
+		hookNotice(stdout, stderr, "engine-sync hook claude stop: "+rootErr.Error())
+		return 0
+	}
 	if root == "" {
 		return 0
 	}
 	flag, err := DirtyFlag(e, root)
 	if err != nil {
-		fmt.Fprintf(stderr, "engine-sync hook claude stop: %v\n", err)
+		hookNotice(stdout, stderr, "engine-sync hook claude stop: "+err.Error())
 		return 0
 	}
-	if _, err := os.Stat(flag); err != nil {
-		return 0
-	}
-	// Claim the flag before the stages read the sources: a mark that lands
-	// while they run sets a fresh flag, which this pass never clears.
-	claim := fmt.Sprintf("%s.stop-%d", flag, os.Getpid())
-	if err := atomicfile.Move(flag, claim); err != nil {
+	info, err := os.Lstat(flag)
+	if err != nil || !info.Mode().IsRegular() {
+		if err == nil {
+			err = fmt.Errorf("dirty flag %s is not a regular file", flag)
+		}
 		if !errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(stderr, "engine-sync hook claude stop: claim the dirty flag: %v\n", err)
+			message := fmt.Sprintf("engine-sync: cannot inspect dirty flag: %v", err)
+			fmt.Fprintln(stderr, message)
+			if err := json.NewEncoder(stdout).Encode(map[string]string{"systemMessage": message}); err != nil {
+				fmt.Fprintln(stderr, err)
+			}
 		}
 		return 0
 	}
+	// Keep the durable flag while stages run; a killed process cannot lose it.
 	var failed []string
 	var detail strings.Builder
-	for _, stage := range stopStages(root) {
+	for _, stage := range stopStages(root, e.Engines) {
 		code, output := runner(stage)
 		if code == 0 {
 			continue
@@ -203,13 +256,27 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 		detail.WriteString(name + ":\n" + output + "\n")
 	}
 	if len(failed) == 0 {
-		if err := os.Remove(claim); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(stderr, "engine-sync hook claude stop: clear the dirty flag: %v\n", err)
+		home, err := e.Home()
+		if err != nil {
+			hookNotice(stdout, stderr, "engine-sync: "+err.Error())
+			return 0
+		}
+		release, err := guard.Lock(e.State(home), "dirty:"+root, 250*time.Millisecond)
+		if err != nil {
+			hookNotice(stdout, stderr, "engine-sync: "+err.Error())
+			return 0
+		}
+		current, err := os.Lstat(flag)
+		if err == nil && os.SameFile(info, current) && info.ModTime() == current.ModTime() && info.Size() == current.Size() {
+			err = os.Remove(flag)
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			hookNotice(stdout, stderr, "engine-sync: clear dirty flag: "+err.Error())
+		}
+		if err := release(); err != nil {
+			hookNotice(stdout, stderr, "engine-sync: release dirty lock: "+err.Error())
 		}
 		return 0
-	}
-	if err := restoreFlag(claim, flag); err != nil {
-		fmt.Fprintf(stderr, "engine-sync hook claude stop: keep the dirty flag: %v\n", err)
 	}
 	stages := strings.Join(failed, ", ") + " (binary: " + e.Writer() + ")"
 	text := detail.String()
@@ -217,29 +284,19 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 		text = text[:detailLimit]
 	}
 	var answer any
-	if payload.StopHookActive {
+	if payload.StopHookActive || strings.Contains(detail.String(), "BUSY ") {
 		answer = map[string]string{"systemMessage": "engine-sync WARNING: " + stages +
-			" still failing after the repair turn — the mirror is stale; the flag stays set and the check repeats next turn."}
+			" failed — the mirror is stale; the flag stays set and the check repeats next turn.\n" + text}
 	} else {
 		answer = map[string]string{"decision": "block", "reason": "engine-sync: " + stages +
-			" failed after this turn's framework edits — the mirror is stale. Repair it now, then end the turn: " +
-			"a dangling ~/.claude link → engine-sync global (prunes orphaned global-command links; a stale " +
-			"~/.claude/agents link is removed by hand); a stale or orphan mirror file → engine-sync build .; " +
-			"then engine-sync check . must pass. Output of the failing stage(s):\n" + text}
+			" failed after this turn's source edits — the mirror is stale. Repair it now, then end the turn: " +
+			"a dangling source link → repair its named source; a stale or orphan mirror file → " + shellPath(e.Writer()) + " build .; " +
+			"then " + shellPath(e.Writer()) + " check . must pass. Output of the failing stage(s):\n" + text}
 	}
 	if err := json.NewEncoder(stdout).Encode(answer); err != nil {
 		fmt.Fprintf(stderr, "engine-sync hook claude stop: write the answer: %v\n", err)
 	}
 	return 0
-}
-
-// restoreFlag puts a claimed flag back after a failed pass; a fresh flag a
-// concurrent mark set already keeps the project dirty.
-func restoreFlag(claim, flag string) error {
-	if _, err := os.Lstat(flag); err == nil {
-		return os.Remove(claim)
-	}
-	return atomicfile.Move(claim, flag)
 }
 
 // Start rebuilds a stale mirror (a `git pull` lands here) and refreshes
@@ -248,9 +305,14 @@ func restoreFlag(claim, flag string) error {
 func Start(stderr io.Writer, e Context, runner StageRunner) int {
 	cwd, err := os.Getwd()
 	if err != nil {
-		cwd = "."
+		fmt.Fprintf(stderr, "engine-sync hook claude start: getwd: %v\n", err)
+		return 0
 	}
-	if root := ProjectRoot(e, cwd); root != "" {
+	root, rootErr := resolveProjectRoot(e, cwd, true)
+	if rootErr != nil {
+		fmt.Fprintf(stderr, "engine-sync hook claude start: %v\n", rootErr)
+	}
+	if root != "" {
 		if scoped, err := InScope(root); err != nil {
 			fmt.Fprintf(stderr, "engine-sync hook claude start: %v\n", err)
 		} else if scoped {
@@ -279,3 +341,5 @@ func Start(stderr io.Writer, e Context, runner StageRunner) int {
 	}
 	return 0
 }
+
+func shellPath(path string) string { return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'" }

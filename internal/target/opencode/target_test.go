@@ -90,7 +90,7 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	}
 	worker, _ := os.ReadFile(filepath.Join(root, ".opencode", "agent", "worker.md"))
 	if !strings.Contains(string(worker), "mode: all") ||
-		!strings.Contains(string(worker), "model: openai/gpt-6.1-sol-fast") ||
+		!strings.Contains(string(worker), `model: "openai/gpt-6.1-sol-fast"`) ||
 		!strings.Contains(string(worker), "tools:\n") ||
 		!strings.Contains(string(worker), "  edit: false\n") ||
 		strings.Contains(string(worker), "  read: false\n") ||
@@ -149,7 +149,7 @@ func TestOpenCodeAgentModelOverrideWinsOverDefault(t *testing.T) {
 		t.Fatalf("build result=%#v err=%v", result, err)
 	}
 	worker, err := os.ReadFile(filepath.Join(root, ".opencode", "agent", "worker.md"))
-	if err != nil || !strings.Contains(string(worker), "model: openai/other\n") {
+	if err != nil || !strings.Contains(string(worker), "model: \"openai/other\"\n") {
 		t.Fatalf("override was not emitted: worker=%q err=%v", worker, err)
 	}
 }
@@ -159,7 +159,7 @@ func TestOpenCodeUnmappedModelAliasIsOmittedWithAWarning(t *testing.T) {
 	home := filepath.Join(root, "home")
 	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"opencode":{"modelMap":{"opus":"openai/gpt-6.1-sol"}}}`)
 	unmapped := filepath.Join(root, ".claude", "agents", "worker.md")
-	writeOpenCodeFixture(t, unmapped, "---\ndescription: Worker role.\nmodel: inherit\n---\nWork.\n")
+	writeOpenCodeFixture(t, unmapped, "---\ndescription: Worker role.\nmodel: unmapped-tier\n---\nWork.\n")
 	writeOpenCodeFixture(
 		t,
 		filepath.Join(root, ".claude", "agents", "lead.md"),
@@ -170,7 +170,7 @@ func TestOpenCodeUnmappedModelAliasIsOmittedWithAWarning(t *testing.T) {
 	if err != nil || !result.OK {
 		t.Fatalf("build result=%#v err=%v", result, err)
 	}
-	want := `unmapped OpenCode model alias "inherit" in ` + unmapped + " — model omitted"
+	want := `unmapped OpenCode model alias "unmapped-tier" in ` + unmapped + " — model omitted"
 	if !containsProblem(result.Warnings, want) {
 		t.Fatalf("warnings = %q, want %q", result.Warnings, want)
 	}
@@ -179,7 +179,7 @@ func TestOpenCodeUnmappedModelAliasIsOmittedWithAWarning(t *testing.T) {
 		t.Fatalf("unmapped agent: worker=%q err=%v", worker, err)
 	}
 	lead, err := os.ReadFile(filepath.Join(root, ".opencode", "agent", "lead.md"))
-	if err != nil || !strings.Contains(string(lead), "model: openai/gpt-6.1-sol\n") {
+	if err != nil || !strings.Contains(string(lead), "model: \"openai/gpt-6.1-sol\"\n") {
 		t.Fatalf("mapped agent: lead=%q err=%v", lead, err)
 	}
 }
@@ -262,9 +262,9 @@ func TestCheckReportsUnmarkedConflictAndBuildPreservesIt(t *testing.T) {
 
 func TestOpenCodeWorkbenchParentProjects(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
-	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".professor/workbench.json"}`)
+	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".example/workbench.json"}`)
 	writeOpenCodeFixture(t, filepath.Join(root, "scribe", "CLAUDE.md"), "Scribe.\n")
-	writeOpenCodeFixture(t, filepath.Join(root, "scribe", ".professor", "workbench.json"), `{}`)
+	writeOpenCodeFixture(t, filepath.Join(root, "scribe", ".example", "workbench.json"), `{}`)
 	writeOpenCodeFixture(
 		t,
 		filepath.Join(root, "scribe", ".claude", "agents", "clerk.md"),
@@ -290,8 +290,8 @@ func TestOpenCodeWorkbenchParentProjects(t *testing.T) {
 
 func TestOpenCodeWorkbenchHomeFree(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
-	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".professor/workbench.json"}`)
-	writeOpenCodeFixture(t, filepath.Join(root, ".professor", "workbench.json"), `{}`)
+	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".example/workbench.json"}`)
+	writeOpenCodeFixture(t, filepath.Join(root, ".example", "workbench.json"), `{}`)
 	writeOpenCodeFixture(
 		t,
 		filepath.Join(home, ".claude", "commands", "memo.md"),
@@ -327,15 +327,15 @@ func TestOpenCodeWorkbenchHomeFree(t *testing.T) {
 				t.Errorf("home sentinel=%q err=%v", data, err)
 			}
 			data, err := os.ReadFile(filepath.Join(root, ".opencode", "command", "local.md"))
-			if err != nil || !strings.Contains(string(data), "Use /tools-review.") {
-				t.Errorf("home roster not used: %q err=%v", data, err)
+			if err != nil || !strings.Contains(string(data), "Use /tools:review.") {
+				t.Errorf("unread home roster changed reference: %q err=%v", data, err)
 			}
 		})
 	}
 }
 
 func TestOpenCodeWorkbenchProbeErrors(t *testing.T) {
-	t.Setenv("ENGINE_SYNC_WORKBENCH_MARKER", ".professor/workbench.json")
+	t.Setenv("ENGINE_SYNC_WORKBENCH_MARKER", ".example/workbench.json")
 	for _, scenario := range []string{"root", "child"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, home := testjail.Scratch(t), testjail.Scratch(t)
@@ -362,7 +362,7 @@ func TestOpenCodeWorkbenchProbeErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 			sentinel := filepath.Join(home, ".config", "opencode", "command", "old.md")
-			body := artifact.Prefix + " from fixture\n"
+			body := artifact.Marker(artifact.Markdown, "fixture") + "\n"
 			writeOpenCodeFixture(t, sentinel, body)
 			var child string
 			if scenario == "child" {
@@ -380,7 +380,7 @@ func TestOpenCodeWorkbenchProbeErrors(t *testing.T) {
 					t.Errorf("home sentinel=%q err=%v, want %q", raw, err, body)
 				}
 			} else {
-				want := "inspect workbench " + filepath.Join(child, ".professor") + ": "
+				want := "inspect workbench " + filepath.Join(child, ".example") + ": "
 				configPrefix := "config " + filepath.Join(child, ".claude", "engine-sync.json") + ": "
 				found := false
 				for _, problem := range result.Problems {
@@ -394,7 +394,7 @@ func TestOpenCodeWorkbenchProbeErrors(t *testing.T) {
 	}
 }
 
-func TestOpenCodeRealAgentBeatsDanglingTwin(t *testing.T) {
+func TestOpenCodeRealAgentCollidesWithDanglingTwin(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	source := filepath.Join(root, ".claude", "agents", "scan-api.md")
 	writeOpenCodeFixture(t, source, "---\ndescription: Old.\n---\nOld.\n")
@@ -413,15 +413,22 @@ func TestOpenCodeRealAgentBeatsDanglingTwin(t *testing.T) {
 	writeOpenCodeFixture(t, realSource, "---\ndescription: Scan.\n---\nScan.\n")
 	result, err = Compile(Options{Root: root, Home: home, Mode: ModeBuild})
 	body, readErr := os.ReadFile(filepath.Join(root, ".opencode", "agent", "scan-api.md"))
-	warnings := 0
-	for _, warning := range result.Warnings {
-		if strings.Contains(warning, source) && strings.Contains(warning, realSource) {
-			warnings++
-		}
+	if err != nil || result.OK || readErr != nil || !containsProblem(result.Problems, "CONFLICT") || !containsProblem(result.Problems, source) || !containsProblem(result.Problems, realSource) || !strings.Contains(string(body), "Old.") {
+		t.Fatalf("collision must preserve incumbent: result=%#v error=%v body=%q read=%v", result, err, body, readErr)
 	}
-	if err != nil || !result.OK || readErr != nil ||
-		!strings.Contains(string(body), generatedMarker("api/.claude/agents/scan.md")) ||
-		warnings != 1 {
-		t.Fatalf("build=%#v err=%v body=%q read=%v replacement warnings=%d", result, err, body, readErr, warnings)
+}
+
+func TestReviewDescriptionAndPathClassification(t *testing.T) {
+	root := filepath.Join(testjail.Scratch(t), "agent", "project")
+	home := testjail.Scratch(t)
+	writeOpenCodeFixture(t, filepath.Join(root, "CLAUDE.md"), "Sample\n")
+	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "commands", "hello.md"), "---\ndescription: Hello.\n---\nHi.\n")
+	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "commands", "nodesc.md"), "No description.\n")
+	result, e := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if e != nil || !result.OK {
+		t.Fatalf("one command aborted tree: %+v error=%v", result, e)
+	}
+	if _, e := os.Stat(filepath.Join(root, ".opencode", "command", "hello.md")); e != nil {
+		t.Fatal(e)
 	}
 }

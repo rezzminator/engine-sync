@@ -31,9 +31,18 @@ type Config struct {
 	Sources         map[string]string `json:"-"`
 	Deprecations    []string          `json:"-"`
 	Rewrites        []Rewrite         `json:"rewrites"`
+	CommandDirs     []string          `json:"commandDirs"`
+}
+
+type Review struct {
+	ModelAlias    string `json:"modelAlias"`
+	DefaultEffort string `json:"defaultEffort"`
+	Prompt        string `json:"prompt"`
+	SlotPrompt    string `json:"slotPrompt"`
 }
 
 type Codex struct {
+	Review          Review            `json:"review"`
 	GlobalCommands  bool              `json:"globalCommands"`
 	ModelMap        map[string]string `json:"modelMap"`
 	RootAdapter     string            `json:"rootAdapter"`
@@ -64,6 +73,8 @@ type MCP struct {
 }
 
 type Machine struct {
+	SourceAgentsDir      string            `json:"sourceAgentsDir"`
+	AgentMarkerDir       string            `json:"agentMarkerDir"`
 	ModelMap             map[string]string `json:"modelMap"`
 	ClaudeAgentsDir      string            `json:"claudeAgentsDir"`
 	LegacyCodexAgentsDir string            `json:"legacyCodexAgentsDir"`
@@ -82,6 +93,7 @@ type MachineFile struct {
 	WorkbenchMarker string    `json:"workbenchMarker"`
 	MCP             MCP       `json:"mcp"`
 	Rewrites        []Rewrite `json:"rewrites"`
+	CommandDirs     []string  `json:"commandDirs"`
 	Machine         Machine   `json:"machine"`
 }
 
@@ -92,7 +104,7 @@ type Rewrite struct {
 	Replace string   `json:"replace"`
 }
 
-const DefaultAgentPreamble = "You are the {{.Name}} role in this repository, running as a native {{.Engine}} subagent.\nFirst action: read the repository root {{.Root}} in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\n"
+const DefaultAgentPreamble = "You are the {{.Name}} role in this repository, running as a native {{.Engine}} subagent.\nRead the repository root {{.Root}} before starting your task.\n\n"
 
 const DefaultRootAdapter = `
 ## {{.Engine}} adapter — reading this file in the {{.Engine}} harness
@@ -118,13 +130,15 @@ func Default() Config {
 		OpenCode: OpenCode{
 			ModelMap:      map[string]string{},
 			AgentPreamble: DefaultAgentPreamble,
-			Permission:    Permission{Tools: []ToolPermission{{Name: "*", Value: PermissionValue{Action: "allow"}}}},
+			Permission:    Permission{},
 			Agent:         map[string]OpenCodeAgent{},
 			MirrorFiles:   []string{},
 		},
-		Rewrites: []Rewrite{},
-		MCP:      MCP{GlobalServers: []string{}, Renamed: map[string]string{}},
+		Rewrites:    []Rewrite{},
+		CommandDirs: []string{},
+		MCP:         MCP{GlobalServers: []string{}, Renamed: map[string]string{}},
 		Machine: Machine{
+			SourceAgentsDir:      "agents",
 			ModelMap:             defaultModelMap(),
 			ClaudeAgentsDir:      "",
 			GeneratedAgentsDir:   paths.ClaudeVariantStore,
@@ -156,12 +170,12 @@ func LoadConfigLayers(root string, homes ...string) (Config, error) {
 		home = homes[0]
 	} else {
 		var err error
-		home, err = os.UserHomeDir()
+		home, err = paths.Home()
 		if err != nil {
 			return Config{}, err
 		}
 	}
-	return Resolve(root, home, os.Getenv)
+	return Resolve(root, home, paths.Getenv)
 }
 
 func sourceForError(cfg Config, err error) string {
@@ -199,6 +213,9 @@ func readObjectWithoutVersion(path string) (map[string]json.RawMessage, bool, er
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("config %s: read config: %w", path, err)
+	}
+	if err := uniqueJSON(raw); err != nil {
+		return nil, false, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	var object map[string]json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -304,6 +321,17 @@ func validateValue(raw json.RawMessage, shape reflect.Type, key string) error {
 }
 
 func Validate(cfg Config) error {
+	if e := RelativePath(cfg.Machine.SourceAgentsDir, "machine.sourceAgentsDir"); e != nil {
+		return e
+	}
+	if cfg.Machine.AgentMarkerDir != "" {
+		if e := RelativePath(cfg.Machine.AgentMarkerDir, "machine.agentMarkerDir"); e != nil {
+			return e
+		}
+	}
+	if cfg.Codex.Review.DefaultEffort != "" && !strings.Contains("|low|medium|high|xhigh|", "|"+cfg.Codex.Review.DefaultEffort+"|") {
+		return fmt.Errorf("codex.review.defaultEffort: invalid effort %q", cfg.Codex.Review.DefaultEffort)
+	}
 	for _, home := range cfg.Machine.CodexHomes {
 		if !filepath.IsAbs(home) {
 			return fmt.Errorf("machine.codexHomes: %q must be absolute", home)
@@ -327,7 +355,7 @@ func Validate(cfg Config) error {
 			return err
 		}
 	}
-	for key, values := range map[string][]string{"opencode.mirrorFiles": cfg.OpenCode.MirrorFiles, "machine.retiredFiles": cfg.Machine.RetiredFiles, "codex.excludeDirs": cfg.Codex.ExcludeDirs} {
+	for key, values := range map[string][]string{"opencode.mirrorFiles": cfg.OpenCode.MirrorFiles, "machine.retiredFiles": cfg.Machine.RetiredFiles, "codex.excludeDirs": cfg.Codex.ExcludeDirs, "commandDirs": cfg.CommandDirs} {
 		for _, value := range values {
 			if err := RelativePath(value, key); err != nil {
 				return err
@@ -387,7 +415,7 @@ func Validate(cfg Config) error {
 
 // A dangling config symlink is present but unreadable, never a missing policy.
 func readConfigFile(path string) ([]byte, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := paths.ReadRegular(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if _, statErr := os.Lstat(path); statErr == nil {
 			return nil, fmt.Errorf("unreadable config: %v", err)
@@ -405,7 +433,7 @@ type SourceRow struct {
 }
 
 func Describe(cfg Config) []SourceRow {
-	raw, _ := json.Marshal(MachineFile{Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine})
+	raw, _ := json.Marshal(MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine})
 	var object map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &object)
 	var rows []SourceRow

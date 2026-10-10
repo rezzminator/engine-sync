@@ -88,6 +88,25 @@ func executeCodex(root, home string, policy config.Config, mode Mode, model *cla
 	}
 	target := Target{}
 	r, ok := engine.Execute(*model, policy, codexMode(mode), target.Render, target.Roots, target.Validate)
+	if !model.Workbench && (policy).Codex.GlobalCommands {
+		machine, e := config.Resolve("", home, paths.Getenv)
+		if e != nil {
+			return Result{}, e
+		}
+		roster, e := config.ResolveTargets(paths.Getenv, home, machine, config.Targets{})
+		if e != nil {
+			return Result{}, e
+		}
+		globals, pass := engine.Commands(home, "", machine, *roster.CodexHomes, false, codexMode(mode), target.Render, target.Roots, target.Validate)
+		ok = ok && pass
+		r.Problems = append(r.Problems, globals.Problems...)
+		r.Warnings = append(r.Warnings, globals.Warnings...)
+		r.Actions = append(r.Actions, globals.Actions...)
+		r.Wrote += globals.Wrote
+		r.Unchanged += globals.Unchanged
+		r.Deleted += globals.Deleted
+	}
+
 	return Result{OK: ok, Dangling: r.Dangling, Warnings: r.Warnings, Problems: r.Problems, Rebuildable: r.Rebuildable, Wrote: r.Wrote, Unchanged: r.Unchanged, Deleted: r.Deleted, Actions: r.Actions}, nil
 }
 
@@ -107,14 +126,21 @@ func RunGlobalCommands(options GlobalCommandsOptions) (Result, error) {
 			return Result{}, err
 		}
 	}
-	cfg := config.Default()
+	cfg, err := config.Resolve("", home, paths.Getenv)
+	if err != nil {
+		return Result{}, err
+	}
 	if options.Config != nil {
 		cfg = *options.Config
 	}
-	p := claudesource.LoadMachineCommands(home, sourceHome, options.Uninstall)
+	p := claudesource.LoadMachineCommands(home, sourceHome, options.Uninstall, cfg)
 	p.CodexHomes = options.CodexHomes
 	if p.CodexHomes == nil {
-		p.CodexHomes = []string{filepath.Join(home, ".codex")}
+		roster, err := config.ResolveTargets(paths.Getenv, home, cfg, config.Targets{})
+		if err != nil {
+			return Result{}, err
+		}
+		p.CodexHomes = *roster.CodexHomes
 	}
 	t := Target{}
 	r, ok := engine.Execute(p, cfg, codexMode(options.Mode), t.Render, t.Roots, t.Validate)
@@ -146,7 +172,7 @@ func resolveRoot(root string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve repository root: %w", err)
 	}
-	return filepath.Clean(root), nil
+	return paths.PhysicalPath(root)
 }
 
 func resolveCodexHome(home string) (string, error) {
@@ -186,24 +212,35 @@ func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
 		sources = append(sources, filepath.Join(child.Root, ".claude"))
 	}
 	names := []string{filepath.Join(p.Root, ".codex", "agents"), filepath.Join(p.Root, ".codex", "skills")}
-	if cfg.Codex.GlobalCommands && !p.Workbench {
-		names = append(names, filepath.Join(p.Home, ".codex", "skills"), filepath.Join(p.Home, ".codex", "prompts"))
-	}
 	roots := make([]artifact.Root, 0, len(names))
-	for _, name := range names {
-		roots = append(roots, artifact.Root{Path: name, SourceRoots: sources})
+	for _, project := range p.Projects {
+		roots = append(roots, artifact.Root{Path: filepath.Join(p.Root, project, "AGENTS.md"), ValidateOnly: true})
 	}
-	for _, name := range []string{filepath.Join(p.Root, ".codex", "config.toml"), filepath.Join(p.Home, ".codex", "config.toml"), filepath.Join(p.Home, ".codex", "agents")} {
+	for _, name := range names {
+		roots = append(roots, artifact.Root{Path: name, SourceRoots: sources, InspectForeign: filepath.Base(name) == "agents"})
+	}
+	for _, name := range []string{filepath.Join(p.Root, ".codex", "config.toml")} {
 		roots = append(roots, artifact.Root{Path: name, ValidateOnly: true})
+	}
+	if !p.Workbench && !cfg.Codex.GlobalCommands {
+		homes := p.CodexHomes
+		if homes == nil {
+			homes = []string{filepath.Join(p.Home, ".codex")}
+		}
+		for _, home := range homes {
+			for _, name := range []string{"agents", "config.toml"} {
+				roots = append(roots, artifact.Root{Path: filepath.Join(home, name), ValidateOnly: true})
+			}
+		}
 	}
 	return roots
 }
 
 func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
 	if p.Scope == claudesource.MachineScope {
-		return renderMachine(p, cfgAll)
+		return renderCodexMachine(p, cfgAll)
 	}
-	root, home, cfg := p.Root, p.Home, cfgAll.Codex
+	root, cfg := p.Root, cfgAll.Codex
 	if p.Workbench {
 		cfg.GlobalCommands = false
 	}
@@ -215,7 +252,17 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 
 	projects := discoverProjects(root, cfg, &result, cfgAll.WorkbenchMarker)
 	roster := discoverCommandRoster(root, cfg, &result)
-	transform := TransformOptions{ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, Rewrites: cfgAll.Rewrites}
+	for _, rel := range cfgAll.CommandDirs {
+		for name, value := range discoverCommandRosterIn(filepath.Join(root, rel), cfg.ExcludeDirs, &result) {
+			roster[name] = value
+		}
+	}
+	if p.SourceCommandDir != "" {
+		for name, value := range discoverCommandRosterIn(p.SourceCommandDir, nil, &result) {
+			roster[name] = value
+		}
+	}
+	transform := TransformOptions{Review: cfg.Review, ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, Rewrites: cfgAll.Rewrites}
 	agentsDocumentTransform := transform
 	agentsDocumentTransform.ReplaceClaudeFile = true
 
@@ -226,7 +273,11 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 			continue
 		}
 		if project == "." {
-			adapter, _ := config.RenderTemplate(cfg.RootAdapter, config.TemplateData{Engine: "Codex", Source: "CLAUDE.md", Root: "AGENTS.md"})
+			adapter, err := config.RenderTemplate(cfg.RootAdapter, config.TemplateData{Engine: "Codex", Source: "CLAUDE.md", Root: "AGENTS.md"})
+			if err != nil {
+				problem(fmt.Sprintf("render codex.rootAdapter for %s: %v", src, err))
+				continue
+			}
 			content += adapter
 		}
 		rel, _ := filepath.Rel(root, src)
@@ -241,9 +292,6 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 	compileAgents(root, projects, cfg, transform, add, problem, warn, &result)
 	compileRepoCommands(root, cfg, transform, roster, add, problem, warn, &result)
 	compileRepoSkills(root, add, problem, &result)
-	if cfg.GlobalCommands {
-		compileInstalledGlobalCommands(home, home, add, problem, warn, &result, cfgAll)
-	}
 
 	mcp, err := renderMCP(root, &p, "")
 	if err != nil {

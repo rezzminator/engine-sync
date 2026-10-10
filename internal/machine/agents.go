@@ -15,7 +15,7 @@ import (
 
 // GlobalAgentsOptions selects the host HOME whose global Codex agents get
 // (re)compiled and installed. The source directory is always
-// {SourceRepo}/templates/global/agents. Installs land at
+// {SourceRepo}/{machine.sourceAgentsDir}. Installs land at
 // {ClaudeConfigDir}/agents for every configured Claude account (a symlink to
 // the raw .md, Claude reads it directly) and at {CodexHome}/agents for every
 // configured Codex home — there as a REGULAR FILE holding the compiled TOML,
@@ -24,7 +24,7 @@ type GlobalAgentsOptions struct {
 	Source *source.Project
 	Config *config.Config
 	Home   string
-	// SourceRepo selects templates/global/agents inside a repository. Empty
+	// SourceRepo selects machine.sourceAgentsDir inside a repository. Empty
 	// uses the Claude config directory's agents registry as its source.
 	SourceRepo string
 	// ClaudeConfigDirs are the Claude config dirs whose agents/ registry
@@ -91,16 +91,16 @@ type GlobalAgentAction struct {
 }
 
 // RunGlobalAgents compiles
-// every {SourceRepo}/templates/global/agents/*.md, validates every compiled
+// every {SourceRepo}/{machine.sourceAgentsDir}/*.md, validates every compiled
 // TOML parses, then installs each agent twice.
 //
 // Claude gets a SYMLINK: every configured Claude agents registry
 // (ClaudeConfigDirs, {Home}/.claude by default) points at the clone's .md, so
 // an edit to the source propagates with no reinstall. A regular-file copy
-// already at a desired target (the shape the old copy-based installer left
-// behind) is replaced with the link; a symlink pointing outside the source
-// repository is a conflict this never touches — see
-// ClassifyGlobalLink/ApplyGlobalLink in globallink.go.
+// already at a desired target is replaced only with proven ownership. An
+// unmarked copy from the old installer is refused, preserved and fails the
+// run. An unowned symlink is also a conflict — see
+// ClassifyGlobalLink in globallink.go.
 //
 // Codex gets a REGULAR FILE: {CodexHome}/agents/<name>.toml holds the compiled
 // bytes outright, because Codex's role loader opens a role with O_NOFOLLOW and
@@ -154,7 +154,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	// same fail-loud order the host script used.
 	model := options.Source
 	if model == nil {
-		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants)
+		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
 		if e != nil {
 			return GlobalAgentsResult{}, e
 		}
@@ -222,7 +222,11 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 			}
 		}
 		for _, config := range claudeConfigDirs {
-			if paths.SameEntry(filepath.Join(config, "agents", filepath.Base(agent.mdSource)), agent.mdSource) {
+			same, e := paths.SameEntry(filepath.Join(config, "agents", filepath.Base(agent.mdSource)), agent.mdSource)
+			if e != nil {
+				return GlobalAgentsResult{}, e
+			}
+			if same {
 				continue
 			}
 			links = append(
@@ -247,7 +251,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		result.Roles = append(result.Roles, found)
 		switch state {
 		case GlobalRoleForeign:
-			result.Problems = append(result.Problems, found.Describe())
+			// Reconciliation below reports the conflict once.
 			continue
 		case GlobalRoleCurrent:
 			continue
@@ -299,7 +303,13 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		rebuildable[p] = true
 	}
 	for _, problem := range applied.Problems {
-		if !rebuildable[problem] {
+		duplicate := false
+		for _, link := range result.Installed {
+			if link.State == GlobalLinkConflict && strings.Contains(problem, link.Path) {
+				duplicate = true
+			}
+		}
+		if !rebuildable[problem] && !duplicate {
 			result.Problems = append(result.Problems, problem)
 		}
 	}
@@ -326,7 +336,7 @@ type compiledAgent struct {
 // partial roster.
 func compileGlobalAgents(home, sourceRepo string, cfg *config.Config) ([]compiledAgent, error) {
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants)
+	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
 	if err != nil {
 		return nil, err
 	}

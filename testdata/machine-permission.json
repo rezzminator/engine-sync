@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "opencode": {
+    "permission": {
+      "*": "allow",
+      "bash": {
+        "*": "allow",
+        "git commit": "deny",
+        "git commit *": "deny",
+        "git push": "deny",
+        "git push *": "deny",
+        "git tag": "deny",
+        "git tag *": "deny",
+        "git merge": "deny",
+        "git merge *": "deny",
+        "git rebase": "deny",
+        "git rebase *": "deny",
+        "git reset": "deny",
+        "git reset *": "deny",
+        "git cherry-pick": "deny",
+        "git cherry-pick *": "deny",
+        "git revert": "deny",
+        "git revert *": "deny",
+        "git am": "deny",
+        "git am *": "deny",
+        "git -C * commit": "deny",
+        "git -C * commit *": "deny",
+        "git -C * push": "deny",
+        "git -C * push *": "deny",
+        "git -C * tag": "deny",
+        "git -C * tag *": "deny",
+        "git -C * merge": "deny",
+        "git -C * merge *": "deny",
+        "git -C * rebase": "deny",
+        "git -C * rebase *": "deny",
+        "git -C * reset": "deny",
+        "git -C * reset *": "deny",
+        "git -C * cherry-pick": "deny",
+        "git -C * cherry-pick *": "deny",
+        "git -C * revert": "deny",
+        "git -C * revert *": "deny",
+        "git -C * am": "deny",
+        "git -C * am *": "deny",
+        "gh release*": "deny"
+      },
+      "doom_loop": "allow",
+      "edit": {
+        "**": "allow",
+        "**/.claude/**": "deny",
+        "**/AGENTS.md": "deny",
+        "**/CLAUDE.md": "deny",
+        ".opencode/**": "deny",
+        "AGENTS.md": "deny",
+        "CLAUDE.md": "deny"
+      },
+      "external_directory": "allow"
+    }
+  }
+}

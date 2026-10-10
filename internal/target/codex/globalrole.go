@@ -23,6 +23,4 @@ var ReadGlobalRoleFile = reconciler.ReadGlobalRoleFile
 
 var ClassifyGlobalRole = reconciler.ClassifyGlobalRole
 
-var ApplyGlobalRole = reconciler.ApplyGlobalRole
-
 func globalRoleHeader(source string) string { return artifact.Marker(artifact.TOML, source) + "\n" }

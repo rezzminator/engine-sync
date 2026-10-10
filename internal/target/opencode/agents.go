@@ -3,6 +3,8 @@ package opencode
 import (
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/rewrite"
 	claudesource "github.com/rezzminator/engine-sync/internal/source"
 	"path/filepath"
@@ -48,27 +50,32 @@ func compileOpenCodeAgents(
 	knownServers := knownMCPServers(model, root, policy.MCP)
 	for _, project := range projects {
 		for _, entry := range discoverOpenCodeAgents(filepath.Join(root, project, ".claude", "agents"), problem, dangling, model) {
-			name := strings.TrimSuffix(filepath.Base(entry.Path), ".md")
-			if project != "." {
-				name += "-" + project
+			base := strings.TrimSuffix(filepath.Base(entry.Path), ".md")
+			name, register, err := claudesource.RoleName(base, project, policy.Codex)
+			if err != nil {
+				problem("%s: %v", entry.Path, err)
+				continue
 			}
-			if previous, exists := seen[name]; exists {
-				if previous.Target == "" || entry.Target != "" {
-					warn("skip %s — root agent %s owns the registration", filepath.ToSlash(entry.Path), name)
-					continue
-				}
-				warn("source unresolvable: %s — compiling real source %s instead", previous.Path, entry.Path)
+			if !register {
+				warn("skip agent %s — never-register policy", entry.Path)
+				continue
 			}
-			seen[name] = entry
+			key := paths.FoldName(name)
+			if previous, exists := seen[key]; exists {
+				problem("%s role name %s from %s and %s", reconcile.Conflict, name, previous.Path, entry.Path)
+				continue
+			}
+			seen[key] = entry
+
 			if entry.Target != "" {
 				kept = append(kept, name)
 				continue
 			}
-			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, skip, warn, model, policy)
+			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, problem, warn, model, policy)
 		}
 	}
 	for _, name := range kept {
-		if entry := seen[name]; entry.Target != "" {
+		if entry := seen[paths.FoldName(name)]; entry.Target != "" {
 			add(artifact.Artifact{Path: filepath.Join(root, ".opencode", "agent", name+".md"), Kept: &artifact.SourceLink{Path: entry.Path, Target: entry.Target}})
 		}
 	}
@@ -111,7 +118,7 @@ func compileOpenCodeAgent(
 		mode = value
 	}
 	description := chain.Apply(strings.TrimSpace(fields["description"]), ctx)
-	content := "---\n# " + generatedMarker(
+	content := "---\n" + artifact.Marker(artifact.YAMLFront,
 		filepath.ToSlash(rel),
 	) + "\ndescription: " + quoteOpenCodeYAML(
 		description,
@@ -121,13 +128,13 @@ func compileOpenCodeAgent(
 		alias = strings.TrimSpace(alias[:comment])
 	}
 	if pin := strings.TrimSpace(front.Engine["opencode"]["model"]); pin != "" {
-		content += "model: " + pin + "\n"
-	} else if alias != "" {
+		content += "model: " + quoteOpenCodeYAML(pin) + "\n"
+	} else if alias != "" && alias != "inherit" {
 		model, ok := modelMap[alias]
 		if !ok || strings.TrimSpace(model) == "" {
 			warn("unmapped OpenCode model alias %q in %s — model omitted", alias, path)
 		} else {
-			content += "model: " + strings.TrimSpace(model) + "\n"
+			content += "model: " + quoteOpenCodeYAML(strings.TrimSpace(model)) + "\n"
 		}
 	}
 	if tools, ok := fields["tools"]; ok {
@@ -144,7 +151,11 @@ func compileOpenCodeAgent(
 	if agent, ok := policy.OpenCode.Agent[name]; ok {
 		content += renderAgentPermission(agent.Permission)
 	}
-	preamble, _ := config.RenderTemplate(policy.OpenCode.AgentPreamble, config.TemplateData{Name: name, Engine: "OpenCode", Source: filepath.ToSlash(rel), Root: "AGENTS.md"})
+	preamble, err := config.RenderTemplate(policy.OpenCode.AgentPreamble, config.TemplateData{Name: name, Engine: "OpenCode", Source: filepath.ToSlash(rel), Root: "AGENTS.md"})
+	if err != nil {
+		skip("render opencode.agentPreamble for %s: %v", path, err)
+		return
+	}
 	content += "---\n" + preamble + chain.Apply(strings.TrimSpace(body), ctx) + "\n"
 	add(artifact.Artifact{Path: filepath.Join(root, ".opencode", "agent", name+".md"), Content: []byte(content), NativeMode: mode, Source: path, Syntax: artifact.YAMLFront})
 }

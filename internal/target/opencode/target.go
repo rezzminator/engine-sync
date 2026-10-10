@@ -40,6 +40,25 @@ func compileOpenCode(options Options) (Result, error) {
 	}
 	target := Target{}
 	r, ok := engine.Execute(*p, *options.Config, openCodeMode(options.Mode), target.Render, target.Roots, target.Validate)
+	if !p.Workbench && (*options.Config).Codex.GlobalCommands {
+		machine, e := config.Resolve("", options.Home, paths.Getenv)
+		if e != nil {
+			return Result{}, e
+		}
+		roster, e := config.ResolveTargets(paths.Getenv, options.Home, machine, config.Targets{})
+		if e != nil {
+			return Result{}, e
+		}
+		globals, pass := engine.Commands(options.Home, "", machine, *roster.CodexHomes, false, openCodeMode(options.Mode), target.Render, target.Roots, target.Validate)
+		ok = ok && pass
+		r.Problems = append(r.Problems, globals.Problems...)
+		r.Warnings = append(r.Warnings, globals.Warnings...)
+		r.Actions = append(r.Actions, globals.Actions...)
+		r.Wrote += globals.Wrote
+		r.Unchanged += globals.Unchanged
+		r.Deleted += globals.Deleted
+	}
+
 	return Result{OK: ok, Warnings: r.Warnings, Problems: r.Problems, Rebuildable: r.Rebuildable, Wrote: r.Wrote, Unchanged: r.Unchanged, Deleted: r.Deleted, Actions: r.Actions}, nil
 }
 
@@ -81,7 +100,7 @@ func resolveOpenCodePath(path, label string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve %s %q: %w", label, path, err)
 	}
-	return filepath.Clean(abs), nil
+	return paths.PhysicalPath(abs)
 }
 
 func openCodeName() string {
@@ -98,15 +117,20 @@ type Target struct{}
 func (Target) Name() string { return "opencode" }
 
 func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
+	if p.Scope == claudesource.MachineScope {
+		return []artifact.Root{{Path: filepath.Join(p.Home, ".config", openCodeName(), "command"), SourceRoots: []string{p.SourceCommandDir}}}
+	}
 	sources := []string{filepath.Join(p.Root, ".claude"), filepath.Join(p.Home, ".claude")}
 	for _, child := range p.Children {
 		sources = append(sources, filepath.Join(child.Root, ".claude"))
 	}
 	names := []string{filepath.Join(p.Root, ".opencode", "agent"), filepath.Join(p.Root, ".opencode", "command"), filepath.Join(p.Root, ".opencode", "skills")}
-	if !p.Workbench {
-		names = append(names, filepath.Join(p.Home, ".config", openCodeName(), "command"))
-	}
+
 	var roots []artifact.Root
+	roots = append(roots, artifact.Root{Path: filepath.Join(p.Root, ".opencode", "opencode.jsonc"), ValidateOnly: true})
+	for _, name := range cfg.OpenCode.MirrorFiles {
+		roots = append(roots, artifact.Root{Path: filepath.Join(p.Root, ".opencode", name), ValidateOnly: true})
+	}
 	for _, name := range names {
 		roots = append(roots, artifact.Root{Path: name, SourceRoots: sources})
 	}
@@ -114,7 +138,10 @@ func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
 }
 
 func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
-	root, home, model := p.Root, p.Home, &p
+	if p.Scope == claudesource.MachineScope {
+		return renderOpenCodeMachine(p, cfg)
+	}
+	root, model := p.Root, &p
 	var diagnostics []diag.Diagnostic
 	var outputs []artifact.Artifact
 	add := func(a artifact.Artifact) { outputs = append(outputs, a) }
@@ -125,7 +152,7 @@ func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Arti
 		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Message: fmt.Sprintf(format, args...)})
 	}
 	skip := func(format string, args ...any) {
-		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, State: reconcile.Invalid, Message: fmt.Sprintf(format, args...)})
+		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Message: fmt.Sprintf(format, args...)})
 	}
 	seen := map[string]bool{}
 	dangling := func(path string, err error) {
@@ -136,12 +163,16 @@ func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Arti
 		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, State: reconcile.Dangling, Path: path, Message: fmt.Sprintf("%s %s: %v", reconcile.Dangling, path, err)})
 	}
 	roster := map[string]string{}
-	for _, source := range []string{
-		filepath.Join(root, ".claude", "commands"),
-		filepath.Join(root, "templates", "global", "commands"),
-		filepath.Join(home, ".claude", "commands"),
-	} {
-		discoverOpenCodeCommandRoster(source, roster, problem, dangling, model)
+	dirs := []string{filepath.Join(root, ".claude", "commands")}
+	for _, rel := range cfg.CommandDirs {
+		dirs = append(dirs, filepath.Join(root, rel))
+	}
+	for _, dir := range dirs {
+		discoverOpenCodeCommandRoster(dir, roster, problem, dangling, model)
+	}
+
+	if p.SourceCommandDir != "" {
+		discoverOpenCodeCommandRoster(p.SourceCommandDir, roster, problem, dangling, model)
 	}
 	projects := p.Projects
 	for _, message := range p.Problems {
@@ -159,18 +190,7 @@ func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Arti
 		skip,
 		dangling, model, cfg,
 	)
-	if !p.Workbench {
-		compileOpenCodeCommands(
-			filepath.Join(home, ".claude", "commands"),
-			"$HOME/.claude/commands",
-			roster,
-			filepath.Join(home, ".config", openCodeName(), "command"),
-			add,
-			problem,
-			skip,
-			dangling, model, cfg,
-		)
-	}
+
 	compileOpenCodeSkills(root, add, problem, skip, dangling, model)
 	compileConfigWithSource(model, root, add, problem, warn, cfg.OpenCode)
 	compileOpenCodeMirrors(root, model, cfg, add, problem, warn)

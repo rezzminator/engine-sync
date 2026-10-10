@@ -133,7 +133,7 @@ func mcpFenceProblems(current, configPath string) []string {
 	fences := 0
 	for _, line := range strings.Split(current, "\n") {
 		switch line {
-		case mcpBegin, predecessorMCPBegin, legacyMCPBegin, artifact.PriorMCP:
+		case mcpBegin, predecessorMCPBegin, artifact.PreviousMCP, artifact.PriorMCP:
 			if inFence {
 				problems = append(problems, fmt.Sprintf(
 					string(reconciler.Conflict)+" %s: a second mcp_servers BEGIN fence starts before the first one's END — hand-fix or remove the stale fence",

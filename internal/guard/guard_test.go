@@ -3,9 +3,11 @@ package guard
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/engine-sync/internal/testjail"
 )
@@ -103,5 +105,91 @@ func TestLockIsHeldUntilReleased(t *testing.T) {
 	}
 	if err := probe(); err != nil {
 		t.Fatalf("after release, a second writer's try = %v, want the lock", err)
+	}
+}
+
+func TestReviewDirtyLockIgnoresWorkingDirectory(t *testing.T) {
+	root, state, cwd := testjail.Scratch(t), testjail.Scratch(t), testjail.Scratch(t)
+	// A literal namespace-like directory must not become part of path resolution.
+	if err := os.Symlink(root, filepath.Join(cwd, "dirty:")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	first, err := CanonicalRoot("dirty:" + root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := Lock(state, "dirty:"+root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	}()
+	t.Chdir(testjail.Scratch(t))
+	second, err := CanonicalRoot("dirty:" + root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second || second != "dirty:"+root {
+		t.Errorf("dirty lock changed with cwd: %q / %q, want %q", first, second, "dirty:"+root)
+	}
+	other, err := Lock(state, "dirty:"+root, 20*time.Millisecond)
+	if err == nil {
+		if err := other(); err != nil {
+			t.Error(err)
+		}
+		t.Fatal("second cwd bypassed held dirty lock")
+	}
+	if !strings.Contains(err.Error(), "BUSY") {
+		t.Fatalf("second lock: %v, want BUSY", err)
+	}
+}
+
+func TestReviewCanonicalWriterRoots(t *testing.T) {
+	root, state := testjail.Scratch(t), testjail.Scratch(t)
+	alias := filepath.Join(testjail.Scratch(t), "alias")
+	if e := os.Symlink(root, alias); e != nil {
+		t.Fatal(e)
+	}
+	if e := Save(state, alias, "0.2.0-alpha", "writer"); e != nil {
+		t.Fatal(e)
+	}
+	if e := Check(state, root, "0.1.0"); !errors.Is(e, ErrNewerWriter) {
+		t.Fatalf("alias bypassed guard: %v", e)
+	}
+}
+
+func TestAuditLockAliasesAndUnicode(t *testing.T) {
+	base, state := testjail.Scratch(t), testjail.Scratch(t)
+	root := filepath.Join(base, "caf\u00e9")
+	if err := os.Mkdir(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	release, err := Lock(state, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	for _, spelling := range []string{alias, filepath.Join(base, "cafe\u0301")} {
+		unlock, err := Lock(state, spelling, 30*time.Millisecond)
+		if unlock != nil {
+			_ = unlock()
+		}
+		if err == nil || !strings.Contains(err.Error(), "BUSY") {
+			t.Errorf("lock spelling bypass %s %v", spelling, err)
+		}
+	}
+	if err := Save(state, root, "0.2.0-alpha", "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(state, filepath.Join(base, "cafe\u0301"), "0.1.0"); !errors.Is(err, ErrNewerWriter) {
+		t.Fatal(err)
 	}
 }

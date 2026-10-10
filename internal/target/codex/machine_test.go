@@ -1,7 +1,9 @@
 package codex
 
 import (
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/testjail"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -36,5 +38,33 @@ func TestFullCheckAgreesWithInstallerGlobalReconciliation(t *testing.T) {
 	}
 	if !check.OK {
 		t.Fatalf("full check disagrees with installer reconciliation: %#v", check.Problems)
+	}
+}
+
+func TestReviewMultiHomeCommands(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprint(reverse), func(t *testing.T) {
+			home := testjail.Scratch(t)
+			source := filepath.Join(home, ".claude", "commands")
+			if e := os.MkdirAll(source, 0755); e != nil {
+				t.Fatal(e)
+			}
+			if e := os.WriteFile(filepath.Join(source, "hello.md"), []byte("---\ndescription: Hello.\n---\nHi.\n"), 0600); e != nil {
+				t.Fatal(e)
+			}
+			homes := []string{filepath.Join(home, ".codex"), filepath.Join(home, ".codex-work")}
+			if reverse {
+				homes[0], homes[1] = homes[1], homes[0]
+			}
+			r, e := RunGlobalCommands(GlobalCommandsOptions{Home: home, CodexHomes: homes})
+			if e != nil || !r.OK {
+				t.Errorf("run %+v %v", r, e)
+			}
+			for _, h := range homes {
+				if _, e := os.Stat(filepath.Join(h, "prompts", "hello.md")); e != nil {
+					t.Errorf("home lost %s: %v", h, e)
+				}
+			}
+		})
 	}
 }

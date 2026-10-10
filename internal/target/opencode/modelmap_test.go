@@ -18,47 +18,6 @@ const openCodeBuiltinDenialsForReadOnly = "tools:\n" +
 	"  invalid: false\n  lsp: false\n  plan_exit: false\n  question: false\n  skill: false\n" +
 	"  task: false\n  todowrite: false\n  webfetch: false\n  websearch: false\n  write: false\n"
 
-func TestDefaultOpenCodeModelMap(t *testing.T) {
-	want := map[string]string{"opus": "", "sonnet": "", "haiku": "", "fable": ""}
-	got := defaultOpenCodeModelMap()
-	for alias, model := range want {
-		if got[alias] != model {
-			t.Fatalf("default model for %q = %q, want %q", alias, got[alias], model)
-		}
-	}
-}
-
-func TestLoadOpenCodeModelMapMergesOverride(t *testing.T) {
-	root := testjail.Scratch(t)
-	writeOpenCodeFixture(
-		t,
-		filepath.Join(root, openCodeBuildConfigPath),
-		`{"modelMap":{"sonnet":"openai/other"}}`,
-	)
-
-	got, err := loadOpenCodeModelMap(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got["sonnet"] != "openai/other" {
-		t.Fatalf("sonnet override = %q, want openai/other", got["sonnet"])
-	}
-	if got["opus"] != "" {
-		t.Fatalf("unlisted opus default = %q, want an unpinned alias", got["opus"])
-	}
-}
-
-func TestLoadOpenCodeModelMapNamesMalformedOverride(t *testing.T) {
-	root := testjail.Scratch(t)
-	path := filepath.Join(root, openCodeBuildConfigPath)
-	writeOpenCodeFixture(t, path, `{"modelMap":`)
-
-	_, err := loadOpenCodeModelMap(root)
-	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "parse") {
-		t.Fatalf("load error = %v, want parse error naming %s", err, path)
-	}
-}
-
 func TestRenderOpenCodeToolsBlockDisablesToolsOutsideClaudeAllowList(t *testing.T) {
 	got, _, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", nil)
 	if err != nil {
