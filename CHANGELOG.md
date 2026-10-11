@@ -2,7 +2,7 @@
 
 Every release of engine-sync. Versions follow [semantic versioning](https://semver.org); each release is the `main` commit tagged `v<version>`, with a GitHub release carrying the section below and the four platform binaries.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-12
 
 ### Added
 
@@ -15,8 +15,7 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 - Layered OpenCode permission patterns retain denies from either layer; a deny wins equal-pattern conflicts and more specific patterns follow broad rules. Missing policies and empty rule sets deny access. Project `bash` entries no longer erase machine git-write denies.
 - Codex keeper MCP regions retain the unbranded legacy script fence syntax readable by 0.1.0 on a fresh machine; the immediately preceding development fence remains accepted for migration.
 - Download locks recover dead owners immediately and expire after 120 seconds. Unavailable hooks save a project-scoped deferred refresh; the next equipped hook in that project runs SessionStart recovery. Hook children are bounded and Stop notices include busy-lock details.
-
-- Development builds report `0.2.0-alpha`; the version gate requires a prerelease newer than the plugin manifest. Release builds and four native CI jobs execute assets to verify the reported version matches their names.
+- Development builds report a prerelease of the next version (`0.3.0-alpha` once 0.2.0 is released); the version gate requires a prerelease newer than the plugin manifest. Release builds and four native CI jobs execute assets to verify the reported version matches their names.
 - Neutral model maps, adapters, agent preambles, MCP knowledge, retirement lists and generated-store defaults replace integrator-specific defaults. Configure previous values to retain their bytes; changed defaults intentionally alter unconfigured mirrors.
 - Global commands render only from machine sources and policy, under machine guards, including during project builds. One resolver selects explicit homes, CODEX_HOME, targets, configured homes and defaults; an explicit empty roster disables Codex homes.
 - Configured Go agent-preamble templates now interpolate fields; legacy root adapters retain literal shell-style placeholders. Project command references also use the configured machine roster, so known global slash commands translate in project bodies. Dotted filenames are preserved instead of being mistaken for commands.

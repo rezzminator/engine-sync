@@ -19,7 +19,7 @@ import (
 
 // Version identifies this build; release builds stamp it with the plugin
 // manifest's version using -ldflags "-X github.com/rezzminator/engine-sync/internal/cli.Version=…".
-var Version = "0.2.0-alpha"
+var Version = "0.3.0-alpha"
 
 // env is the process environment one run reads.
 type env struct {
