@@ -1,403 +1,228 @@
 #!/bin/sh
-# engine-sync: the plugin's one entry point. Every hook runs this POSIX sh
-# script; it finds the engine-sync binary for this plugin version, downloads
-# and checksum-verifies it on first use, and execs it with its own arguments
-# and untouched stdin.
-#
-# Resolution order:
-#   1. $ENGINE_SYNC_BIN, when it names an executable file; never linked;
-#   2. {home}/versions/{version}/engine-sync, when executable;
-#   3. a download of $ENGINE_SYNC_RELEASE_BASE/v{version}/engine-sync_{version}_{os}_{arch},
-#      under a lock, verified against libexec/SHA256SUMS, installed at 2 by an
-#      atomic rename, every other cached version unused for 7 days removed
-#      (never the one the stable link names).
-#
-# {home} is $ENGINE_SYNC_HOME, else $XDG_DATA_HOME/engine-sync (counted only
-# when absolute), else $HOME/.local/share/engine-sync.
-#
-# After 2 or 3 the stable link {home}/bin/engine-sync is pointed at the
-# resolved copy when it is absent, dangling, or names an older version: it
-# only moves forward, so an older plugin seat never pulls back a newer one.
-# Every caller outside the plugin runs that stable path.
-#
-# Under `hook` this script never fails a call: an unavailable binary exits 0
-# with `engine-sync: binary unavailable: {cause}` on stderr, and under
-# `hook claude stop` it also answers a systemMessage naming the cause and that
-# the dirty flag is retained, so the next equipped turn repeats the check.
-# Under any other subcommand an unavailable binary is the same stderr line and
-# exit 1. There is no `set -e`: every failure goes through fail().
-
+# Resolve this plugin's verified release, or an explicit development override.
+# Hook children preserve stdin and always return zero. Failed downloads back
+# off for 60 seconds; lock contention never waits in a hook.
 mode=run
-if [ "${1-}" = hook ]; then
-  mode=hook
-fi
+[ "${1-}" = hook ] && mode=hook
 stop=
-if [ "${1-}" = hook ] && [ "${2-}" = claude ] && [ "${3-}" = stop ]; then
-  stop=1
-fi
-
-# Cleanup state: the lock directory this run holds and its temp files.
-held=
-lock=
-tmp=
-tmplink=
-# The download's curl pid while it runs: on_signal kills it.
-fetch=
-
+[ "${1-}" = hook ] && [ "${2-}" = claude ] && [ "${3-}" = stop ] && stop=1
+held= linkheld= tmp= capture= child= watchdog=
 cleanup() {
-  if [ -n "$tmp" ]; then
-    rm -f "$tmp"
-    tmp=
+  [ -n "$watchdog" ] && kill "$watchdog" 2>/dev/null
+  [ -n "$tmp" ] && rm -f "$tmp"
+  [ -n "$capture" ] && rm -f "$capture"
+  if [ -n "$held" ] && [ "$(cat "$lock/owner" 2>/dev/null)" = "$$" ]; then
+    rm -f "$lock/owner"; rmdir "$lock" 2>/dev/null
   fi
-  if [ -n "$tmplink" ]; then
-    rm -f "$tmplink"
-    tmplink=
-  fi
-  if [ -n "$held" ]; then
-    rmdir "$lock" 2>/dev/null
-    held=
-  fi
+  if [ -n "$linkheld" ]; then rmdir "$linklock" 2>/dev/null; fi
+  held= linkheld= tmp= capture=
 }
-
 on_signal() {
-  if [ -n "$fetch" ]; then
-    kill "$fetch" 2>/dev/null
-    wait "$fetch" 2>/dev/null
-    fetch=
-  fi
+  if [ -n "$child" ]; then kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; fi
   cleanup
-  if [ "$mode" = hook ]; then
-    exit 0
-  fi
+  [ "$mode" = hook ] && exit 0
   exit 1
 }
-
 trap cleanup EXIT
 trap on_signal HUP INT TERM
-
-# json_field TEXT KEY sets field to the first string value of "KEY": "..." in
-# TEXT, key and value on one line, or to nothing. Builtins only.
-json_field() {
-  field=
-  rest=$1
-  while :; do
-    case $rest in
-      *"\"$2\""*) ;;
-      *) return 0 ;;
-    esac
-    rest=${rest#*"\"$2\""}
-    val=${rest#"${rest%%[![:space:]]*}"}
-    case $val in
-      :*) val=${val#:} ;;
-      *) continue ;;
-    esac
-    val=${val#"${val%%[![:space:]]*}"}
-    case $val in
-      \"*\"*) ;;
-      *) continue ;;
-    esac
-    val=${val#\"}
-    field=${val%%\"*}
-    return 0
-  done
+json_quote() {
+  printf '%s' "$1" | awk 'BEGIN {printf "\""; for(i=1;i<32;i++) control[sprintf("%c",i)]=i} {if(NR>1)printf "\\n";for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c=="\\")printf "\\\\";else if(c=="\"")printf "\\\"";else if(c in control)printf "\\u%04x",control[c];else printf "%s",c}} END {print "\""}'
 }
-
-# fail CAUSE: the binary cannot be had. The cause is a fixed phrase or a path,
-# never a quote or a backslash, so the systemMessage needs no escaping.
+notice() { printf '{"systemMessage":%s}\n' "$(json_quote "$1")"; }
+# A deferred refresh is scoped to the canonical session root. Its filename is
+# inert even when a project name contains shell metacharacters.
+pending_path() {
+  pending=
+  pending_root=${CLAUDE_PROJECT_DIR:-$PWD}
+  pending_root=$(cd "$pending_root" 2>/dev/null && pwd -P) || return 1
+  [ "$pending_root" != "$HOME" ] || return 1
+  [ -f "$pending_root/.claude/engine-sync.json" ] || [ -f "$pending_root/.claude/codex-build.json" ] || [ -f "$pending_root/AGENTS.md" ] || return 1
+  pending_state=${ENGINE_SYNC_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/engine-sync}
+  case $pending_state in /*) ;; *) return 1;;esac
+  pending_key=$(printf '%s' "$pending_root" | cksum | awk '{print $1 "-" $2}')
+  pending=$pending_state/deferred/$pending_key
+}
 fail() {
   printf 'engine-sync: binary unavailable: %s\n' "$1" >&2
   if [ "$mode" = hook ]; then
-    if [ -n "$stop" ]; then
-      cat >/dev/null 2>&1
-      printf '{"systemMessage":"engine-sync WARNING: binary unavailable — mirrors were not checked; dirty flag retained (%s)"}\n' "$1"
+    recovery="mirrors refresh at the next SessionStart with an available binary"
+    if pending_path && mkdir -p "${pending%/*}" && printf '%s\n' "$pending_root" >"$pending"; then
+      recovery="deferred refresh saved; the next equipped hook in this project runs SessionStart recovery"
     fi
+    [ -n "$stop" ] && notice "engine-sync WARNING: binary unavailable — mirrors were not checked; $recovery ($1)"
     exit 0
   fi
   exit 1
 }
-
-# 1. the override, never linked: a dev build is not a release.
-if [ -n "${ENGINE_SYNC_BIN-}" ] && [ -f "$ENGINE_SYNC_BIN" ] && [ -x "$ENGINE_SYNC_BIN" ]; then
-  exec "$ENGINE_SYNC_BIN" "$@"
-fi
-
-# home: ENGINE_SYNC_HOME, else XDG_DATA_HOME (counted only when absolute) or
-# $HOME/.local/share, plus /engine-sync. Empty when no home can be resolved.
-home=${ENGINE_SYNC_HOME-}
-case $home in
-  /*) ;;
-  *)
-    home=
-    xdg=${XDG_DATA_HOME-}
-    case $xdg in
-      /*) ;;
-      *) xdg=${HOME:+$HOME/.local/share} ;;
-    esac
-    if [ -n "$xdg" ]; then
-      home=$xdg/engine-sync
+valid_stop_json() {
+  [ "$(wc -c <"$1")" -le 65536 ] || return 1
+  awk '
+  function ws(){while(substr(s,p,1)~/[ \t\r\n]/&&p<=length(s))p++}
+  function string( c,h,i){if(substr(s,p++,1)!="\"")return 0;while(p<=length(s)){c=substr(s,p++,1);if(c=="\"")return 1;if(c in control)return 0;if(c=="\\"){c=substr(s,p++,1);if(c=="u"){h=substr(s,p,4);if(length(h)!=4||h~/[^0-9a-fA-F]/)return 0;p+=4}else if(c!~/[\"\\\/bfnrt]/)return 0}}return 0}
+  function value( c,t,n){ws();if(++depth>100)return 0;c=substr(s,p,1);if(c=="\""){n=string()}else if(c=="{"||c=="["){n=container(c)}else if(c=="t"&&substr(s,p,4)=="true"){p+=4;n=1}else if(c=="f"&&substr(s,p,5)=="false"){p+=5;n=1}else if(c=="n"&&substr(s,p,4)=="null"){p+=4;n=1}else{t=substr(s,p);if(match(t,/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/)){p+=RLENGTH;n=1}else n=0}depth--;return n}
+  function container(open, ending){p++;ending=(open=="{"?"}":"]");ws();if(substr(s,p,1)==ending){p++;return 1}while(p<=length(s)){if(open=="{"){ws();if(!string())return 0;ws();if(substr(s,p++,1)!=":")return 0}if(!value())return 0;ws();if(substr(s,p,1)==ending){p++;return 1}if(substr(s,p++,1)!=",")return 0}return 0}
+  BEGIN{for(i=1;i<32;i++)control[sprintf("%c",i)]=1;p=1;depth=0}
+  {s=s $0 "\n"}
+  END{ws();if(p>length(s))exit 0;if(substr(s,p,1)!="{"||!value())exit 1;ws();if(p<=length(s))exit 1}
+  ' "$1"
+}
+run_binary() {
+  binary=$1; shift
+  [ -s "$binary" ] || fail "empty binary at $binary"
+  # Preserve the caller's input before a noninteractive shell redirects an
+  # asynchronous child's fd 0 to /dev/null (notably Linux /bin/sh).
+  exec 3<&0
+  if [ "$mode" = hook ]; then
+    capture=$(mktemp "${TMPDIR:-/tmp}/engine-sync-hook.XXXXXX") || fail "cannot capture hook output"
+    if pending_path && [ -f "$pending" ]; then
+      # Start either refreshes successfully or retains the binary's dirty flag
+      # on a build failure; both paths hand recovery back to the normal hook.
+      "$binary" hook claude start </dev/null >&2 &
+      child=$!; (sleep 15; kill -TERM "$child" 2>/dev/null; sleep 1; kill -KILL "$child" 2>/dev/null) >/dev/null 2>&1 & watchdog=$!
+      wait "$child"; recovery_rc=$?; child=
+      kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; watchdog=
+      [ "$recovery_rc" -eq 0 ] && rm -f "$pending"
     fi
-    ;;
-esac
-
-# The plugin root is the directory above this script's own.
-case $0 in
-  */*) script=$0 ;;
-  *) script=$(command -v "$0" 2>/dev/null) ;;
-esac
-case $script in
-  */*) root=${script%/*}/.. ;;
-  *) fail "plugin root not found" ;;
-esac
-
-# The version is the manifest's first "version" string, read by builtins.
-version=
+    "$binary" "$@" >"$capture" <&3 &
+    child=$!; (sleep 15; kill -TERM "$child" 2>/dev/null; sleep 1; kill -KILL "$child" 2>/dev/null) >/dev/null 2>&1 & watchdog=$!
+    wait "$child"; rc=$?; child=
+    kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; watchdog=
+    if [ "$rc" -eq 0 ]; then
+      if [ -n "$stop" ] && ! valid_stop_json "$capture";then
+        printf 'engine-sync: hook child returned invalid Stop JSON (%s)\n' "$binary" >&2
+        notice "engine-sync WARNING: hook child returned invalid Stop JSON ($binary); mirrors were not checked"
+      else cat "$capture";fi
+    else
+      printf 'engine-sync: hook child %s exited %s\n' "$binary" "$rc" >&2
+      [ -n "$stop" ] && notice "engine-sync WARNING: hook child exited $rc ($binary); mirrors were not checked"
+    fi
+    exit 0
+  fi
+  "$binary" "$@" <&3 &
+  child=$!; wait "$child"; rc=$?; child=
+  exit "$rc"
+}
+if [ -n "${ENGINE_SYNC_BIN-}" ]; then
+  if [ -f "$ENGINE_SYNC_BIN" ] && [ -x "$ENGINE_SYNC_BIN" ]; then run_binary "$ENGINE_SYNC_BIN" "$@"; fi
+  printf 'engine-sync: unusable ENGINE_SYNC_BIN %s; trying the verified release\n' "$ENGINE_SYNC_BIN" >&2
+fi
+home=${ENGINE_SYNC_HOME-}
+case $home in /*) ;; *) xdg=${XDG_DATA_HOME-};case $xdg in /*) ;; *) xdg=${HOME:+$HOME/.local/share};;esac;home=${xdg:+$xdg/engine-sync};;esac
+[ -n "$home" ] || fail "cannot resolve ENGINE_SYNC_HOME"
+case $0 in */*) script=$0;; *) script=$(command -v "$0" 2>/dev/null);;esac
+case $script in */*) root=${script%/*}/..;; *) fail "plugin root not found";;esac
 manifest=$root/.claude-plugin/plugin.json
-if [ -f "$manifest" ] && [ -r "$manifest" ]; then
-  while [ -z "$version" ] && { IFS= read -r line || [ -n "$line" ]; }; do
-    json_field "$line" version
-    version=$field
-  done <"$manifest"
-fi
-case $version in
-  '' | *[!0-9A-Za-z._+-]*) fail "no plugin version" ;;
-esac
-
-if [ -z "$home" ]; then
-  fail "cannot resolve ENGINE_SYNC_HOME"
-fi
+[ -f "$manifest" ] && [ -r "$manifest" ] || fail "cannot read $manifest"
+# Scan quoted tokens at object depth one; nested version fields never select
+# a cache directory. Duplicate top-level versions are refused.
+version=$(awk 'BEGIN {depth=0;quoted=0;escaped=0;count=0;pending=0;token=""} {for(i=1;i<=length($0);i++){c=substr($0,i,1);if(quoted){if(escaped){token=token c;escaped=0}else if(c=="\\"){escaped=1;token=token c}else if(c=="\""){quoted=0;if(depth==1){if(pending==2){value=token;count++;pending=0}else if(token=="version")pending=1}}else token=token c;continue};if(c=="\""){quoted=1;token=""}else if(c=="{"||c=="["){depth++;pending=0}else if(c=="}"||c=="]"){depth--;pending=0}else if(c==":"&&pending==1)pending=2;else if(c==",")pending=0}} END {if(depth==0&&!quoted&&count==1)print value}' "$manifest")
+is_version() {
+  case $1 in ''|*[!0-9A-Za-z.+-]*) return 1;;esac
+  core=${1%%[-+]*};suffix=${1#"$core"}
+  case $suffix in [-+]|?*+*) return 1;;esac
+  case $core in *[!0-9.]*|.*|*.|*..*|*.*.*.*) return 1;; *.*.*) return 0;;esac
+  return 1
+}
+is_version "$version" || fail "invalid top-level version in $manifest"
 versions=$home/versions
 target=$versions/$version/engine-sync
 link=$home/bin/engine-sync
-
-# is_version NAME: NAME is N.N.N (each N one or more digits) with an optional
-# `-` or `+` suffix of one or more of [0-9A-Za-z.-]. Builtins only.
-is_version() {
-  case $1 in
-    '' | *[!0-9A-Za-z.+-]*) return 1 ;;
-  esac
-  v_core=${1%%[-+]*}
-  v_suffix=${1#"$v_core"}
-  case $v_suffix in
-    [-+]) return 1 ;;
-    ?*+*) return 1 ;;
-  esac
-  case $v_core in
-    *[!0-9.]* | .* | *. | *..* | *.*.*.*) return 1 ;;
-    *.*.*) return 0 ;;
-  esac
-  return 1
-}
-
-# newer A B: version A is newer than version B, by the N.N.N core, then a
-# release over its own pre-release (`-` suffix); two pre-releases of one core,
-# or two builds (`+`), compare as equal: the link stays.
 newer() {
-  a_core=${1%%[-+]*}
-  b_core=${2%%[-+]*}
-  a_rest=$a_core
-  b_rest=$b_core
-  for _ in 1 2 3; do
-    a_n=${a_rest%%.*}
-    b_n=${b_rest%%.*}
-    if [ "$a_n" -gt "$b_n" ]; then
-      return 0
-    fi
-    if [ "$a_n" -lt "$b_n" ]; then
-      return 1
-    fi
-    a_rest=${a_rest#*.}
-    b_rest=${b_rest#*.}
-  done
-  case $1 in
-    "$a_core"-*) return 1 ;;
-  esac
-  case $2 in
-    "$b_core"-*) return 0 ;;
-  esac
+  a_core=${1%%[-+]*};b_core=${2%%[-+]*};a_rest=$a_core;b_rest=$b_core
+  for n in 1 2 3;do a_n=${a_rest%%.*};b_n=${b_rest%%.*};[ "$a_n" -gt "$b_n" ]&&return 0;[ "$a_n" -lt "$b_n" ]&&return 1;a_rest=${a_rest#*.};b_rest=${b_rest#*.};done
+  case $1 in "$a_core"-*) return 1;;esac
+  case $2 in "$b_core"-*) return 0;;esac
   return 1
 }
-
-# point_link: move the stable link to this version's copy when it is absent,
-# dangling, or names an older version; a link naming anything else (the
-# user's own file, a version name this script cannot read) stays. Its failure
-# never fails the run: the cached copy still runs.
 point_link() {
-  is_version "$version" || return 0
-  if [ -e "$link" ]; then
-    if [ ! -L "$link" ]; then
-      return 0
-    fi
-    current=$(readlink "$link" 2>/dev/null) || return 0
-    current=${current%/engine-sync}
-    current=${current##*/}
-    if [ "$current" = "$version" ]; then
-      return 0
-    fi
-    if ! is_version "$current" || ! newer "$version" "$current"; then
-      return 0
-    fi
-  fi
   mkdir -p "$home/bin" 2>/dev/null || return 0
-  tmplink=$home/bin/.link-$$
-  rm -f "$tmplink"
-  ln -s "../versions/$version/engine-sync" "$tmplink" 2>/dev/null || { tmplink=; return 0; }
-  # mv -f onto a link to a directory would move into it; the target is a file.
-  mv -f "$tmplink" "$link" 2>/dev/null || rm -f "$tmplink"
-  tmplink=
-  return 0
-}
-
-# stamp_version marks this version's cache as used now: the cleanup after an
-# install reads the mtime of {versions}/{version}/.last-use.
-stamp_version() {
-  { printf 1 >"$versions/$version/.last-use"; } 2>/dev/null || true
-}
-
-# run_cached ARGS...: links, stamps and execs the installed binary.
-run_cached() {
-  cleanup
-  point_link
-  stamp_version
-  exec "$target" "$@"
-}
-
-# 2. the cache
-if [ -f "$target" ] && [ -x "$target" ]; then
-  run_cached "$@"
-fi
-
-# lock_is_stale: the lock directory is older than 120 seconds. An mtime that
-# cannot be read counts as not stale.
-lock_is_stale() {
-  m=$(stat -c %Y "$lock" 2>/dev/null) || m=$(stat -f %m "$lock" 2>/dev/null) || return 1
-  case $m in
-    '' | *[!0-9]*) return 1 ;;
-  esac
-  [ $(($(date +%s) - m)) -gt 120 ]
-}
-
-# sha256_of FILE prints the file's SHA-256, with shasum else sha256sum.
-sha256_of() {
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
-  else
-    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+  linklock=$home/bin/.link-lock
+  mkdir "$linklock" 2>/dev/null || { printf 'engine-sync: stable link busy; cached binary remains usable\n' >&2;return 0; }
+  linkheld=1
+  if [ -e "$link" ] || [ -L "$link" ];then
+    [ -L "$link" ] || return 0
+    current=$(readlink "$link" 2>/dev/null) || return 0
+    case $current in ../versions/*/engine-sync|"$versions"/*/engine-sync) ;; *) return 0;;esac
+    current=${current%/engine-sync};current=${current##*/}
+    if is_version "$current" && { [ "$current" = "$version" ] || ! newer "$version" "$current"; };then return 0;fi
   fi
+  tmplink=$home/bin/.link-$$
+  ln -s "../versions/$version/engine-sync" "$tmplink" 2>/dev/null || return 0
+  mv -f "$tmplink" "$link" 2>/dev/null || rm -f "$tmplink"
 }
-
-# 3. the download
-asset_os=
-case $(uname -s 2>/dev/null) in
-  Darwin) asset_os=darwin ;;
-  Linux) asset_os=linux ;;
-  *) fail "unsupported platform" ;;
-esac
-asset_arch=
-case $(uname -m 2>/dev/null) in
-  x86_64 | amd64) asset_arch=amd64 ;;
-  arm64 | aarch64) asset_arch=arm64 ;;
-  *) fail "unsupported platform" ;;
-esac
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1;then shasum -a 256 "$1" 2>/dev/null|awk '{print $1}';else sha256sum "$1" 2>/dev/null|awk '{print $1}';fi
+}
+case $(uname -s 2>/dev/null) in Darwin) asset_os=darwin;;Linux) asset_os=linux;;*) fail "unsupported platform";;esac
+case $(uname -m 2>/dev/null) in x86_64|amd64) asset_arch=amd64;;arm64|aarch64) asset_arch=arm64;;*) fail "unsupported platform";;esac
 asset=engine-sync_${version}_${asset_os}_${asset_arch}
-
-command -v curl >/dev/null 2>&1 || fail "curl not found"
-if ! command -v shasum >/dev/null 2>&1 && ! command -v sha256sum >/dev/null 2>&1; then
-  fail "no sha256 tool"
-fi
+command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail "no sha256 tool"
 sums=$root/libexec/SHA256SUMS
-if [ ! -r "$sums" ]; then
-  fail "checksums file unreadable"
+[ -f "$sums" ] && [ -r "$sums" ] || fail "checksums file unreadable"
+expected=$(awk -v a="$asset" '{name=$2;sub(/^\*/,"",name);if(name==a){value=$1;count++}} END{if(count==1&&length(value)==64&&value!~/[^0-9a-f]/)print value}' "$sums")
+[ -n "$expected" ] || fail "no checksum for $asset"
+run_cached() {
+  actual=$(sha256_of "$target")
+  [ "$actual" = "$expected" ] || fail "cached checksum mismatch at $target; remove that cache file to retry"
+  point_link
+  printf 1 >"$versions/$version/.last-use" 2>/dev/null || printf 'engine-sync: cannot stamp cached use\n' >&2
+  # A receipt permits selective cache expiry; foreign children are preserved.
+  printf '%s\n' "$expected" >"$versions/$version/.verified-sha256" 2>/dev/null || printf 'engine-sync: cannot record cache receipt\n' >&2
+  linked=$(readlink "$link" 2>/dev/null);linked=${linked%/engine-sync};linked=${linked##*/}
+  for dir in "$versions"/*;do
+    name=${dir##*/};[ -d "$dir" ] && [ ! -L "$dir" ] && [ "$name" != "$version" ] && [ "$name" != "$linked" ] && is_version "$name" || continue
+    [ -f "$dir/.last-use" ] && [ -n "$(find "$dir/.last-use" -prune -mmin +10080 2>/dev/null)" ] && [ -f "$dir/.verified-sha256" ] && [ -f "$dir/engine-sync" ] || continue
+    receipt=$(cat "$dir/.verified-sha256");case $receipt in *[!0-9a-f]*|'')continue;;esac
+    [ "${#receipt}" -eq 64 ] && [ "$(sha256_of "$dir/engine-sync")" = "$receipt" ] || continue
+    rm -f "$dir/engine-sync" "$dir/.verified-sha256" "$dir/.last-use"
+    rmdir "$dir" 2>/dev/null || printf 'engine-sync: preserved foreign cache children at %s\n' "$dir" >&2
+  done
+  cleanup
+  run_binary "$target" "$@"
+}
+[ -f "$target" ] && [ -x "$target" ] && run_cached "$@"
+state=${ENGINE_SYNC_STATE-}
+case $state in /*) ;; *) state=${XDG_STATE_HOME-};case $state in /*) state=$state/engine-sync;; *) state=${HOME:+$HOME/.local/state/engine-sync};;esac;;esac
+[ -n "$state" ] || fail "cannot resolve download state"
+mkdir -p "$state/downloads" "$versions" 2>/dev/null || fail "cannot create download state at $state"
+retry=$state/downloads/$version.retry
+now=$(date +%s)
+until=$(cat "$retry" 2>/dev/null)
+case $until in ''|*[!0-9]*) until=0;;esac
+lock=$versions/.lock-$version
+if ! mkdir "$lock" 2>/dev/null; then
+  owner=$(cat "$lock/owner" 2>/dev/null)
+  stale=
+  case $owner in ''|*[!0-9]*) ;; *) kill -0 "$owner" 2>/dev/null || stale=1;;esac
+  stamp=$(stat -f %m "$lock" 2>/dev/null) || stamp=$(stat -c %Y "$lock" 2>/dev/null)
+  case $stamp in ''|*[!0-9]*) ;; *) [ "$((now-stamp))" -gt 120 ] && stale=1;;esac
+  [ -n "$stale" ] || fail "download lock busy at $lock (owner $owner); retry after its owner finishes"
+  rm -f "$retry"
+  # Preserve unexpected children; never recursively remove a lock directory.
+  rm -f "$lock/owner"
+  rmdir "$lock" 2>/dev/null && mkdir "$lock" 2>/dev/null || fail "download lock changed while reclaiming $lock"
 fi
-expected=$(awk -v a="$asset" '{ name = $2; sub(/^\*/, "", name) } name == a { print $1; exit }' "$sums")
-if [ -z "$expected" ]; then
-  fail "no checksum for $asset"
-fi
+held=1
+printf '%s\n' "$$" >"$lock/owner" || fail "cannot record download lock owner"
+# Recheck both cache and backoff while holding the lock.
+[ -f "$target" ] && [ -x "$target" ] && run_cached "$@"
+until=$(cat "$retry" 2>/dev/null);case $until in ''|*[!0-9]*) until=0;;esac
+[ "$now" -lt "$until" ] && fail "download backoff until $until ($retry)"
+tmp=$state/downloads/.retry-$$
+printf '%s\n' "$((now+60))" >"$tmp" && mv -f "$tmp" "$retry" || fail "cannot record download backoff"
+tmp=
+command -v curl >/dev/null 2>&1 || fail "curl not found"
 release_base=${ENGINE_SYNC_RELEASE_BASE:-https://github.com/rezzminator/engine-sync/releases/download}
 url=${release_base%/}/v${version}/${asset}
-
-mkdir -p "$versions" 2>/dev/null || fail "cannot create $versions"
-lock=$versions/.lock-$version
-
-waited=0
-stale_removed=
-while :; do
-  if mkdir "$lock" 2>/dev/null; then
-    held=1
-    break
-  fi
-  # Another run holds the lock: its install is the one we wait for.
-  if [ -f "$target" ] && [ -x "$target" ]; then
-    run_cached "$@"
-  fi
-  if [ -z "$stale_removed" ] && lock_is_stale; then
-    stale_removed=1
-    rmdir "$lock" 2>/dev/null
-    continue
-  fi
-  if [ "$waited" -ge 50 ]; then
-    fail "lock wait timed out"
-  fi
-  sleep 1
-  waited=$((waited + 1))
-done
-
-# The holder may have lost a race: another run installed between our cache
-# check and our lock.
-if [ -f "$target" ] && [ -x "$target" ]; then
-  run_cached "$@"
-fi
-
-# older_than FILE MINUTES: FILE was last modified more than MINUTES minutes ago.
-# An age that cannot be read counts as not older.
-older_than() {
-  [ -n "$(find "$1" -prune -mmin +"$2" 2>/dev/null)" ]
-}
-
-for f in "$versions"/.tmp-*; do
-  if [ -f "$f" ] && older_than "$f" 2; then
-    rm -f "$f"
-  fi
-done
 tmp=$versions/.tmp-$$
-curl -fsSL --connect-timeout 5 --max-time 40 -o "$tmp" "$url" </dev/null >/dev/null 2>&1 &
-fetch=$!
-wait "$fetch"
-rc=$?
-fetch=
-if [ "$rc" -ne 0 ]; then
-  fail "download failed"
-fi
+curl -fsSL --connect-timeout 3 --max-time 15 -o "$tmp" "$url" </dev/null >/dev/null 2>&1 &
+child=$!;wait "$child";rc=$?;child=
+[ "$rc" -eq 0 ] || fail "download failed"
 actual=$(sha256_of "$tmp")
-if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
-  fail "checksum mismatch"
-fi
-chmod 0755 "$tmp" || fail "cannot make the download executable"
-mkdir -p "$versions/$version" 2>/dev/null || fail "cannot create $versions/$version"
+[ "$actual" = "$expected" ] || fail "checksum mismatch"
+chmod 0755 "$tmp" || fail "cannot make download executable"
+mkdir -p "$versions/$version" 2>/dev/null || fail "cannot create cache directory"
 mv -f "$tmp" "$target" || fail "cannot install $target"
 tmp=
-point_link
-stamp_version
-
-# Every other cached version goes once it has been unused for 7 days, except
-# the one the stable link names: callers outside the plugin run it.
-linked=
-if [ -L "$link" ]; then
-  linked=$(readlink "$link" 2>/dev/null)
-  linked=${linked%/engine-sync}
-  linked=${linked##*/}
-fi
-for d in "$versions"/*; do
-  name=${d##*/}
-  if [ -d "$d" ] && [ "$name" != "$version" ] && [ "$name" != "$linked" ] && is_version "$name"; then
-    ref=$d/.last-use
-    if [ ! -f "$ref" ]; then
-      ref=$d
-    fi
-    if older_than "$ref" 10080; then
-      rm -rf "$d"
-    fi
-  fi
-done
-
-cleanup
-exec "$target" "$@"
+rm -f "$retry"
+run_cached "$@"

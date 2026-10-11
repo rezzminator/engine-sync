@@ -8,6 +8,7 @@ package testjail
 import (
 	"errors"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,38 +19,28 @@ import (
 // clearedEnv are the variables a developer's shell may carry that would steer
 // a test toward a real binary, account or project.
 var clearedEnv = []string{
-	"ENGINE_SYNC_BIN", "ENGINE_SYNC_HOME", "ENGINE_SYNC_STATE", "CODEX_HOME",
+	"ENGINE_SYNC_BIN", "ENGINE_SYNC_WORKBENCH_MARKER", "ENGINE_SYNC_HOME", "ENGINE_SYNC_STATE", "CODEX_HOME",
 	"CLAUDE_CONFIG_DIR", "CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA",
 }
 
 // Run jails the process, runs the tests and returns their exit code; a jail
 // that cannot be built fails the package (exit 1) before any test runs.
-func Run(m *testing.M) int {
+func RunTests(m *testing.M) int {
 	base, err := canonicalBase()
 	if err != nil {
 		warnSetup("no canonical temp base: %v", err)
 		return 1
 	}
-	return run(m.Run, base)
+	return runJailedTests(m.Run, base)
 }
 
 // canonicalBase is a short temp root with every symlink resolved (macOS's
 // /tmp is /private/tmp): a test comparing a path it built with one a tool
 // printed sees the same spelling.
-func canonicalBase() (string, error) {
-	base, err := filepath.EvalSymlinks("/tmp")
-	if err == nil {
-		return base, nil
-	}
-	fallback, fallbackErr := filepath.EvalSymlinks(os.TempDir())
-	if fallbackErr != nil {
-		return "", errors.Join(err, fallbackErr)
-	}
-	return fallback, nil
-}
+func canonicalBase() (string, error) { return filepath.EvalSymlinks(os.TempDir()) }
 
-func run(tests func() int, base string) int {
-	realHome, err := os.UserHomeDir()
+func runJailedTests(tests func() int, base string) int {
+	realHome, err := paths.Home()
 	if err != nil {
 		warnSetup("real home unknown, the jail cannot compare against it: %v", err)
 		realHome = ""
@@ -117,3 +108,22 @@ func refuseRealHome(home, realHome string) error {
 func warnSetup(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "testjail: "+format+"\n", args...)
 }
+
+func Scratch(t testing.TB) string {
+	t.Helper()
+	base, e := canonicalBase()
+	if e != nil {
+		t.Fatal(e)
+	}
+	dir, e := os.MkdirTemp(base, "test-")
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() {
+		if e := os.RemoveAll(dir); e != nil {
+			t.Error(e)
+		}
+	})
+	return dir
+}
+func MkdirTemp(dir, pattern string) (string, error) { return os.MkdirTemp(dir, pattern) }

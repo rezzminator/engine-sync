@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "professor": {
+      "command": "pfm",
+      "args": [
+        "mcp",
+        "serve"
+      ]
+    }
+  }
+}

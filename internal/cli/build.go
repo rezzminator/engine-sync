@@ -1,0 +1,148 @@
+package cli
+
+import (
+	"fmt"
+	"github.com/rezzminator/engine-sync/internal/cliargs"
+	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/diag"
+	"github.com/rezzminator/engine-sync/internal/engine"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
+	"github.com/rezzminator/engine-sync/internal/target"
+	"io"
+)
+
+type selection = cliargs.Selection
+
+func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e env, filter string) int {
+	selected := selection{Engine: filter}
+	parseAction := action
+	o, asJSON, code, ok := parseCodexOptions(parseAction, args, stdout, stderr, e, &selected)
+	if !ok {
+		return code
+	}
+	if (selected.DryRun && action != "build") || (filter != "" && filter != selected.Engine) {
+		fmt.Fprintf(stderr, "engine-sync %s: incompatible --dry-run or --engine\n", action)
+		return 2
+	}
+	var targets []target.Target
+	for _, t := range target.Registry {
+		if selected.Engine == "" || selected.Engine == t.Name() {
+			targets = append(targets, t)
+		}
+	}
+	if len(targets) == 0 {
+		fmt.Fprintf(stderr, "engine-sync: unknown engine %q\n", selected.Engine)
+		return 2
+	}
+	cfg, err := e.policy(o.Root, o.Home, stderr)
+	if err == nil {
+		var value config.Config
+		value, err = cfg.WithCodexOverrides(o.CLIOverrides)
+		cfg = &value
+	}
+	if err != nil {
+		return reportRunFailure("engine-sync "+action, asJSON, err, stdout, stderr)
+	}
+	p := e.source(o.Root, o.Home, *cfg)
+	mode := reconcile.Check
+	if action == "build" {
+		mode = reconcile.Build
+	}
+	if action == "plan" || selected.DryRun {
+		mode = reconcile.Plan
+	}
+	roots := []string{o.Root}
+
+	var combined diag.Report
+	combined.OK = true
+	var actions []reconcile.Action
+	if !p.Workbench && cfg.Codex.GlobalCommands {
+		machinePolicy, loadErr := e.policy("", o.Home, stderr)
+		if loadErr != nil {
+			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		}
+		roster, loadErr := config.ResolveTargets(e.get, o.Home, *machinePolicy, config.Targets{})
+		if loadErr != nil {
+			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		}
+		_, loadErr = guarded(e, machineGuardRoots(o.Home, roster), mode == reconcile.Build, func() int {
+			for _, t := range targets {
+				r, pass := engine.Commands(o.Home, "", *machinePolicy, *roster.CodexHomes, false, mode, t.Render, t.Roots, t.Validate)
+				combined.OK = combined.OK && pass
+				combined.Problems = append(combined.Problems, r.Problems...)
+				combined.Warnings = append(combined.Warnings, r.Warnings...)
+				combined.Rebuildable = append(combined.Rebuildable, r.Rebuildable...)
+				combined.Wrote += r.Wrote
+				combined.Unchanged += r.Unchanged
+				combined.Deleted += r.Deleted
+				actions = append(actions, r.Actions...)
+				if !asJSON {
+					for _, s := range r.Problems {
+						fmt.Fprintln(stderr, s)
+					}
+					for _, s := range r.Warnings {
+						fmt.Fprintln(stderr, "warning:", s)
+					}
+				}
+			}
+			if !combined.OK {
+				return 1
+			}
+			return 0
+		})
+		if loadErr != nil {
+			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		}
+	}
+	code, err = guarded(e, roots, mode == reconcile.Build, func() int {
+		for _, t := range targets {
+			r, pass := engine.Execute(*p, *cfg, mode, t.Render, t.Roots, t.Validate)
+			if mode == reconcile.Plan {
+				repair := map[string]bool{}
+				for _, s := range r.Rebuildable {
+					repair[s] = true
+				}
+				pass = true
+				for _, s := range r.Problems {
+					if !repair[s] {
+						pass = false
+					}
+				}
+			}
+			combined.OK = combined.OK && pass
+			combined.Problems = append(combined.Problems, r.Problems...)
+			combined.Rebuildable = append(combined.Rebuildable, r.Rebuildable...)
+			combined.Warnings = append(combined.Warnings, r.Warnings...)
+			combined.Wrote += r.Wrote
+			combined.Unchanged += r.Unchanged
+			combined.Deleted += r.Deleted
+			actions = append(actions, r.Actions...)
+			if !asJSON {
+				diag.PrintEngine(stdout, stderr, r, mode, t.Name(), action, pass)
+			}
+		}
+		if !combined.OK {
+			return 1
+		}
+		return 0
+	})
+	if asJSON {
+		if mode == reconcile.Plan {
+			return diag.WritePlan(stdout, stderr, combined, actions, err, code)
+		}
+		if action == "doctor" {
+			return diag.WriteJSON(stdout, stderr, combined, err, config.Describe(*cfg))
+		}
+		return diag.WriteJSON(stdout, stderr, combined, err)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if action == "doctor" {
+		for _, row := range config.Describe(*cfg) {
+			fmt.Fprintf(stdout, "CONFIG %s=%s (%s)\n", row.Key, row.Value, row.Source)
+		}
+	}
+	return code
+}

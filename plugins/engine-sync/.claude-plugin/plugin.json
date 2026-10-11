@@ -1,7 +1,7 @@
 {
   "name": "engine-sync",
-  "version": "0.1.0",
-  "description": "Carries a project's Claude Code agents, commands, skills, rules and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
+  "version": "0.2.0",
+  "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
   "license": "MIT",
   "author": {
     "name": "Reza · Professor",
