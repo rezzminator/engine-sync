@@ -1,6 +1,6 @@
 import os,pathlib,subprocess,tempfile,sys,json
 producer=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else pathlib.Path(__file__).with_name('build-release.sh')).resolve()
-with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as tmp:
+with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR', '/tmp')) as tmp:
  root=pathlib.Path(tmp);scripts=root/'scripts';scripts.mkdir();(scripts/'build-release.sh').write_bytes(producer.read_bytes())
  manifest=root/'plugins/engine-sync/.claude-plugin';manifest.mkdir(parents=True);(manifest/'plugin.json').write_text(json.dumps({'version':'0.1.0'}))
  tools=root/'bin';tools.mkdir();go=tools/'go';go.write_text("""#!/bin/sh

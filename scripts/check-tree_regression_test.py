@@ -1,6 +1,6 @@
 import pathlib,tempfile,subprocess,json,os
 script=pathlib.Path(__file__).with_name('check-tree.py').resolve()
-with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as tmp:
+with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR', '/tmp')) as tmp:
  from tree_test_fixture import git_enumerator
  git_enumerator(tmp)
  root=pathlib.Path(tmp)
