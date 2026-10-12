@@ -476,3 +476,33 @@ func capabilityPolicy(t *testing.T, home string, capabilities ...string) *config
 	cfg.Capabilities = capabilities
 	return &cfg
 }
+
+// TestMovedGeneratedDirRepointsReceiptlessLinksBeforeRetiringTheStore: a host
+// whose registry links into the home store carry no receipt moves to
+// machine.sourceGeneratedAgentsDir in one run — every link repoints into the
+// source repository, no link dangles, and the store is retired after.
+func TestMovedGeneratedDirRepointsReceiptlessLinksBeforeRetiringTheStore(t *testing.T) {
+	home, repo := fixture(t)
+	if report := RunMachine(Options{Home: home, SourceRepo: repo, CodexHomes: []string{}}); report.Err != nil {
+		t.Fatalf("first run: %v", report.Err)
+	}
+	link := filepath.Join(home, ".claude", "agents", "gamma-deep.md")
+	store := filepath.Join(home, paths.ClaudeVariantStore, "gamma-deep.md")
+	if got, _ := os.Readlink(link); got != store {
+		t.Fatalf("first run linked %s -> %q, want %q", link, got, store)
+	}
+	if err := os.RemoveAll(filepath.Join(paths.EngineSyncState(paths.Getenv, home), "links")); err != nil {
+		t.Fatal(err)
+	}
+	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"sourceGeneratedAgentsDir":"generated/agents"}}`)
+	report := RunMachine(Options{Home: home, SourceRepo: repo, CodexHomes: []string{}})
+	if report.Err != nil || len(messages(report.Events, VerbConflict)) != 0 {
+		t.Fatalf("move run: err=%v conflicts=%q", report.Err, messages(report.Events, VerbConflict))
+	}
+	if got, _ := os.Readlink(link); got != filepath.Join(repo, "generated", "agents", "gamma-deep.md") {
+		t.Fatalf("link not repointed into the source repository: -> %q", got)
+	}
+	if _, err := os.Lstat(store); !os.IsNotExist(err) {
+		t.Fatalf("home store entry not retired (err=%v)", err)
+	}
+}

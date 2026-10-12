@@ -208,15 +208,8 @@ func (r *run) wireAgents() error {
 	if err := r.retireOrphanGlobalAgents(*plan.Source); err != nil {
 		return err
 	}
-	// Declarations that now render into the source repository leave nothing
-	// owned in the home store they rendered into before.
-	if store := filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir); r.policy.Machine.SourceGeneratedAgentsDir != "" && filepath.Clean(store) != filepath.Clean(plan.Source.GeneratedDir) {
-		if err := r.retireOwnedEntries(store, "generated agents now render into "+plan.Source.GeneratedDir); err != nil {
-			return err
-		}
-	}
 	if r.options.Plan {
-		return nil
+		return r.retireMovedGeneratedStore(plan.Source.GeneratedDir)
 	}
 	agents.Source = plan.Source
 	agents.Mode = ModeBuild
@@ -235,7 +228,19 @@ func (r *run) wireAgents() error {
 		return fmt.Errorf("global agents: %s", strings.Join(result.Problems, "; "))
 	}
 	r.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
-	return nil
+	return r.retireMovedGeneratedStore(plan.Source.GeneratedDir)
+}
+
+// retireMovedGeneratedStore retires what engine-sync owns in the home store
+// once declarations render into the source repository instead. It runs after
+// the registry links are repointed, so no link is left dangling into it and a
+// link without a receipt is still claimed through the file it points at.
+func (r *run) retireMovedGeneratedStore(generatedDir string) error {
+	store := filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir)
+	if r.policy.Machine.SourceGeneratedAgentsDir == "" || filepath.Clean(store) == filepath.Clean(generatedDir) {
+		return nil
+	}
+	return r.retireOwnedEntries(store, "generated agents now render into "+generatedDir)
 }
 
 // retireCodexRoles retires every role in registry not in keep that this compiler
