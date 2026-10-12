@@ -374,3 +374,15 @@ func (r *run) retireOwnedEntries(dir, reason string) error {
 	}
 	return nil
 }
+
+// retireMovedGeneratedStore retires what engine-sync owns in the home store
+// once declarations render into the source repository instead. It runs after
+// the registry links are repointed, so no link is left dangling into it and a
+// link without a receipt is still claimed through the file it points at.
+func (r *run) retireMovedGeneratedStore(generatedDir string) error {
+	store := filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir)
+	if r.policy.Machine.SourceGeneratedAgentsDir == "" || filepath.Clean(store) == filepath.Clean(generatedDir) {
+		return nil
+	}
+	return r.retireOwnedEntries(store, "generated agents now render into "+generatedDir)
+}
