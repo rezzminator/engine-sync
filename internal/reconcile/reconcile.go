@@ -116,7 +116,7 @@ func LinkArtifact(result *Result, output artifact.Artifact, mode Mode, owns func
 	}
 	exists := err == nil
 	if exists && info.Mode()&os.ModeSymlink != 0 {
-		if link, readErr := os.Readlink(output.Path); readErr == nil && link == output.Target {
+		if link, readErr := os.Readlink(output.Path); readErr == nil && (link == output.Target || ResolveLink(output.Path, link) == filepath.Clean(output.Target)) {
 			result.Unchanged++
 			return
 		}
