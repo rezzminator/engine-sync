@@ -1,8 +1,12 @@
 package source
 
 import (
-	"github.com/rezzminator/engine-sync/internal/config"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/rezzminator/engine-sync/internal/config"
+	"github.com/rezzminator/engine-sync/internal/testjail"
 )
 
 func TestRoleNamePolicy(t *testing.T) {
@@ -21,5 +25,24 @@ func TestRoleNamePolicy(t *testing.T) {
 	}
 	if _, _, err := RoleName("../escape", ".", cfg); err == nil {
 		t.Fatal("path name admitted")
+	}
+}
+
+// TestDeclaredName: the frontmatter name wins over the file base; a source
+// without one, or one that fails to parse, falls back to the base.
+func TestDeclaredName(t *testing.T) {
+	dir := testjail.Scratch(t)
+	for file, tc := range map[string]struct{ content, want string }{
+		"lead-file.md": {content: "---\nname: lead\n---\nLead.\n", want: "lead"},
+		"plain.md":     {content: "---\ndescription: No name.\n---\nPlain.\n", want: "plain"},
+		"broken.md":    {content: "---\nname: lead\nengines:\n  codex: [\n---\nBroken.\n", want: "broken"},
+	} {
+		path := filepath.Join(dir, file)
+		if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := DeclaredName(nil, path); got != tc.want {
+			t.Errorf("DeclaredName(%s) = %q, want %q", file, got, tc.want)
+		}
 	}
 }

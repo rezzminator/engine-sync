@@ -68,7 +68,7 @@ func hasGlobalAgentLinkAction(actions []GlobalAgentAction, path, target string) 
 func TestGlobalAgentCodexFrontmatterOverridesModelAndEffort(t *testing.T) {
 	agentsDir := testjail.Scratch(t)
 	path := filepath.Join(agentsDir, "worker.md")
-	raw := "---\nname: worker\ndescription: Worker.\nmodel: sonnet\neffort: medium\ncodex-model: gpt-6-sol\ncodex-effort: high\n---\n\nWork.\n"
+	raw := "---\nname: worker\ndescription: Worker.\nmodel: sonnet\neffort: medium\nengines:\n  codex:\n    model: gpt-6-sol\n    effort: high\n---\n\nWork.\n"
 	_, got, err := renderFixtureMachineAgent(path, raw, agentsDir)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestGlobalAgentCodexFrontmatterOverridesModelAndEffort(t *testing.T) {
 	if !strings.Contains(got, "model = \"gpt-6-sol\"\nmodel_reasoning_effort = \"high\"\n") {
 		t.Fatalf("Codex overrides missing from TOML:\n%s", got)
 	}
-	if strings.Contains(got, "codex-model") || strings.Contains(got, "codex-effort") {
+	if strings.Contains(got, "engines") || strings.Contains(got, "gpt-6-sol\n    effort") {
 		t.Fatalf("Codex-only frontmatter leaked into TOML:\n%s", got)
 	}
 }
@@ -84,12 +84,12 @@ func TestGlobalAgentCodexFrontmatterOverridesModelAndEffort(t *testing.T) {
 func TestGlobalAgentBadCodexEffortNamesSource(t *testing.T) {
 	agentsDir := testjail.Scratch(t)
 	path := filepath.Join(agentsDir, "worker.md")
-	for _, effort := range []string{"", "max", "HIGH"} {
+	for _, effort := range []string{"", "ultra", "HIGH"} {
 		t.Run(effort, func(t *testing.T) {
-			raw := "---\nname: worker\ndescription: Worker.\ncodex-effort: " + effort + "\n---\n\nWork.\n"
+			raw := "---\nname: worker\ndescription: Worker.\nengines:\n  codex:\n    effort: " + effort + "\n---\n\nWork.\n"
 			_, _, err := renderFixtureMachineAgent(path, raw, agentsDir)
-			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "codex-effort") {
-				t.Fatalf("error = %v, want source path and codex-effort", err)
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "engines.codex.effort") {
+				t.Fatalf("error = %v, want source path and engines.codex.effort", err)
 			}
 		})
 	}
@@ -290,7 +290,7 @@ func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
 			// The description reaches the compiled role verbatim but for the
 			// one rewrite a Codex lead needs: Claude's /code-review names a
 			// command no Codex seat has (review.go).
-			wantDescription := rewriteCodeReview(strings.TrimSpace(fields["description"]), fixtureMachinePolicy().Machine.ModelMap, fixtureMachinePolicy().Codex.Review)
+			wantDescription := rewriteCodeReview(strings.TrimSpace(fields["description"]), fixtureMachinePolicy().Codex.ModelMap, fixtureMachinePolicy().Codex.Review)
 
 			_, first, err := renderFixtureMachineAgent(source, string(raw), agentsDir)
 			if err != nil {
@@ -357,17 +357,6 @@ func TestGlobalAgentEscapeMultilineNeutralisesTripleQuoteCollision(t *testing.T)
 	want := "line one\nhas a literal \\\"\\\"\\\" inside\nand a backslash \\\\ alone"
 	if got := codex.EscapeRoleMultiline(in); got != want {
 		t.Fatalf("codex.EscapeRoleMultiline(%q) = %q, want %q", in, got, want)
-	}
-}
-
-func TestGlobalAgentsMissingFrontmatterFieldIsAHardError(t *testing.T) {
-	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "broken.md"),
-		"---\nname: broken\n---\n\nno description field.\n")
-
-	_, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
-	if err == nil || !strings.Contains(err.Error(), "needs both name: and description") {
-		t.Fatalf("RunGlobalAgents: got %v, want a frontmatter error", err)
 	}
 }
 
@@ -775,7 +764,7 @@ func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
 	}{
 		{
 			file:        "tracer-rr.md",
-			frontmatter: "name: tracer-rr\ndescription: Reads.\ntools: Bash, Read\nmodel: opus\ncodex-sandbox: workspace-write\n",
+			frontmatter: "name: tracer-rr\ndescription: Reads.\ntools: Bash, Read\nmodel: opus\nengines:\n  codex:\n    sandbox: workspace-write\n",
 			want:        []string{"model = \"gpt-6.1-sol\"\n", "sandbox_mode = \"workspace-write\"\n"},
 		},
 		{
@@ -785,7 +774,7 @@ func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
 		},
 		{
 			file:        "gitter.md",
-			frontmatter: "name: gitter\ndescription: Commits.\ntools: Read, Grep, Glob, Bash\ncodex-sandbox: inherit\n",
+			frontmatter: "name: gitter\ndescription: Commits.\ntools: Read, Grep, Glob, Bash\nengines:\n  codex:\n    sandbox: inherit\n",
 			wantAbsent:  []string{"sandbox_mode"},
 		},
 		{

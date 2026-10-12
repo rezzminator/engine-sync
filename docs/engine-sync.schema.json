@@ -3,6 +3,19 @@
     "project": {
       "additionalProperties": false,
       "properties": {
+        "agents": {
+          "additionalProperties": false,
+          "properties": {
+            "passthroughKeys": {
+              "items": {
+                "pattern": "^[^ \\t\\n:]*[^\\t\\n\\v\\f\\r :\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^ \\t\\n:]*$",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "codex": {
           "additionalProperties": false,
           "properties": {
@@ -99,50 +112,6 @@
         "opencode": {
           "additionalProperties": false,
           "properties": {
-            "agent": {
-              "additionalProperties": {
-                "additionalProperties": false,
-                "properties": {
-                  "permission": {
-                    "anyOf": [
-                      {
-                        "enum": [
-                          "allow",
-                          "ask",
-                          "deny"
-                        ]
-                      },
-                      {
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "enum": [
-                                "allow",
-                                "ask",
-                                "deny"
-                              ]
-                            },
-                            {
-                              "additionalProperties": {
-                                "enum": [
-                                  "allow",
-                                  "ask",
-                                  "deny"
-                                ]
-                              },
-                              "type": "object"
-                            }
-                          ]
-                        },
-                        "type": "object"
-                      }
-                    ]
-                  }
-                },
-                "type": "object"
-              },
-              "type": "object"
-            },
             "agentPreamble": {
               "type": "string"
             },
@@ -239,6 +208,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "agents": {
+      "additionalProperties": false,
+      "properties": {
+        "passthroughKeys": {
+          "items": {
+            "pattern": "^[^ \\t\\n:]*[^\\t\\n\\v\\f\\r :\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^ \\t\\n:]*$",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "codex": {
       "additionalProperties": false,
       "properties": {
@@ -335,12 +317,6 @@
         "legacyCodexAgentsDir": {
           "type": "string"
         },
-        "modelMap": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        },
         "retiredAgents": {
           "items": {
             "type": "string"
@@ -410,50 +386,6 @@
     "opencode": {
       "additionalProperties": false,
       "properties": {
-        "agent": {
-          "additionalProperties": {
-            "additionalProperties": false,
-            "properties": {
-              "permission": {
-                "anyOf": [
-                  {
-                    "enum": [
-                      "allow",
-                      "ask",
-                      "deny"
-                    ]
-                  },
-                  {
-                    "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "enum": [
-                            "allow",
-                            "ask",
-                            "deny"
-                          ]
-                        },
-                        {
-                          "additionalProperties": {
-                            "enum": [
-                              "allow",
-                              "ask",
-                              "deny"
-                            ]
-                          },
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    "type": "object"
-                  }
-                ]
-              }
-            },
-            "type": "object"
-          },
-          "type": "object"
-        },
         "agentPreamble": {
           "type": "string"
         },

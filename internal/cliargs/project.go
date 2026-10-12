@@ -39,6 +39,8 @@ func ParseProjectOptions(action string, args []string, stdout, stderr io.Writer,
 	}
 	flags.StringVar(&choice.Engine, "engine", choice.Engine, "target name from registry")
 	flags.BoolVar(&choice.DryRun, "dry-run", false, "plan without writes")
+	var capabilities RepeatString
+	flags.Var(&capabilities, "capability", "a host capability an agent's requires may name; repeatable")
 	asJSON := flags.Bool("json", false, "print one JSON result object instead of the report")
 	positionals, code, ok := ParseFlagsAnywhere(flags, args)
 	if !ok {
@@ -80,7 +82,7 @@ func ParseProjectOptions(action string, args []string, stdout, stderr io.Writer,
 			overrides.SetAgentPreamble = true
 		}
 	})
-	return codex.Options{Root: root, Home: resolvedHome, CLIOverrides: overrides}, *asJSON, 0, true
+	return codex.Options{Root: root, Home: resolvedHome, CLIOverrides: overrides, Capabilities: []string(capabilities)}, *asJSON, 0, true
 }
 
 func ReportFailure(prefix string, asJSON bool, err error, stdout, stderr io.Writer) int {
@@ -100,10 +102,11 @@ func CodexUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --exclude-dir NAME        repeatable")
 	fmt.Fprintln(w, "  --exclude-project NAME    repeatable")
 	fmt.Fprintln(w, "  --never-register NAME     repeatable")
+	fmt.Fprintln(w, "  --capability NAME         a host capability an agent's requires may name; repeatable")
 	fmt.Fprintln(w, "  --suffix-mode MODE [--suffix-prefix TEXT]")
 	fmt.Fprintln(w, "  --json                    one JSON result object on stdout")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--gpt-agents]")
+	fmt.Fprintln(w, "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--capability NAME]...")
 	fmt.Fprintln(w, "  compiles every {Claude config dir}/agents/*.md, symlinks")
 	fmt.Fprintln(w, "  {home}/.claude/agents to the .md sources, and writes {home}/.codex/agents/*.toml as")
 	fmt.Fprintln(w, "  regular files — Codex refuses to load a role through a symlink.")

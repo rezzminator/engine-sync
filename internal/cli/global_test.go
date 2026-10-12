@@ -13,7 +13,7 @@ import (
 func TestGlobalUsesClaudeConfigSourcesAndPreservesThem(t *testing.T) {
 	home, configDir := testjail.Scratch(t), testjail.Scratch(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
-	source := "---\nname: writer\ndescription: Writes git.\ntools: Read, Bash\ncodex-sandbox: inherit\n---\nchildren are Explore+haiku (never\nyour own type)\n"
+	source := "---\nname: writer\ndescription: Writes git.\ntools: Read, Bash\nengines:\n  codex:\n    sandbox: inherit\n---\nchildren are Explore+haiku (never\nyour own type)\n"
 	putProjectFile(t, configDir, "agents/writer.md", source)
 	vars := map[string]string{"HOME": home, "CLAUDE_CONFIG_DIR": configDir}
 	e := env{get: func(key string) string { return vars[key] }}

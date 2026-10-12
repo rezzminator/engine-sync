@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "engine-sync agent frontmatter",
+  "description": "The YAML frontmatter of a Claude agent source as engine-sync reads it. Keys outside Claude Code's native sub-agent keys, engine-sync's own keys and agents.passthroughKeys warn UNKNOWN-KEY.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The agent name; the Codex role and OpenCode agent use it verbatim."
+    },
+    "description": {
+      "type": "string"
+    },
+    "tools": {
+      "description": "A comma-separated string or a list of tool names.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "model": {
+      "type": "string",
+      "description": "A model alias, mapped per engine by codex.modelMap and opencode.modelMap."
+    },
+    "effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "description": "Codex receives max as xhigh."
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      },
+      "description": "Capabilities the host must have for the agent to be linked or emitted."
+    },
+    "role": {
+      "type": "string",
+      "description": "Stamped by the variant renderer only; a source carrying it is a problem."
+    },
+    "engines": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "codex": {
+          "oneOf": [
+            {
+              "const": false
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "pattern": "\\S",
+                  "description": "A codex.modelMap key is mapped; any other value is emitted verbatim."
+                },
+                "effort": {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "sandbox": {
+                  "enum": [
+                    "inherit",
+                    "read-only",
+                    "workspace-write"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "opencode": {
+          "oneOf": [
+            {
+              "const": false
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "pattern": "\\S",
+                  "description": "An opencode.modelMap key is mapped; any other value is emitted verbatim."
+                },
+                "mode": {
+                  "enum": [
+                    "all",
+                    "primary",
+                    "subagent"
+                  ]
+                },
+                "permission": {
+                  "type": "object",
+                  "description": "Rendered as the agent's OpenCode permission."
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "not": {
+    "anyOf": [
+      {
+        "required": [
+          "codex-model"
+        ]
+      },
+      {
+        "required": [
+          "codex-effort"
+        ]
+      },
+      {
+        "required": [
+          "codex-sandbox"
+        ]
+      },
+      {
+        "required": [
+          "opencode-model"
+        ]
+      },
+      {
+        "required": [
+          "opencode-mode"
+        ]
+      }
+    ]
+  },
+  "additionalProperties": true
+}

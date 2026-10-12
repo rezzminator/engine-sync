@@ -18,7 +18,14 @@ func Execute(p source.Project, cfg config.Config, mode reconcile.Mode,
 	artifacts, diagnostics := render(p, cfg)
 	result := reconcile.Result{}
 	diagnostics = append(diagnostics, validate(artifacts)...)
+	named := map[string]bool{}
 	for _, d := range diagnostics {
+		// The source loader and the target reading the same file name one
+		// problem in the same words: it is one line.
+		if named[d.Message] {
+			continue
+		}
+		named[d.Message] = true
 		if d.State == reconcile.Dangling {
 			result.Dangling = append(result.Dangling, d.Message)
 		}

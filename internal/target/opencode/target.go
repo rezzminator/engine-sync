@@ -117,8 +117,12 @@ type Target struct{}
 func (Target) Name() string { return "opencode" }
 
 func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
-	if p.Scope == claudesource.MachineScope {
+	if p.Scope == claudesource.MachineScope && p.MachineCommands {
 		return []artifact.Root{{Path: filepath.Join(p.Home, ".config", openCodeName(), "command"), SourceRoots: []string{p.SourceCommandDir}}}
+	}
+	if p.Scope == claudesource.MachineScope {
+		sources := []string{p.AgentSourceDir, filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), p.Root}
+		return []artifact.Root{{Path: MachineAgentsDir(p.Home), SourceRoots: sources, InspectForeign: true}}
 	}
 	sources := []string{filepath.Join(p.Root, ".claude"), filepath.Join(p.Home, ".claude")}
 	for _, child := range p.Children {
@@ -138,8 +142,11 @@ func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
 }
 
 func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
-	if p.Scope == claudesource.MachineScope {
+	if p.Scope == claudesource.MachineScope && p.MachineCommands {
 		return renderOpenCodeMachine(p, cfg)
+	}
+	if p.Scope == claudesource.MachineScope {
+		return renderOpenCodeMachineAgents(p, cfg)
 	}
 	root, model := p.Root, &p
 	var diagnostics []diag.Diagnostic

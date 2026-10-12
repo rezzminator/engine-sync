@@ -1,12 +1,6 @@
 {
   "version": 1,
   "machine": {
-    "modelMap": {
-      "opus": "gpt-6.1-sol",
-      "sonnet": "gpt-6-luna",
-      "haiku": "gpt-6-luna",
-      "fable": "gpt-6.1-sol"
-    },
     "legacyCodexAgentsDir": ".local/state/pfm/generated/codex-agents",
     "retiredAgents": [
       "frr",
@@ -113,15 +107,6 @@
         "CLAUDE.md": "deny"
       },
       "external_directory": "allow"
-    },
-    "agent": {
-      "gitter": {
-        "permission": {
-          "bash": {
-            "git *": "allow"
-          }
-        }
-      }
     }
   },
   "mcp": {

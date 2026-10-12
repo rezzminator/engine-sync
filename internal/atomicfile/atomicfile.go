@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // removeScratch deletes an unpublished scratch file; a variable so a test can
@@ -170,13 +171,69 @@ func Symlink(target, path string) error {
 	return syncDirectory(filepath.Dir(path))
 }
 
+// link is os.Link; a variable so a test can make it cross a filesystem.
+var link = os.Link
+
+// Move moves from to to without ever replacing a file at to: a hard link
+// (refused when to exists), then from removed, both directories synced. A
+// link refused because the two sit on different filesystems (EXDEV) falls
+// back to a copy created exclusively beside to, synced, then from removed.
 func Move(from, to string) error {
-	if err := os.Rename(from, to); err != nil {
+	err := link(from, to)
+	if errors.Is(err, syscall.EXDEV) {
+		return copyAcross(from, to)
+	}
+	if err != nil {
 		return err
 	}
-	err := syncDirectory(filepath.Dir(to))
+	if err := os.Remove(from); err != nil {
+		return errors.Join(fmt.Errorf("remove %s after linking it to %s: %w", from, to, err), os.Remove(to))
+	}
+	err = syncDirectory(filepath.Dir(to))
 	if filepath.Dir(from) != filepath.Dir(to) {
 		err = errors.Join(err, syncDirectory(filepath.Dir(from)))
 	}
 	return err
+}
+
+// copyAcross moves from to another filesystem: to is created exclusively with
+// from's permission bits, written, synced and closed, its directory synced,
+// and only then from removed. A failed copy removes the partial to and leaves
+// from in place.
+func copyAcross(from, to string) (err error) {
+	source, err := os.Open(from)
+	if err != nil {
+		return fmt.Errorf("move %s across filesystems: %w", from, err)
+	}
+	defer func() {
+		if closeErr := source.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close %s: %w", from, closeErr))
+		}
+	}()
+	info, err := source.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect %s to move it: %w", from, err)
+	}
+	target, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("move %s across filesystems: %w", from, err)
+	}
+	_, err = io.Copy(target, source)
+	if err == nil {
+		err = target.Chmod(info.Mode().Perm())
+	}
+	if err == nil {
+		err = target.Sync()
+	}
+	err = errors.Join(err, target.Close())
+	if err != nil {
+		return errors.Join(fmt.Errorf("copy %s to %s: %w", from, to, err), os.Remove(to))
+	}
+	if err := syncDirectory(filepath.Dir(to)); err != nil {
+		return err
+	}
+	if err := os.Remove(from); err != nil {
+		return fmt.Errorf("remove %s after copying it to %s: %w", from, to, err)
+	}
+	return syncDirectory(filepath.Dir(from))
 }

@@ -24,7 +24,7 @@ func TestTemplateConfigValidationAndNeutralModels(t *testing.T) {
 		t.Fatalf("bad template error=%v", e)
 	}
 	cfg := Default()
-	if len(cfg.Codex.ModelMap)+len(cfg.OpenCode.ModelMap)+len(cfg.Machine.ModelMap) != 0 {
+	if len(cfg.Codex.ModelMap)+len(cfg.OpenCode.ModelMap) != 0 {
 		t.Fatalf("neutral models contain pins: %#v", cfg)
 	}
 }
@@ -34,12 +34,16 @@ func TestReviewLayeredPolicy(t *testing.T) {
 		name, machine, project, want string
 		bad                          bool
 	}{
-		{"bare permission", `{"version":1,"opencode":{"permission":"deny","agent":{"reader":{"permission":"deny"}}}}`, `{"version":1,"opencode":{"permission":{"bash":"allow"},"agent":{"reader":{"permission":{"bash":"allow"}}}}}`, "", false},
+		{"bare permission", `{"version":1,"opencode":{"permission":"deny"}}`, `{"version":1,"opencode":{"permission":{"bash":"allow"}}}`, "", false},
+		{"machine modelMap removed", `{"version":1,"machine":{"modelMap":{"opus":"model-a"}}}`, "", "machine.modelMap is removed; use codex.modelMap", true},
+		{"opencode agent removed", "", `{"version":1,"opencode":{"agent":{"reader":{"permission":"deny"}}}}`, "opencode.agent is removed; use engines.opencode.permission", true},
+		{"missing model alias", `{"version":1,"codex":{"modelMap":{"opus":"model-a"}}}`, `{"version":1,"codex":{"rootAdapter":"Use {{index .Models \"opus\"}} or {{index .Models \"haiku\"}}."}}`, `model alias "haiku" is not in the engine's modelMap`, true},
 		{"duplicate", `{"version":1,"version":1}`, "", "duplicate", true},
 		{"nested duplicate", `{"version":1,"codex":{"suffixMode":"none","suffixMode":"project"}}`, "", "duplicate", true},
 		{"relative env", "", "", "CLAUDE_CONFIG_DIR", true},
 		{"legacy null", "", `{"version":1,"rootAdapter":null}`, "", false},
 		{"legacy adapter", "", `{"version":1,"rootAdapter":"A ${name} B"}`, "", false},
+		{"legacy opencode agent removed", "", `{"version":1,"opencode":{"agent":{"reader":{"permission":"deny"}}}}`, "opencode.agent is removed; use engines.opencode.permission", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home, root := testjail.Scratch(t), testjail.Scratch(t)
@@ -77,7 +81,7 @@ func TestReviewLayeredPolicy(t *testing.T) {
 				t.Fatal(e)
 			}
 			if tc.name == "bare permission" {
-				for _, p := range []Permission{cfg.OpenCode.Permission, cfg.OpenCode.Agent["reader"].Permission} {
+				for _, p := range []Permission{cfg.OpenCode.Permission} {
 					if len(p.Tools) != 2 || p.Tools[0].Name != "*" || p.Tools[0].Value.Action != "deny" {
 						t.Fatalf("lost deny: %+v", p)
 					}

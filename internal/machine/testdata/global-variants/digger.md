@@ -8,6 +8,10 @@ effort: low
 
 You map a topic.
 
+## Rounds
+
 Spawn at most 4 helpers a round. Ending comes when every sub-area is settled, or at the end of round 3 — a safety ceiling, never a target.
+
+## Helpers
 
 `scout` is the only agent type you spawn.

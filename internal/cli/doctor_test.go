@@ -14,10 +14,10 @@ import (
 func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
-	putProjectFile(t, root, ".claude/agents/reader.md", "---\nname: reader\ndescription: Reads.\nmodel: opus\n---\nRead.\n")
+	putProjectFile(t, root, ".claude/agents/reader.md", "---\nname: reader\ndescription: Reads.\nmodel: opus\nengines:\n  opencode:\n    permission:\n      edit:\n        \"private/**\": deny\n      bash:\n        \"deploy preview\": ask\n---\nRead.\n")
 	configHome := filepath.Join(home, ".config")
-	putProjectFile(t, configHome, "engine-sync/config.json", `{"version":1,"codex":{"modelMap":{"opus":"machine-model"},"rootAdapter":"Machine adapter.\n"},"opencode":{"permission":{"bash":{"*":"allow","deploy *":"deny","deploy preview":"allow"}},"agent":{"reader":{"permission":{"edit":{"private/**":"deny"}}}}},"machine":{"retiredAgents":["retired-reader"]}}`)
-	putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"codex":{"modelMap":{"opus":"project-model"}},"opencode":{"agent":{"reader":{"permission":{"bash":{"deploy preview":"ask"}}}}},"mcp":{"globalServers":["central"]}}`)
+	putProjectFile(t, configHome, "engine-sync/config.json", `{"version":1,"codex":{"modelMap":{"opus":"machine-model"},"rootAdapter":"Machine adapter.\n"},"opencode":{"permission":{"bash":{"*":"allow","deploy *":"deny","deploy preview":"allow"}}},"machine":{"retiredAgents":["retired-reader"]}}`)
+	putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"codex":{"modelMap":{"opus":"project-model"}},"mcp":{"globalServers":["central"]}}`)
 	vars := map[string]string{"HOME": home, "XDG_CONFIG_HOME": configHome, "ENGINE_SYNC_WORKBENCH_MARKER": ".project/workbench.json"}
 	configReads := 0
 	e := env{get: func(key string) string {
@@ -30,8 +30,8 @@ func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 	if code := dispatch([]string{"build", root, "--model", "opus=flag-model"}, &out, &errOut, e); code != 0 {
 		t.Fatalf("build rc=%d: %s%s", code, &out, &errOut)
 	}
-	if configReads != 3 {
-		t.Fatalf("configuration resolutions=%d want 3 (project, machine and target registry)", configReads)
+	if configReads != 4 {
+		t.Fatalf("configuration resolutions=%d want 4 (project, machine, target registry and capability set)", configReads)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, ".codex/agents/reader.toml"))
 	if err != nil {
@@ -59,7 +59,7 @@ func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), `"private/**": deny`) {
-		t.Fatalf("machine per-agent rule inherited: %s", raw)
+		t.Fatalf("frontmatter per-agent rule lost: %s", raw)
 	}
 	if !strings.Contains(string(raw), `"deploy preview": ask`) {
 		t.Fatalf("native per-agent override: %s", raw)

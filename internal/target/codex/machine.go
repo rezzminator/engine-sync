@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"fmt"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/diag"
@@ -105,17 +104,36 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 	for _, s := range p.Warnings {
 		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Message: s})
 	}
-	for _, a := range p.Agents {
-		if alias := a.Front.Fields["model"]; len(p.CodexHomes) > 0 && alias != "" && alias != "inherit" && cfg.Machine.ModelMap[alias] == "" && a.Front.Fields["codex-model"] == "" {
-			diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Path: a.Path, Message: fmt.Sprintf("unmapped Codex model alias %q in %s — model omitted", alias, a.Path)})
+	for _, name := range p.Failed {
+		// An agent skipped for an error keeps its installed role and variant.
+		for _, home := range p.CodexHomes {
+			outputs = append(outputs, artifact.Artifact{Path: filepath.Join(home, "agents", name+".toml"), Kept: &artifact.SourceLink{Path: name}})
 		}
-		name, text, err := renderGlobalAgentTOML(a.Path, string(a.Raw), p.AgentSourceDir, cfg)
-		if err != nil {
-			diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Error, Path: a.Path, Message: err.Error()})
+		outputs = append(outputs, artifact.Artifact{Path: filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
+	}
+	for _, a := range p.Agents {
+		problems, warnings := source.ValidateAgent(a.Path, a.Front, cfg.Agents.PassthroughKeys, a.Generated)
+		for _, w := range warnings {
+			diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Path: a.Path, Message: w})
+		}
+		for _, e := range problems {
+			diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Error, Path: a.Path, Message: e})
+		}
+		if len(problems) > 0 {
 			continue
 		}
-		for _, home := range p.CodexHomes {
-			outputs = append(outputs, artifact.Artifact{Path: filepath.Join(home, "agents", name+".toml"), Content: []byte(text), Source: a.Path, Syntax: artifact.TOML})
+		if !a.Front.Engines.CodexOff() {
+			name, text, warning, err := renderGlobalAgentTOML(a.Path, string(a.Raw), p.AgentSourceDir, cfg)
+			if err != nil {
+				diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Error, Path: a.Path, Message: err.Error()})
+				continue
+			}
+			if warning != "" && len(p.CodexHomes) > 0 {
+				diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Path: a.Path, Message: warning})
+			}
+			for _, home := range p.CodexHomes {
+				outputs = append(outputs, artifact.Artifact{Path: filepath.Join(home, "agents", name+".toml"), Content: []byte(text), Source: a.Path, Syntax: artifact.TOML})
+			}
 		}
 		if a.Generated {
 			outputs = append(outputs, artifact.Artifact{Path: a.Path, Content: a.Raw, Source: filepath.Join(p.AgentSourceDir, "variants.json"), Syntax: artifact.YAMLFront})

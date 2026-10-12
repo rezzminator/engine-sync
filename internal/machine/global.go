@@ -8,6 +8,7 @@ import (
 	"fmt"
 	reconciler "github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/source"
+	"github.com/rezzminator/engine-sync/internal/target/opencode"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -37,7 +38,6 @@ type Event struct {
 // Options select the homes and the source clone. A nil CodexHomes means
 // {Home}/.codex alone; a non-nil empty one means no Codex home at all.
 type Options struct {
-	GptAgents        bool
 	Config           *config.Config
 	Home             string
 	SourceRepo       string
@@ -48,6 +48,10 @@ type Options struct {
 	SourceHome string
 	Plan       bool
 	Uninstall  bool
+	// AdoptDir, when set, is where an unowned regular file at a declared
+	// agent's path moves before the build replaces it (`global --adopt`).
+	// Empty leaves it a CONFLICT.
+	AdoptDir string
 }
 
 // Report is the run's transcript. Err is a failure that stopped a step; a
@@ -180,11 +184,10 @@ func (r *run) wireAgents() error {
 		ClaudeConfigDirs: r.claudeConfigDirs(),
 		CodexHomes:       r.codexHomes(),
 		Mode:             ModeCheck,
-		GptAgents:        r.options.GptAgents,
 	}
-	plan, err := RunGlobalAgents(agents)
+	plan, err := r.planAgents(agents)
 	if err != nil {
-		return fmt.Errorf("plan engine-sync codex agents: %w", err)
+		return err
 	}
 	if r.options.Plan {
 		for _, action := range plan.Actions {
@@ -289,6 +292,9 @@ func (r *run) retireOrphanGlobalAgents(model source.Project) error {
 		if within(agent.Path, generatedDir) {
 			keep[filepath.Base(agent.Path)] = true
 		}
+	}
+	for _, name := range model.Failed {
+		keep[name+".md"] = true // skipped for an error: its copy stays
 	}
 	for _, config := range r.claudeConfigDirs() {
 		registry := filepath.Join(config, "agents")
@@ -432,27 +438,10 @@ func (r *run) unwireGeneratedAgents() error {
 			return err
 		}
 	}
-	return r.removeDir(generated, "generated Codex agents directory")
-}
-
-func (r *run) removeDir(dir, label string) error {
-	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("inspect %s %s: %w", label, dir, err)
+	if err := r.removeDir(generated, "generated Codex agents directory"); err != nil {
+		return err
 	}
-	mode := reconciler.Build
-	if r.options.Plan {
-		mode = reconciler.Plan
-	}
-	result := reconciler.RetireOwned(dir, mode, r.retirementBoundary(dir))
-	for _, a := range result.Actions {
-		r.add(VerbRetire, "retire "+a.Path+" ("+label+")", a.Path)
-	}
-	if len(planBlockers(result.Problems)) > 0 {
-		return fmt.Errorf("retire %s: %s", dir, strings.Join(result.Problems, "; "))
-	}
-	return nil
+	return r.retireOwnedEntries(opencode.MachineAgentsDir(r.options.Home), "uninstall OpenCode machine agent")
 }
 
 func within(target, dir string) bool {
@@ -468,10 +457,12 @@ func (r *run) retirementBoundary(path string) string {
 	return filepath.Dir(path)
 }
 
-// retireExcludedMachineAgents removes only exact receipt-owned excluded Claude links.
+// retireExcludedMachineAgents removes the Claude links of agents whose
+// requires the host does not meet, only where the link points at the agent's
+// own source; an operator file or a foreign link stays.
 func (r *run) retireExcludedMachineAgents(model source.Project) error {
 	for _, agent := range model.Agents {
-		if machineAgentEnabled(agent, false) {
+		if source.Unmet(agent.Front.Requires, r.policy.Capabilities) == "" {
 			continue
 		}
 		for _, dir := range r.claudeConfigDirs() {
@@ -495,7 +486,7 @@ func (r *run) retireExcludedMachineAgents(model source.Project) error {
 				target = filepath.Join(filepath.Dir(path), target)
 			}
 			if filepath.Clean(target) == filepath.Clean(agent.Path) {
-				if err := r.retire(path, "provider-specific agent disabled"); err != nil {
+				if err := r.retire(path, "requires unmet"); err != nil {
 					return err
 				}
 			}

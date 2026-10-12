@@ -2,8 +2,11 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Schema is generated from the same tagged types accepted by the loader.
@@ -14,7 +17,19 @@ func Schema() []byte {
 	m["title"] = "engine-sync settings"
 	m["$defs"] = map[string]any{"project": p}
 	raw, _ := json.MarshalIndent(m, "", "  ")
-	return append(raw, '\n')
+	// Every non-ASCII rune sits inside a JSON string (the passthrough-key
+	// pattern's Unicode spaces); escaping it keeps the tracked file ASCII.
+	out := make([]byte, 0, len(raw)+1)
+	for _, r := range string(raw) {
+		if r < utf8.RuneSelf {
+			out = append(out, byte(r))
+			continue
+		}
+		for _, unit := range utf16.Encode([]rune{r}) {
+			out = fmt.Appendf(out, `\u%04x`, unit)
+		}
+	}
+	return append(out, '\n')
 }
 func schemaType(t reflect.Type) map[string]any {
 	if t == reflect.TypeFor[Permission]() {
@@ -29,7 +44,17 @@ func schemaType(t reflect.Type) map[string]any {
 			if key == "-" {
 				continue
 			}
-			props[key] = schemaType(f.Type)
+			field := schemaType(f.Type)
+			// A `pattern` tag carries the loader's own string rule into the
+			// schema: on the items of a list, else on the string itself.
+			if pattern := f.Tag.Get("pattern"); pattern != "" {
+				if items, ok := field["items"].(map[string]any); ok {
+					items["pattern"] = pattern
+				} else {
+					field["pattern"] = pattern
+				}
+			}
+			props[key] = field
 		}
 		out := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
 		if _, ok := props["version"]; ok {

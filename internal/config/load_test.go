@@ -29,7 +29,7 @@ func TestMachineRewriteAndTemplateLayers(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	text, e := RenderTemplate(cfg.Codex.AgentPreamble, TemplateData{"reader", "Codex", "reader.md", "AGENTS.md"})
+	text, e := RenderTemplate(cfg.Codex.AgentPreamble, TemplateData{Name: "reader", Engine: "Codex", Source: "reader.md", Root: "AGENTS.md"})
 	if e != nil || text != "reader Codex reader.md AGENTS.md" || len(cfg.Deprecations) != 1 || len(cfg.Machine.Rewrites) != 1 || cfg.Codex.ModelMap["fast"] != "machine-model" {
 		t.Fatalf("cfg=%#v text=%q err=%v", cfg, text, e)
 	}

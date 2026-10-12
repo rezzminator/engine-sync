@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/machine"
@@ -11,7 +10,7 @@ import (
 
 func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	flags := NewFlagSet("doctor --machine", "usage: engine-sync doctor --machine [--home H] [--source-repo R] "+
-		"[--claude-config-dir C] [--codex-home X]... [--claude-absent] [--gpt-agents] [--json]", stderr)
+		"[--claude-config-dir C] [--codex-home X]... [--claude-absent] [--capability NAME]... [--json]", stderr)
 	flags.Bool("machine", true, "the machine rows")
 	home := flags.String("home", "", "the home whose registries are classified")
 	sourceRepo := flags.String("source-repo", "", "the source clone; absent is the no-clone state")
@@ -19,7 +18,8 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	var codexHomes repeatString
 	flags.Var(&codexHomes, "codex-home", "a Codex home; repeatable")
 	claudeAbsent := flags.Bool("claude-absent", false, "no Claude Code binary is installed")
-	gptAgents := flags.Bool("gpt-agents", false, "include provider-specific GPT agents")
+	var capabilities repeatString
+	flags.Var(&capabilities, "capability", "a host capability an agent's requires may name; repeatable")
 	asJSON := flags.Bool("json", false, "print one JSON object")
 	positionals, code, ok := ParseFlagsAnywhere(flags, args)
 	if !ok {
@@ -31,23 +31,14 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	}
 	resolvedHome, err := absoluteHome(*home, e)
 	if err != nil {
-		if *asJSON {
-			if writeErr := json.NewEncoder(stdout).Encode(map[string]any{"ok": false, "rows": []machine.Row{}, "configSources": []config.SourceRow{}, "error": err.Error()}); writeErr != nil {
-				fmt.Fprintln(stderr, writeErr)
-			}
-		} else {
-			fmt.Fprintf(stderr, "engine-sync doctor: resolve home: %v\n", err)
-		}
-		return 1
+		return machine.PrintDoctor(nil, nil, fmt.Errorf("engine-sync doctor: resolve home: %w", err), *asJSON, stdout, stderr)
 	}
 	policy, err := e.policy("", resolvedHome, stderr)
+	if err == nil {
+		policy, err = config.WithCapabilities(e.get, resolvedHome, policy, capabilities)
+	}
 	if err != nil {
-		if *asJSON {
-			_ = json.NewEncoder(stdout).Encode(map[string]any{"ok": false, "rows": []machine.Row{}, "configSources": []config.SourceRow{}, "error": err.Error()})
-		} else {
-			fmt.Fprintln(stderr, err)
-		}
-		return 1
+		return machine.PrintDoctor(nil, nil, err, *asJSON, stdout, stderr)
 	}
 	var cds repeatString
 	if *claudeConfig != "" {
@@ -58,39 +49,14 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 		return reportRunFailure("engine-sync doctor", *asJSON, err, stdout, stderr)
 	}
 	var rows []machine.Row
-	_, guardErr := guarded(e, optionGuardRoots(options), false, func() int {
-		rows = machine.Doctor(machine.DoctorOptions{Config: policy, Home: resolvedHome, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, ClaudeAbsent: *claudeAbsent, GptAgents: *gptAgents})
+	_, guardErr := guarded(e, machine.GuardRoots(options.Home, options.CodexHomes, options.ClaudeConfigDirs), false, func() int {
+		rows = machine.Doctor(machine.DoctorOptions{Config: policy, Home: resolvedHome, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, ClaudeAbsent: *claudeAbsent})
 		return 0
 	})
 	if guardErr != nil {
 		rows = append(rows, machine.Row{Level: machine.LevelFail, Message: guardErr.Error()})
 	}
-
-	failed := false
-	for _, row := range rows {
-		failed = failed || row.Level == machine.LevelFail
-	}
-	if *asJSON {
-		if err := json.NewEncoder(stdout).Encode(struct {
-			OK            bool               `json:"ok"`
-			Rows          []machine.Row      `json:"rows"`
-			ConfigSources []config.SourceRow `json:"configSources"`
-		}{OK: !failed, Rows: rows, ConfigSources: config.Describe(*policy)}); err != nil {
-			fmt.Fprintf(stderr, "engine-sync doctor: write JSON: %v\n", err)
-			return 1
-		}
-	} else {
-		for _, row := range config.Describe(*policy) {
-			fmt.Fprintf(stdout, "CONFIG %s=%s (%s)\n", row.Key, row.Value, row.Source)
-		}
-		for _, row := range rows {
-			fmt.Fprintf(stdout, "%s %s\n", row.Level, row.Message)
-		}
-	}
-	if failed {
-		return 1
-	}
-	return 0
+	return machine.PrintDoctor(rows, config.Describe(*policy), nil, *asJSON, stdout, stderr)
 }
 
 func absoluteHome(flagValue string, e env) (string, error) {

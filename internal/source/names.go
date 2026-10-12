@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -30,4 +31,17 @@ func RoleName(base, project string, cfg config.Codex) (string, bool, error) {
 		return "", false, err
 	}
 	return name, !slices.Contains(cfg.NeverRegister, base) && !slices.Contains(cfg.NeverRegister, name), nil
+}
+
+// DeclaredName is the name an agent source declares, the base RoleName applies
+// the suffix mode to: its frontmatter `name`, or the file base when the
+// source declares none or cannot be read or parsed (a kept link; a header the
+// caller reports as FRONTMATTER-INVALID itself).
+func DeclaredName(model *Project, path string) string {
+	if front, _, err := model.Frontmatter(path); err == nil {
+		if name := strings.TrimSpace(front.Fields["name"]); name != "" {
+			return name
+		}
+	}
+	return strings.TrimSuffix(filepath.Base(path), ".md")
 }

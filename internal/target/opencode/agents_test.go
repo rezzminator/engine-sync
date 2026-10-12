@@ -35,7 +35,7 @@ func TestOpenCodeAgentRelativePathFailureIsAProblemAndSkipsTheAgent(t *testing.T
 func TestOpenCodeNativeOverridesAndTemplateSource(t *testing.T) {
 	root := testjail.Scratch(t)
 	path := filepath.Join(root, ".claude", "agents", "reader.md")
-	writeOpenCodeFixture(t, path, "---\ndescription: Read.\nmodel: tiny\nopencode-model: native/pinned\nopencode-mode: primary\ncodex-model: ignored\n---\nRead files.\n")
+	writeOpenCodeFixture(t, path, "---\ndescription: Read.\nmodel: tiny\nengines:\n  opencode:\n    model: native/pinned\n    mode: primary\n  codex:\n    model: ignored\n---\nRead files.\n")
 	cfg := config.Default()
 	cfg.OpenCode.AgentPreamble = "Source {{.Source}}; engine {{.Engine}}; role {{.Name}}.\n"
 	model := claudesource.LoadProject(root, filepath.Join(root, "home"), cfg)

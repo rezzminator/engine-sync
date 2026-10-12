@@ -6,7 +6,6 @@ import (
 	"github.com/rezzminator/engine-sync/internal/machine"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
@@ -40,10 +39,11 @@ func runCodex(args []string, stdout, stderr io.Writer, e env) int {
 // runCodexAgents compiles the global (host-level) agents: no repository root,
 // every source and destination anchored on --home.
 func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
-	flags := NewFlagSet("codex agents", "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--gpt-agents]", stderr)
+	flags := NewFlagSet("codex agents", "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--capability NAME]...", stderr)
 	home := flags.String("home", "", "host HOME whose global agents get compiled and installed")
 	sourceRepo := flags.String("source-repo", "", "repository whose configured agent directory supplies the roles")
-	gptAgents := flags.Bool("gpt-agents", false, "include provider-specific GPT agents")
+	var capabilities repeatString
+	flags.Var(&capabilities, "capability", "a host capability an agent's requires may name; repeatable")
 	positionals, code, ok := ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
@@ -52,19 +52,15 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
 		flags.Usage()
 		return 2
 	}
-	resolvedHome := *home
-	var err error
-	if resolvedHome == "" {
-		if resolvedHome, err = e.home(); err != nil {
-			fmt.Fprintf(stderr, "engine-sync codex agents: resolve home: %v\n", err)
-			return 1
-		}
-	}
-	if resolvedHome, err = filepath.Abs(resolvedHome); err != nil {
+	resolvedHome, err := absoluteHome(*home, e)
+	if err != nil {
 		fmt.Fprintf(stderr, "engine-sync codex agents: resolve home: %v\n", err)
 		return 1
 	}
 	policy, err := e.policy("", resolvedHome, stderr)
+	if err == nil {
+		policy, err = config.WithCapabilities(e.get, resolvedHome, policy, capabilities)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -74,33 +70,13 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	code, err = guarded(e, optionGuardRoots(options), true, func() int {
-		result, err := machine.RunGlobalAgents(machine.GlobalAgentsOptions{Home: resolvedHome, SourceRepo: options.SourceRepo, Config: policy, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, GptAgents: *gptAgents})
+	code, err = guarded(e, machine.GuardRoots(options.Home, options.CodexHomes, options.ClaudeConfigDirs), true, func() int {
+		result, err := machine.RunGlobalAgents(machine.GlobalAgentsOptions{Home: resolvedHome, SourceRepo: options.SourceRepo, Config: policy, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes})
 		if err != nil {
 			fmt.Fprintf(stderr, "engine-sync codex agents: %v\n", err)
 			return 1
 		}
-		for _, warning := range result.Warnings {
-			fmt.Fprintln(stderr, "engine-sync codex agents: warning: "+warning)
-		}
-		for _, compiled := range result.Compiled {
-			fmt.Fprintf(stdout, "compiled %s: %d B, parses clean\n", compiled.Path, compiled.Size)
-		}
-		for _, installed := range result.Installed {
-			fmt.Fprintf(stdout, "%s %s\n", installed.State,
-				codex.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found))
-		}
-		for _, role := range result.Roles {
-			fmt.Fprintf(stdout, "%s %s\n", role.State, role.Describe())
-		}
-		for _, problem := range result.Problems {
-			fmt.Fprintf(stderr, "engine-sync codex agents: %s\n", problem)
-		}
-		if len(result.Problems) > 0 {
-			return 1
-		}
-		fmt.Fprintln(stdout, "CODEX AGENTS PASS")
-		return 0
+		return machine.PrintGlobalAgents(result, stdout, stderr)
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "engine-sync codex agents: %v\n", err)

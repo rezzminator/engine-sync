@@ -3,6 +3,7 @@ package machine
 import (
 	"errors"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
@@ -38,7 +39,7 @@ func fixture(t *testing.T) (home, repo string) {
 	repo = filepath.Join(home, "clone")
 	agents := filepath.Join(repo, "agents")
 	writeMachineFixture(t, filepath.Join(agents, "gamma.md"), "---\nname: gamma\ndescription: Gamma role.\nmodel: sonnet\neffort: medium\n---\n\nGamma body.\n")
-	writeMachineFixture(t, filepath.Join(agents, source.GlobalAgentVariantsFile), `{"gamma-deep":{"from":"gamma","effort":"high"}}`)
+	writeMachineFixture(t, filepath.Join(agents, source.GlobalAgentVariantsFile), `{"version":2,"variants":{"gamma-deep":{"from":"gamma","set":{"effort":"high"}}}}`)
 	writeMachineFixture(t, filepath.Join(home, ".claude", "commands", "tidy.md"), "---\ndescription: Tidy.\n---\nTidy up.\n")
 	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"retiredAgents":["frr","rr-super"],"retiredFiles":[".codex/agents/explorer.toml"]}}`)
 	return home, repo
@@ -180,7 +181,11 @@ func TestNoCodexHomeWritesNoRoleAndSkipsTheMirrors(t *testing.T) {
 	if report.Err != nil {
 		t.Fatal(report.Err)
 	}
+	// OpenCode's global agents are no Codex home's: they are still written,
+	// and the fixture's unmapped OpenCode aliases still warn.
 	want := []string{
+		`unmapped OpenCode model alias "sonnet" in ` + filepath.Join(repo, "agents", "gamma.md") + " — model omitted",
+		`unmapped OpenCode model alias "sonnet" in ` + filepath.Join(paths.GeneratedClaudeAgentsDir(home), "gamma-deep.md") + " — model omitted",
 		"no Codex accounts configured — command mirror has nothing to write",
 		"no Codex accounts configured — agent mirror has nothing to write",
 	}
@@ -316,13 +321,13 @@ func TestUninstallWithAnEmptyRosterRetiresTheCommandMirror(t *testing.T) {
 	}
 }
 
-func TestGptMachineAgentsOptInAndRetireOwnedOnly(t *testing.T) {
+func TestCapabilityMachineAgentsOptInAndRetireOwnedOnly(t *testing.T) {
 	home, repo := fixture(t)
 	for i := range 8 {
 		name := fmt.Sprintf("gpt-role-%d", i)
-		writeMachineFixture(t, filepath.Join(repo, "agents", name+".md"), "---\nname: "+name+"\ndescription: Routed role.\nmodel: gpt-6.1-sol\neffort: high\n---\n\nRouted role.\n")
+		writeMachineFixture(t, filepath.Join(repo, "agents", name+".md"), "---\nname: "+name+"\ndescription: Routed role.\nmodel: gpt-6.1-sol\neffort: high\nrequires: [gpt-agents]\n---\n\nRouted role.\n")
 	}
-	options := Options{Home: home, SourceRepo: repo}
+	options := Options{Home: home, SourceRepo: repo, Config: capabilityPolicy(t, home)}
 	report := RunMachine(options)
 	if report.Err != nil || !report.OK {
 		t.Fatalf("default install: %+v", report)
@@ -331,7 +336,7 @@ func TestGptMachineAgentsOptInAndRetireOwnedOnly(t *testing.T) {
 	if _, err := os.Lstat(target); !os.IsNotExist(err) {
 		t.Errorf("default installed GPT role: %v", err)
 	}
-	options.GptAgents = true
+	options.Config = capabilityPolicy(t, home, "gpt-agents")
 	report = RunMachine(options)
 	if report.Err != nil || !report.OK {
 		t.Fatalf("opt-in install: %+v", report)
@@ -347,7 +352,7 @@ func TestGptMachineAgentsOptInAndRetireOwnedOnly(t *testing.T) {
 	}
 	operator := filepath.Join(home, ".codex", "agents", "gpt-role-0.toml")
 	writeMachineFixture(t, operator, `name = "operator"`)
-	options.GptAgents = false
+	options.Config = capabilityPolicy(t, home)
 	report = RunMachine(options)
 	if report.Err != nil || !report.OK {
 		t.Fatalf("opt-out install: %+v", report)
@@ -366,14 +371,14 @@ func TestGptMachineAgentsOptInAndRetireOwnedOnly(t *testing.T) {
 			}
 		}
 	}
-	for _, row := range Doctor(DoctorOptions{Home: home, SourceRepo: repo}) {
-		if strings.Contains(row.Message, "gpt-role") {
+	for _, row := range Doctor(DoctorOptions{Home: home, SourceRepo: repo, Config: capabilityPolicy(t, home)}) {
+		if row.Level == LevelFail && strings.Contains(row.Message, "gpt-role") {
 			t.Errorf("disabled doctor expects GPT role: %+v", row)
 		}
 	}
 }
 
-func TestGptOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
+func TestCapabilityOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
 	for _, door := range []string{"plan", "global", "agents"} {
 		t.Run(door, func(t *testing.T) {
 			home, repo := fixture(t)
@@ -382,10 +387,10 @@ func TestGptOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
 				if stem == "routed" {
 					name = "routed-v2"
 				}
-				writeMachineFixture(t, filepath.Join(repo, "agents", stem+".md"), "---\nname: "+name+"\ndescription: Routed.\nmodel: gpt-6.1-sol\neffort: medium\n---\nRouted.\n")
+				writeMachineFixture(t, filepath.Join(repo, "agents", stem+".md"), "---\nname: "+name+"\ndescription: Routed.\nmodel: gpt-6.1-sol\neffort: medium\nrequires: [gpt-agents]\n---\nRouted.\n")
 			}
-			writeMachineFixture(t, filepath.Join(repo, "agents", source.GlobalAgentVariantsFile), `{"gamma-deep":{"from":"gamma","effort":"high"},"routed-deep":{"from":"routed","effort":"high"}}`)
-			options := Options{Home: home, SourceRepo: repo, GptAgents: true}
+			writeMachineFixture(t, filepath.Join(repo, "agents", source.GlobalAgentVariantsFile), `{"version":2,"variants":{"gamma-deep":{"from":"gamma","set":{"effort":"high"}},"routed-deep":{"from":"routed","set":{"effort":"high"}}}}`)
+			options := Options{Home: home, SourceRepo: repo, Config: capabilityPolicy(t, home, "gpt-agents")}
 			if report := RunMachine(options); report.Err != nil || !report.OK {
 				t.Fatalf("opt-in: %+v", report)
 			}
@@ -405,7 +410,7 @@ func TestGptOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
 			if err := os.Symlink(operator, foreign); err != nil {
 				t.Fatal(err)
 			}
-			options.GptAgents = false
+			options.Config = capabilityPolicy(t, home)
 			if door == "plan" {
 				options.Plan = true
 				report := RunMachine(options)
@@ -457,4 +462,16 @@ func TestGptOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
 			}
 		})
 	}
+}
+
+// capabilityPolicy is the home's resolved policy with the host capability
+// set an agent's requires tests.
+func capabilityPolicy(t *testing.T, home string, capabilities ...string) *config.Config {
+	t.Helper()
+	cfg, err := config.LoadConfigLayers("", home)
+	if err != nil {
+		t.Fatalf("load policy for %s: %v", home, err)
+	}
+	cfg.Capabilities = capabilities
+	return &cfg
 }

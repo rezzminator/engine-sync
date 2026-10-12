@@ -21,6 +21,9 @@ func KeepArtifact(output, source, target string) (warning, problem string) {
 		}
 		return "", fmt.Sprintf("inspect kept output %s: %v", output, err)
 	}
+	if target == "" {
+		return fmt.Sprintf("%s did not build; output kept: %s", source, output), ""
+	}
 	return fmt.Sprintf("source unresolvable: %s → %s; output kept", source, target), ""
 }
 

@@ -27,15 +27,15 @@ func TestCommandExitCodes(t *testing.T) {
 	}
 }
 
-func TestMachineUsageNamesGptOptIn(t *testing.T) {
+func TestMachineUsageNamesCapability(t *testing.T) {
 	_, e := project(t)
 	for _, args := range [][]string{{"global", "--help"}, {"codex", "agents", "--help"}, {"doctor", "--machine", "--help"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			dispatch(args, &stdout, &stderr, e)
 			first, _, _ := strings.Cut(stderr.String(), "\n")
-			if !strings.Contains(first, "--gpt-agents") {
-				t.Fatalf("usage omits machine opt-in: %q", first)
+			if !strings.Contains(first, "--capability NAME") {
+				t.Fatalf("usage omits the capability flag: %q", first)
 			}
 		})
 	}

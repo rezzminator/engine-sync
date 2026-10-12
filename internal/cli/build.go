@@ -6,6 +6,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/diag"
 	"github.com/rezzminator/engine-sync/internal/engine"
+	"github.com/rezzminator/engine-sync/internal/machine"
 	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/target"
 	"io"
@@ -40,6 +41,9 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		value, err = cfg.WithCodexOverrides(o.CLIOverrides)
 		cfg = &value
 	}
+	if err == nil {
+		cfg, err = config.WithCapabilities(e.get, o.Home, cfg, o.Capabilities)
+	}
 	if err != nil {
 		return reportRunFailure("engine-sync "+action, asJSON, err, stdout, stderr)
 	}
@@ -53,9 +57,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	}
 	roots := []string{o.Root}
 
-	var combined diag.Report
-	combined.OK = true
-	var actions []reconcile.Action
+	combined := diag.Report{OK: true}
 	if !p.Workbench && cfg.Codex.GlobalCommands {
 		machinePolicy, loadErr := e.policy("", o.Home, stderr)
 		if loadErr != nil {
@@ -65,24 +67,12 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		if loadErr != nil {
 			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
 		}
-		_, loadErr = guarded(e, machineGuardRoots(o.Home, roster), mode == reconcile.Build, func() int {
+		_, loadErr = guarded(e, machine.GuardRoots(o.Home, *roster.CodexHomes, roster.ClaudeConfigDirs), mode == reconcile.Build, func() int {
 			for _, t := range targets {
 				r, pass := engine.Commands(o.Home, "", *machinePolicy, *roster.CodexHomes, false, mode, t.Render, t.Roots, t.Validate)
-				combined.OK = combined.OK && pass
-				combined.Problems = append(combined.Problems, r.Problems...)
-				combined.Warnings = append(combined.Warnings, r.Warnings...)
-				combined.Rebuildable = append(combined.Rebuildable, r.Rebuildable...)
-				combined.Wrote += r.Wrote
-				combined.Unchanged += r.Unchanged
-				combined.Deleted += r.Deleted
-				actions = append(actions, r.Actions...)
+				combined.Merge(r, pass)
 				if !asJSON {
-					for _, s := range r.Problems {
-						fmt.Fprintln(stderr, s)
-					}
-					for _, s := range r.Warnings {
-						fmt.Fprintln(stderr, "warning:", s)
-					}
+					diag.PrintLines(stderr, r.Problems, r.Warnings)
 				}
 			}
 			if !combined.OK {
@@ -92,6 +82,13 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		})
 		if loadErr != nil {
 			return reportRunFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		}
+	}
+	if action == "check" || action == "doctor" {
+		problems, warnings := machine.CheckSourceVariants(o.Root, o.Home, *cfg)
+		combined.Merge(reconcile.Result{Problems: problems, Warnings: warnings}, len(problems) == 0)
+		if !asJSON {
+			diag.PrintLines(stderr, problems, warnings)
 		}
 	}
 	code, err = guarded(e, roots, mode == reconcile.Build, func() int {
@@ -109,14 +106,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 					}
 				}
 			}
-			combined.OK = combined.OK && pass
-			combined.Problems = append(combined.Problems, r.Problems...)
-			combined.Rebuildable = append(combined.Rebuildable, r.Rebuildable...)
-			combined.Warnings = append(combined.Warnings, r.Warnings...)
-			combined.Wrote += r.Wrote
-			combined.Unchanged += r.Unchanged
-			combined.Deleted += r.Deleted
-			actions = append(actions, r.Actions...)
+			combined.Merge(r, pass)
 			if !asJSON {
 				diag.PrintEngine(stdout, stderr, r, mode, t.Name(), action, pass)
 			}
@@ -128,7 +118,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	})
 	if asJSON {
 		if mode == reconcile.Plan {
-			return diag.WritePlan(stdout, stderr, combined, actions, err, code)
+			return diag.WritePlan(stdout, stderr, combined, combined.Actions, err, code)
 		}
 		if action == "doctor" {
 			return diag.WriteJSON(stdout, stderr, combined, err, config.Describe(*cfg))

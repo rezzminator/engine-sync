@@ -19,19 +19,24 @@ const RelPath = ".claude/engine-sync.json"
 const LegacyRelPath = ".claude/codex-build.json"
 
 type Config struct {
-	ClaudeConfigDir string            `json:"-"`
-	Version         int               `json:"version"`
-	Codex           Codex             `json:"codex"`
-	OpenCode        OpenCode          `json:"opencode"`
-	WorkbenchMarker string            `json:"workbenchMarker"`
-	MCP             MCP               `json:"mcp"`
-	Machine         Machine           `json:"-"`
-	Source          string            `json:"-"`
-	Legacy          bool              `json:"-"`
-	Sources         map[string]string `json:"-"`
-	Deprecations    []string          `json:"-"`
-	Rewrites        []Rewrite         `json:"rewrites"`
-	CommandDirs     []string          `json:"commandDirs"`
+	ClaudeConfigDir string   `json:"-"`
+	Version         int      `json:"version"`
+	Codex           Codex    `json:"codex"`
+	OpenCode        OpenCode `json:"opencode"`
+	WorkbenchMarker string   `json:"workbenchMarker"`
+	MCP             MCP      `json:"mcp"`
+	Machine         Machine  `json:"-"`
+	Agents          Agents   `json:"agents"`
+	// Capabilities is the host's capability set for this run: every
+	// --capability flag plus targets.json "capabilities". It is never read
+	// from a config file and carries no meaning beyond set membership.
+	Capabilities []string          `json:"-"`
+	Source       string            `json:"-"`
+	Legacy       bool              `json:"-"`
+	Sources      map[string]string `json:"-"`
+	Deprecations []string          `json:"-"`
+	Rewrites     []Rewrite         `json:"rewrites"`
+	CommandDirs  []string          `json:"commandDirs"`
 }
 
 type Review struct {
@@ -56,15 +61,17 @@ type Codex struct {
 }
 
 type OpenCode struct {
-	ModelMap      map[string]string        `json:"modelMap"`
-	AgentPreamble string                   `json:"agentPreamble"`
-	Permission    Permission               `json:"permission"`
-	Agent         map[string]OpenCodeAgent `json:"agent"`
-	MirrorFiles   []string                 `json:"mirrorFiles"`
+	ModelMap      map[string]string `json:"modelMap"`
+	AgentPreamble string            `json:"agentPreamble"`
+	Permission    Permission        `json:"permission"`
+	MirrorFiles   []string          `json:"mirrorFiles"`
 }
 
-type OpenCodeAgent struct {
-	Permission Permission `json:"permission"`
+// Agents is the agent frontmatter policy: PassthroughKeys names extra
+// top-level keys a host accepts beside the Claude Code native keys and
+// engine-sync's own, so they never warn as UNKNOWN-KEY.
+type Agents struct {
+	PassthroughKeys []string `json:"passthroughKeys" pattern:"^[^ \\t\\n:]*[^\\t\\n\\v\\f\\r :\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^ \\t\\n:]*$"`
 }
 
 type MCP struct {
@@ -73,17 +80,16 @@ type MCP struct {
 }
 
 type Machine struct {
-	SourceAgentsDir      string            `json:"sourceAgentsDir"`
-	AgentMarkerDir       string            `json:"agentMarkerDir"`
-	ModelMap             map[string]string `json:"modelMap"`
-	ClaudeAgentsDir      string            `json:"claudeAgentsDir"`
-	LegacyCodexAgentsDir string            `json:"legacyCodexAgentsDir"`
-	RetiredAgents        []string          `json:"retiredAgents"`
-	RetiredFiles         []string          `json:"retiredFiles"`
-	Rewrites             []Rewrite         `json:"rewrites"`
-	CodexHomes           []string          `json:"codexHomes"`
-	Variants             string            `json:"variants"`
-	GeneratedAgentsDir   string            `json:"generatedAgentsDir"`
+	SourceAgentsDir      string    `json:"sourceAgentsDir"`
+	AgentMarkerDir       string    `json:"agentMarkerDir"`
+	ClaudeAgentsDir      string    `json:"claudeAgentsDir"`
+	LegacyCodexAgentsDir string    `json:"legacyCodexAgentsDir"`
+	RetiredAgents        []string  `json:"retiredAgents"`
+	RetiredFiles         []string  `json:"retiredFiles"`
+	Rewrites             []Rewrite `json:"rewrites"`
+	CodexHomes           []string  `json:"codexHomes"`
+	Variants             string    `json:"variants"`
+	GeneratedAgentsDir   string    `json:"generatedAgentsDir"`
 }
 
 type MachineFile struct {
@@ -95,6 +101,7 @@ type MachineFile struct {
 	Rewrites        []Rewrite `json:"rewrites"`
 	CommandDirs     []string  `json:"commandDirs"`
 	Machine         Machine   `json:"machine"`
+	Agents          Agents    `json:"agents"`
 }
 
 type Rewrite struct {
@@ -131,15 +138,14 @@ func Default() Config {
 			ModelMap:      map[string]string{},
 			AgentPreamble: DefaultAgentPreamble,
 			Permission:    Permission{},
-			Agent:         map[string]OpenCodeAgent{},
 			MirrorFiles:   []string{},
 		},
 		Rewrites:    []Rewrite{},
 		CommandDirs: []string{},
+		Agents:      Agents{PassthroughKeys: []string{}},
 		MCP:         MCP{GlobalServers: []string{}, Renamed: map[string]string{}},
 		Machine: Machine{
 			SourceAgentsDir:      "agents",
-			ModelMap:             defaultModelMap(),
 			ClaudeAgentsDir:      "",
 			GeneratedAgentsDir:   paths.ClaudeVariantStore,
 			LegacyCodexAgentsDir: paths.CodexLegacyStore,
@@ -374,11 +380,16 @@ func Validate(cfg Config) error {
 			}
 		}
 	}
-	for key, models := range map[string]map[string]string{"codex.modelMap": cfg.Codex.ModelMap, "opencode.modelMap": cfg.OpenCode.ModelMap, "machine.modelMap": cfg.Machine.ModelMap} {
+	for key, models := range map[string]map[string]string{"codex.modelMap": cfg.Codex.ModelMap, "opencode.modelMap": cfg.OpenCode.ModelMap} {
 		for alias, model := range models {
 			if strings.TrimSpace(alias) == "" || strings.TrimSpace(model) == "" {
 				return fmt.Errorf("%s.%s: alias and model must be nonempty", key, alias)
 			}
+		}
+	}
+	for _, key := range cfg.Agents.PassthroughKeys {
+		if strings.TrimSpace(key) == "" || strings.ContainsAny(key, " \t\n:") {
+			return fmt.Errorf("agents.passthroughKeys: invalid key %q", key)
 		}
 	}
 	for _, section := range []struct {
@@ -433,7 +444,7 @@ type SourceRow struct {
 }
 
 func Describe(cfg Config) []SourceRow {
-	raw, _ := json.Marshal(MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine})
+	raw, _ := json.Marshal(MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine, Agents: cfg.Agents})
 	var object map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &object)
 	var rows []SourceRow
@@ -458,32 +469,31 @@ func Describe(cfg Config) []SourceRow {
 	return rows
 }
 
-// Map values need their inherited struct when decoding a partial agent override.
-func mergeAgents(raw json.RawMessage, inherited map[string]OpenCodeAgent) (map[string]OpenCodeAgent, error) {
-	if len(raw) == 0 {
-		return inherited, nil
-	}
-	var section struct {
-		Agent map[string]json.RawMessage `json:"agent"`
-	}
-	if err := json.Unmarshal(raw, &section); err != nil {
-		return nil, err
-	}
-	if section.Agent == nil {
-		return inherited, nil
-	}
-	merged := make(map[string]OpenCodeAgent, len(inherited)+len(section.Agent))
-	for name, agent := range inherited {
-		merged[name] = agent
-	}
-	for name, raw := range section.Agent {
-		agent := merged[name]
-		if err := json.Unmarshal(raw, &agent); err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
+// removedKeys are configuration keys a former release read and this one
+// refuses, each naming where its value lives now, so an old file fails loudly
+// instead of being silently ignored or rejected as a bare unknown key.
+var removedKeys = []struct{ section, key, replacement string }{
+	{"machine", "modelMap", "codex.modelMap"},
+	{"opencode", "agent", "engines.opencode.permission in each agent's frontmatter"},
+}
+
+// refuseRemoved names a removed key before shape validation reports it as
+// unknown.
+func refuseRemoved(object map[string]json.RawMessage) error {
+	for _, removed := range removedKeys {
+		raw, ok := object[removed.section]
+		if !ok {
+			continue
 		}
-		merged[name] = agent
+		var section map[string]json.RawMessage
+		if json.Unmarshal(raw, &section) != nil {
+			continue
+		}
+		if _, ok := section[removed.key]; ok {
+			return fmt.Errorf("%s.%s is removed; use %s", removed.section, removed.key, removed.replacement)
+		}
 	}
-	return merged, nil
+	return nil
 }
 
 var RelativePath = paths.RelativePath

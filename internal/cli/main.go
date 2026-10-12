@@ -19,7 +19,7 @@ import (
 
 // Version identifies this build; release builds stamp it with the plugin
 // manifest's version using -ldflags "-X github.com/rezzminator/engine-sync/internal/cli.Version=…".
-var Version = "0.3.0-alpha"
+var Version = "0.3.0-alpha.1"
 
 // env is the process environment one run reads.
 type env struct {
@@ -90,6 +90,7 @@ func commandTable() []commandEntry {
 		{"opencode", "opencode build|check|doctor [repo] [options]", runOpenCode},
 		{"config", "config show|validate|schema [--json] [root]", runConfig},
 		{"global", "global [options]", runGlobal},
+		{"variants", "variants pin [name]... [--home H] [--source-repo R]", runVariants},
 		{"hook", "hook claude mark|stop|start", runHook},
 		{"version", "version", func(_ []string, o, w io.Writer, e env) int { fmt.Fprintf(o, "engine-sync %s\n", Version); return 0 }},
 		{"help", "help", func(_ []string, o, w io.Writer, e env) int { printUsage(o); return 0 }},
@@ -126,10 +127,6 @@ func writerPath() string {
 	}
 	return exe
 }
-
-// globalRoot is the guard root of a home's machine-level outputs: its Codex
-// roles, Claude agent links and global commands.
-func globalRoot(home string) string { return "global:" + home }
 
 func (e env) source(root, home string, cfg config.Config) *source.Project {
 	raw, _ := json.Marshal(cfg)

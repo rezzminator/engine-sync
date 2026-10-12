@@ -29,20 +29,18 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 	if object, found, err := readObject(machinePath); err != nil {
 		return Config{}, err
 	} else if found {
+		if err := refuseRemoved(object); err != nil {
+			return Config{}, fmt.Errorf("config %s: %w", machinePath, err)
+		}
 		if err := validateObject(object, reflect.TypeFor[MachineFile](), ""); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", machinePath, err)
 		}
-		agents, err := mergeAgents(object["opencode"], cfg.OpenCode.Agent)
-		if err != nil {
-			return Config{}, fmt.Errorf("config %s: opencode.agent: %w", machinePath, err)
-		}
-		machine := MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine}
+		machine := MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine, Agents: cfg.Agents}
 		raw, _ := json.Marshal(object)
 		if err := json.Unmarshal(raw, &machine); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", machinePath, err)
 		}
-		machine.OpenCode.Agent = agents
-		cfg.Version, cfg.Codex, cfg.OpenCode, cfg.WorkbenchMarker, cfg.MCP, cfg.Machine, cfg.Rewrites = machine.Version, machine.Codex, machine.OpenCode, machine.WorkbenchMarker, machine.MCP, machine.Machine, machine.Rewrites
+		cfg.Version, cfg.Codex, cfg.OpenCode, cfg.WorkbenchMarker, cfg.MCP, cfg.Machine, cfg.Rewrites, cfg.Agents = machine.Version, machine.Codex, machine.OpenCode, machine.WorkbenchMarker, machine.MCP, machine.Machine, machine.Rewrites, machine.Agents
 		cfg.CommandDirs = machine.CommandDirs
 		markSources(&cfg, object, "", machinePath)
 	}
@@ -77,18 +75,16 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 				return Config{}, fmt.Errorf("inspect legacy config %s: %w", legacyPath, e)
 			}
 		}
-		if err := validateObject(object, reflect.TypeFor[Config](), ""); err != nil {
+		if err := refuseRemoved(object); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", path, err)
 		}
-		agents, err := mergeAgents(object["opencode"], cfg.OpenCode.Agent)
-		if err != nil {
-			return Config{}, fmt.Errorf("config %s: opencode.agent: %w", path, err)
+		if err := validateObject(object, reflect.TypeFor[Config](), ""); err != nil {
+			return Config{}, fmt.Errorf("config %s: %w", path, err)
 		}
 		raw, _ := json.Marshal(object)
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", path, err)
 		}
-		cfg.OpenCode.Agent = agents
 		markSources(&cfg, object, "", path)
 	} else {
 		path = filepath.Join(root, filepath.FromSlash(LegacyRelPath))
@@ -110,6 +106,9 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 			}
 			if err := json.Unmarshal(version, &cfg.Version); err != nil {
 				return Config{}, fmt.Errorf("config %s: version: %w", path, err)
+			}
+			if err := refuseRemoved(legacy); err != nil {
+				return Config{}, fmt.Errorf("config %s: %w", path, err)
 			}
 			if err := validateObject(legacy, reflect.TypeFor[Codex](), ""); err != nil {
 				return Config{}, fmt.Errorf("config %s: %w", path, err)

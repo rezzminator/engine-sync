@@ -15,13 +15,14 @@ import (
 func compileAgents(
 	root string,
 	projects []string,
-	cfg Config,
+	all config.Config,
 	options TransformOptions,
 	add func(artifact.Artifact),
 	problem, warn func(string),
 	result *Result,
 ) {
 	options.Kind = "agent"
+	cfg := all.Codex
 	seen := map[string]string{}
 	for _, project := range projects {
 		dir := filepath.Join(root, project, ".claude", "agents")
@@ -29,8 +30,7 @@ func compileAgents(
 			if entry.SkillDir || entry.DirLink {
 				continue
 			}
-			base := strings.TrimSuffix(filepath.Base(entry.Path), ".md")
-			name, register, err := claudesource.RoleName(base, project, cfg)
+			name, register, err := claudesource.RoleName(claudesource.DeclaredName(options.Source, entry.Path), project, cfg)
 			if err != nil {
 				problem(fmt.Sprintf("%s: %v", entry.Path, err))
 				continue
@@ -39,7 +39,7 @@ func compileAgents(
 				warn("skip agent " + entry.Path + " — never-register policy")
 				continue
 			}
-			key := paths.FoldName(strings.ReplaceAll(name, "-", "_"))
+			key := paths.FoldName(name)
 			if previous, ok := seen[key]; ok {
 				problem(fmt.Sprintf("%s role name %s from %s and %s", reconcile.Conflict, name, previous, entry.Path))
 				continue
@@ -57,99 +57,137 @@ func compileAgents(
 			}
 			rel, _ := filepath.Rel(root, entry.Path)
 			front, body, parseErr := options.Source.Frontmatter(entry.Path)
-			fields := front.Fields
 			if parseErr != nil {
-				problem(fmt.Sprintf("parse %s: %v", entry.Path, parseErr))
+				problem(claudesource.DescribeParseError(entry.Path, parseErr))
 				continue
 			}
-			role, err := codexRoleSettings(fields, cfg.ModelMap, entry.Path)
-			if err != nil {
-				problem(err.Error())
+			problems, warnings := claudesource.ValidateAgent(entry.Path, front, all.Agents.PassthroughKeys, false)
+			for _, w := range warnings {
+				warn(w)
+			}
+			if len(problems) > 0 {
+				for _, p := range problems {
+					problem(p)
+				}
 				continue
 			}
-			modelAlias := fields["model"]
-			if modelAlias != "" && modelAlias != "inherit" && cfg.ModelMap[modelAlias] == "" && fields["codex-model"] == "" {
-				warn(fmt.Sprintf("unmapped Codex model alias %q in %s — model omitted", modelAlias, entry.Path))
+			if missing := claudesource.Unmet(front.Requires, all.Capabilities); missing != "" {
+				warn(claudesource.Skipped(name, missing))
+				continue
 			}
-			tomlName := strings.ReplaceAll(name, "-", "_")
-			instructions, err := config.RenderTemplate(cfg.AgentPreamble, config.TemplateData{Name: tomlName, Engine: "Codex", Source: filepath.ToSlash(rel), Root: "AGENTS.md"})
+			if front.Engines.CodexOff() {
+				continue
+			}
+			instructions, err := config.RenderTemplate(cfg.AgentPreamble, config.TemplateData{Name: name, Engine: "Codex", Source: filepath.ToSlash(rel), Root: "AGENTS.md", Models: cfg.ModelMap})
 			if err != nil {
 				problem(fmt.Sprintf("render codex.agentPreamble for %s: %v", entry.Path, err))
 				continue
 			}
-			instructions += transformMarkdown(strings.TrimSpace(body), options)
-			toml := artifact.Marker(artifact.TOML, filepath.ToSlash(rel)) + "\n"
-			if role.Model != "" {
-				toml += "# model: " + tomlEscape(role.Model)
-				if modelAlias != "" && modelAlias != role.Model {
-					toml += " (Claude alias: " + tomlEscape(modelAlias) + ")"
-				}
-				toml += "\n"
+			text, warning, err := renderRole(roleSpec{
+				Header:       artifact.Marker(artifact.TOML, filepath.ToSlash(rel)) + "\n",
+				Name:         name,
+				Description:  transformMarkdown(front.Fields["description"], options),
+				Instructions: instructions + transformMarkdown(strings.TrimSpace(body), options),
+				ModelComment: true,
+			}, front, cfg.ModelMap, entry.Path)
+			if err != nil {
+				problem(err.Error())
+				continue
 			}
-			description := transformMarkdown(fields["description"], options)
-			toml += "name = " + tomlString(tomlName) + "\ndescription = " + tomlString(description) + "\n"
-			if role.Model != "" {
-				toml += "model = " + tomlString(role.Model) + "\n"
+			if warning != "" {
+				warn(warning)
 			}
-			if role.Effort != "" {
-				toml += "model_reasoning_effort = " + tomlString(role.Effort) + "\n"
-			}
-			if role.Sandbox != "" {
-				toml += "sandbox_mode = " + tomlString(role.Sandbox) + "\n"
-			}
-			toml += "developer_instructions = \"\"\"\n" + tomlMultiline(instructions) + "\"\"\"\n"
-			add(artifact.Artifact{Path: filepath.Join(root, ".codex", "agents", name+".toml"), Content: []byte(toml), Source: entry.Path, Syntax: artifact.TOML})
+			add(artifact.Artifact{Path: filepath.Join(root, ".codex", "agents", name+".toml"), Content: []byte(text), Source: entry.Path, Syntax: artifact.TOML})
 		}
 	}
 }
 
-func codexRoleSettings(fields, modelMap map[string]string, source string) (codexRole, error) {
-	role := codexRole{Effort: strings.TrimSpace(fields["effort"])}
-	if override, ok := fields["codex-model"]; ok {
-		role.Model = strings.TrimSpace(override)
-	} else if model := strings.TrimSpace(fields["model"]); model != "" {
-		mapped, ok := modelMap[model]
-		if !ok && model == claudeInheritModel {
-			// Claude's "inherit" is the session's model: a Codex role with no
-			// model line runs on its session's model too.
-			mapped, ok = "", true
-		}
-		if !ok {
-			mapped = ""
-		}
+// roleSpec is what differs between the project and the machine path of the
+// one Codex role renderer: the marker header, the role's name, description
+// and instructions as each path prepared them, and whether the project's
+// `# model:` comment precedes the fields.
+type roleSpec struct {
+	Header, Name, Description, Instructions string
+	ModelComment                            bool
+}
 
-		role.Model = mapped
+// renderRole is the one Codex role renderer. warning names an unmapped model
+// alias, whose model line is omitted.
+func renderRole(spec roleSpec, front claudesource.Frontmatter, modelMap map[string]string, source string) (string, string, error) {
+	role, warning, err := codexRoleSettings(front, modelMap, source)
+	if err != nil {
+		return "", "", err
+	}
+	text := spec.Header
+	if spec.ModelComment && role.Model != "" {
+		alias := strings.TrimSpace(front.Model)
+		text += "# model: " + tomlEscape(role.Model)
+		if alias != "" && alias != role.Model {
+			text += " (Claude alias: " + tomlEscape(alias) + ")"
+		}
+		text += "\n"
+	}
+	text += "name = " + tomlString(spec.Name) + "\ndescription = " + tomlString(spec.Description) + "\n"
+	if role.Model != "" {
+		text += "model = " + tomlString(role.Model) + "\n"
 	}
 	if role.Effort != "" {
-		if mapped, ok := codeReviewEfforts[role.Effort]; ok {
-			role.Effort = mapped
-		} else {
-			return codexRole{}, fmt.Errorf("%s: invalid effort %q", source, role.Effort)
+		text += "model_reasoning_effort = " + tomlString(role.Effort) + "\n"
+	}
+	if role.Sandbox != "" {
+		text += "sandbox_mode = " + tomlString(role.Sandbox) + "\n"
+	}
+	text += "developer_instructions = \"\"\"\n" + tomlMultiline(spec.Instructions) + "\"\"\"\n"
+	return text, warning, nil
+}
+
+// codexRoleSettings resolves a role's Codex model, effort and sandbox.
+// Model: engines.codex.model (a codex.modelMap key is mapped, any other value
+// is verbatim), then modelMap[model]; an unmapped alias is omitted with a
+// warning, and Claude's "inherit" is no model line (the session's model).
+// Effort: engines.codex.effort, then effort; max reaches Codex as xhigh.
+// Sandbox: engines.codex.sandbox (inherit is no line), else read-only when
+// the tools line grants no write tool.
+func codexRoleSettings(front claudesource.Frontmatter, modelMap map[string]string, source string) (codexRole, string, error) {
+	var role codexRole
+	var warning string
+	settings := claudesource.CodexEngine{}
+	if front.Engines.Codex != nil {
+		settings = *front.Engines.Codex
+	}
+	if pin := strings.TrimSpace(settings.Model); pin != "" {
+		role.Model = pin
+		if mapped, ok := modelMap[pin]; ok {
+			role.Model = mapped
+		}
+	} else if model := strings.TrimSpace(front.Model); model != "" && model != claudeInheritModel {
+		role.Model = modelMap[model]
+		if strings.TrimSpace(role.Model) == "" {
+			role.Model = ""
+			warning = fmt.Sprintf("unmapped Codex model alias %q in %s — model omitted", model, source)
 		}
 	}
-	if override, ok := fields["codex-effort"]; ok {
-		role.Effort = strings.TrimSpace(override)
-		switch role.Effort {
-		case codeReviewBareEffort, codexMediumEffort, codexHighEffort, codeReviewTopEffort:
-		default:
-			return codexRole{}, fmt.Errorf(
-				"%s: invalid codex-effort %q (want low, medium, high, or xhigh)",
-				source,
-				role.Effort,
-			)
-		}
+	role.Effort = strings.TrimSpace(front.Effort)
+	if pin := strings.TrimSpace(settings.Effort); pin != "" {
+		role.Effort = pin
 	}
-	if sandbox, ok := fields["codex-sandbox"]; ok {
-		if strings.TrimSpace(sandbox) != "workspace-write" && strings.TrimSpace(sandbox) != "inherit" && strings.TrimSpace(sandbox) != "read-only" {
-			return codexRole{}, fmt.Errorf("%s: invalid codex-sandbox %q (want inherit, read-only, or workspace-write)", source, sandbox)
+	if role.Effort != "" {
+		mapped, ok := codeReviewEfforts[role.Effort]
+		if !ok {
+			return codexRole{}, "", fmt.Errorf("%s: invalid effort %q", source, role.Effort)
 		}
-		if strings.TrimSpace(sandbox) != "inherit" {
-			role.Sandbox = strings.TrimSpace(sandbox)
-		}
-	} else if codexReadOnly(fields["tools"]) {
-		role.Sandbox = "read-only"
+		role.Effort = mapped
 	}
-	return role, nil
+	switch sandbox := strings.TrimSpace(settings.Sandbox); sandbox {
+	case "inherit":
+	case "":
+		if codexReadOnly(front.Fields["tools"]) {
+			role.Sandbox = "read-only"
+		}
+	default:
+		role.Sandbox = sandbox
+	}
+	return role, warning, nil
 }
 
 // codexReadOnly reports whether a role compiles to sandbox_mode = "read-only",
@@ -173,21 +211,21 @@ func codexReadOnly(tools string) bool {
 // read here because a variant's Markdown exists only in memory until the build
 // phase writes it; mdPath labels errors and, against agentsDir, names the
 // source the generated marker credits.
-func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Config) (string, string, error) {
-	fields, body, err := claudesource.Fields(raw)
+func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Config) (string, string, string, error) {
+	front, body, err := claudesource.Parse(raw)
 	if err != nil {
-		return "", "", fmt.Errorf("parse %s: %w", mdPath, err)
+		return "", "", "", fmt.Errorf("%s", claudesource.DescribeParseError(mdPath, err))
 	}
-	if len(fields) == 0 {
-		return "", "", fmt.Errorf("%s: no frontmatter", mdPath)
+	if front.Node == nil {
+		return "", "", "", fmt.Errorf("%s: no frontmatter", mdPath)
 	}
-	name := strings.TrimSpace(fields["name"])
-	description := strings.TrimSpace(fields["description"])
+	name := strings.TrimSpace(front.Fields["name"])
+	description := strings.TrimSpace(front.Fields["description"])
 	if name == "" || description == "" {
-		return "", "", fmt.Errorf("%s: frontmatter needs both name: and description", mdPath)
+		return "", "", "", fmt.Errorf("%s: frontmatter needs both name: and description", mdPath)
 	}
 	if err := paths.ValidateName(name); err != nil {
-		return "", "", fmt.Errorf("%s: %w", mdPath, err)
+		return "", "", "", fmt.Errorf("%s: %w", mdPath, err)
 	}
 	body = strings.TrimSpace(body)
 
@@ -195,52 +233,39 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 	if len(policies) > 0 {
 		cfg = policies[0]
 	}
+	generated := filepath.Dir(mdPath) != filepath.Clean(agentsDir)
+	if problems, _ := claudesource.ValidateAgent(mdPath, front, cfg.Agents.PassthroughKeys, generated); len(problems) > 0 {
+		return "", "", "", fmt.Errorf("%s", strings.Join(problems, "; "))
+	}
 	ctx := rewrite.Context{Engine: "codex", Kind: "agent", Source: mdPath}
 	rules := rewrite.Builtins(rewrite.Func(func(text string, _ rewrite.Context) string {
-		return rewriteCodeReview(text, cfg.Machine.ModelMap, cfg.Codex.Review)
+		return rewriteCodeReview(text, cfg.Codex.ModelMap, cfg.Codex.Review)
 	}))
 	description = rules.Apply(description, ctx)
 	rules = append(rules, rewrite.Configured(cfg.Machine.Rewrites)...)
 	rules = append(rules, rewrite.Configured(cfg.Rewrites)...)
 	description = rewrite.Configured(append(cfg.Machine.Rewrites, cfg.Rewrites...)).Apply(description, ctx)
 	body = rules.Apply(body, ctx)
-	role, err := codexRoleSettings(fields, cfg.Machine.ModelMap, mdPath)
+	content, warning, err := renderRole(roleSpec{
+		Header:       globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir, cfg.Machine.AgentMarkerDir)),
+		Name:         name,
+		Description:  description,
+		Instructions: body,
+	}, front, cfg.Codex.ModelMap, mdPath)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-
-	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir, cfg.Machine.AgentMarkerDir)) +
-		"name = \"" + globalAgentEscape(name) + "\"\n" +
-		"description = \"" + globalAgentEscape(description) + "\"\n"
-	if role.Model != "" {
-		content += "model = \"" + globalAgentEscape(role.Model) + "\"\n"
-	}
-	if role.Effort != "" {
-		content += "model_reasoning_effort = \"" + globalAgentEscape(role.Effort) + "\"\n"
-	}
-	if role.Sandbox != "" {
-		content += "sandbox_mode = \"" + globalAgentEscape(role.Sandbox) + "\"\n"
-	}
-	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
-
-	return name, content, nil
+	return name, content, warning, nil
 }
 
-// globalAgentMarkerSource names what the generated marker credits: the clone
-// path of an original agent, or variants.json for a variant, whose Markdown
-// only ever existed in the engine-sync-owned generated directory. It is deliberately
-// clone-relative — a host-absolute path in a marker says nothing an operator
-// on another machine can act on.
+// globalAgentMarkerSource is source.MachineMarkerSource: one credit rule for
+// every engine's machine-global agent marker.
 func globalAgentMarkerSource(mdPath, agentsDir string, markers ...string) string {
-	relDir := filepath.Base(agentsDir)
-	if len(markers) > 0 && markers[0] != "" {
-		relDir = markers[0]
+	markerDir := ""
+	if len(markers) > 0 {
+		markerDir = markers[0]
 	}
-	relDir = filepath.ToSlash(relDir) + "/"
-	if filepath.Dir(mdPath) == filepath.Clean(agentsDir) {
-		return relDir + filepath.Base(mdPath)
-	}
-	return relDir + "variants.json"
+	return claudesource.MachineMarkerSource(mdPath, agentsDir, markerDir)
 }
 
 // globalAgentEscape is for a TOML basic string — build-codex.mjs:151.
@@ -258,12 +283,15 @@ const claudeInheritModel = "inherit"
 type codexRole struct{ Model, Effort, Sandbox string }
 
 func RenderMachineAgent(path, raw, dir string, cfg ...config.Config) (string, string, error) {
-	return renderGlobalAgentTOML(path, raw, dir, cfg...)
+	name, content, _, err := renderGlobalAgentTOML(path, raw, dir, cfg...)
+	return name, content, err
 }
 func ValidateRole(text string) error { return validateTOML(text) }
 
 type Role = codexRole
 
-func RoleSettings(f, m map[string]string, s string) (Role, error) { return codexRoleSettings(f, m, s) }
-func EscapeRole(s string) string                                  { return globalAgentEscape(s) }
-func EscapeRoleMultiline(s string) string                         { return globalAgentEscapeMultiline(s) }
+func RoleSettings(f claudesource.Frontmatter, m map[string]string, s string) (Role, string, error) {
+	return codexRoleSettings(f, m, s)
+}
+func EscapeRole(s string) string          { return globalAgentEscape(s) }
+func EscapeRoleMultiline(s string) string { return globalAgentEscapeMultiline(s) }

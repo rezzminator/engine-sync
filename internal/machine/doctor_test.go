@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/engine-sync/internal/artifact"
 )
 
 func TestMachineDoctorRows(t *testing.T) {
@@ -95,5 +97,66 @@ func TestMachineDoctorReportsDanglingSources(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("doctor omitted source failure: %+v", rows)
+	}
+}
+
+// TestMachineDoctorStaleOnceAndNoScanWithoutConfig: a STALE agent is one
+// row (its plan retire event is not a second), and a config that fails to
+// load is reported with the agent scan named NOT SCANNED, never as clean,
+// and no directory scanned from a config that never loaded.
+func TestMachineDoctorStaleOnceAndNoScanWithoutConfig(t *testing.T) {
+	home, repo := fixture(t)
+	if report := RunMachine(Options{Home: home, SourceRepo: repo}); report.Err != nil {
+		t.Fatal(report.Err)
+	}
+	stale := filepath.Join(home, ".codex", "agents", "old.toml")
+	writeMachineFixture(t, stale, artifact.Marker(artifact.TOML, "agents/old.md")+"\nname = \"old\"\n")
+	rows := Doctor(DoctorOptions{Home: home, SourceRepo: repo})
+	count := 0
+	for _, row := range rows {
+		if strings.Contains(row.Message, stale) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("rows naming %s = %d, want 1: %+v", stale, count, rows)
+	}
+	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"bogus":true}}`)
+	var text []string
+	for _, row := range Doctor(DoctorOptions{Home: home, SourceRepo: repo}) {
+		text = append(text, row.Level+" "+row.Message)
+	}
+	all := strings.Join(text, "\n")
+	for _, want := range []string{"bogus", LevelFail + " global-agents states NOT SCANNED"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("doctor lacks %q:\n%s", want, all)
+		}
+	}
+	for _, lack := range []string{stale, "\n" + LevelFail + " agent "} {
+		if strings.Contains(all, lack) {
+			t.Fatalf("doctor scanned without a config (%q):\n%s", lack, all)
+		}
+	}
+}
+
+// TestMachineDoctorInspectsHealthyAgentsBesideABrokenOne: a source breaking
+// the agent contract is a BROKEN row naming it, never the whole directory
+// UNREADABLE, and every healthy agent's Codex registry is still inspected —
+// global skips the broken agent and installs the rest.
+func TestMachineDoctorInspectsHealthyAgentsBesideABrokenOne(t *testing.T) {
+	home, repo := fixture(t)
+	path := filepath.Join(repo, "agents", "broken.md")
+	plantFile(t, path, []byte("---\nname: broken\n---\n\nno description field.\n"))
+	statuses := InspectRegistries(DoctorOptions{Home: home, SourceRepo: repo})
+	var broken, codex bool
+	for _, s := range statuses {
+		if s.State == AgentsUnreadable && s.Dir == filepath.Join(repo, "agents") {
+			t.Fatalf("a readable agents directory reported UNREADABLE: %+v", statuses)
+		}
+		broken = broken || (s.State == AgentsBroken && strings.Join(s.Names, ",") == "broken" && strings.Contains(s.Error, path))
+		codex = codex || (!s.Store && s.Dir == filepath.Join(home, ".codex", "agents"))
+	}
+	if !broken || !codex {
+		t.Fatalf("statuses = %+v, want a BROKEN row naming broken and the Codex registry inspected", statuses)
 	}
 }

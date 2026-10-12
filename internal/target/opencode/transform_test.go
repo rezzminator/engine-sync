@@ -6,13 +6,13 @@ import (
 )
 
 func TestParseOpenCodeFrontmatterReadsAYAMLListAsTheCommaJoinedList(t *testing.T) {
-	listed, _, err := claudesource.Fields(
+	listed, _, err := parseFields(
 		"---\ndescription: Worker.\ntools:\n  - Read\n  - Grep\nmodel: sonnet\n---\nWork.\n",
 	)
 	if err != nil {
 		t.Fatalf("parse list: %v", err)
 	}
-	inline, _, err := claudesource.Fields(
+	inline, _, err := parseFields(
 		"---\ndescription: Worker.\ntools: Read, Grep\nmodel: sonnet\n---\nWork.\n",
 	)
 	if err != nil {
@@ -26,4 +26,9 @@ func TestParseOpenCodeFrontmatterReadsAYAMLListAsTheCommaJoinedList(t *testing.T
 	if listedBlock != inlineBlock {
 		t.Fatalf("list block = %q, inline block = %q", listedBlock, inlineBlock)
 	}
+}
+
+func parseFields(text string) (map[string]string, string, error) {
+	front, body, err := claudesource.Parse(text)
+	return front.Fields, body, err
 }
