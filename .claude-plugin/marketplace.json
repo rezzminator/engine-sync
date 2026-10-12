@@ -15,7 +15,7 @@
         "ref": "main"
       },
       "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "license": "MIT",
       "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"],
       "author": {

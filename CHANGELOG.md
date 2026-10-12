@@ -2,6 +2,30 @@
 
 Every release of engine-sync. Versions follow [semantic versioning](https://semver.org); each release is the `main` commit tagged `v<version>`, with a GitHub release carrying the section below and the four platform binaries.
 
+## [0.3.0] - 2026-10-12
+
+### Added
+
+- Agent frontmatter carries per-engine settings in an `engines:` block (Codex model, effort and sandbox; OpenCode model, mode and permission; `false` skips an engine). One YAML node parser serves every source kind; a header failing strict YAML is retried once with single-line values read as literal strings, and one that still fails is `FRONTMATTER-INVALID {file}:{line}`, skipped by name.
+- Derived machine agents are declaration files: a machine source carrying `from:` declares one rendered agent whose Claude-native keys and `## Heading` body sections replace the base's; `retitle`, `pins`, `add`, `unset`, `rename`, `prepend` and `append` shape it, and `variants pin` rewrites a file's `pins:` block in place. A declaration extends a shared `.md` below a subdirectory by relative path; a shared file nothing extends is reported `SHARED-UNUSED`.
+- Machine agents are capability-gated: `requires` is checked against `--capability` and the targets.json `capabilities` list, and machine GPT agents install only when asked for.
+- `machine.sourceGeneratedAgentsDir` (source-repository-relative, empty by default) renders declarations beside their sources instead of the home store; links point there, `global` retires what it owned in the home store, and `--uninstall` never removes the repository directory.
+- Machine doctor is closed-world: `INSTALLED`, `MISSING`, `STALE`, `SHADOWED`, `SKIPPED`, `BROKEN`, `STRAY`, and a failing `ORPHAN` row for each rendered file whose declaration is gone. `global --adopt` moves shadowing hand files to the adopted store; one broken agent is skipped by name and keeps its installed copy.
+
+### Changed
+
+- Rendered machine agents carry a `role` stamp and a mark naming `engine-sync global`; OpenCode global agents are written under `agents/`. Project Codex role names are the frontmatter name verbatim; targets.json `codexHomes` is optional.
+- `check` and `doctor` see the whole Claude roster for the source collision; `check` skips a directory holding no declaration. A declaration inside a Claude agents directory engine-sync installs into is a named problem and is never replaced.
+
+### Removed
+
+- `--gpt-agents`: use `--capability`. Flat `codex-*` and `opencode-*` agent keys, the `machine.variants` carrier (variants.json), `machine.modelMap`, `opencode.agent` and `abstract:` are refused, each naming its replacement: port each variants.json entry to its own `{machine.sourceAgentsDir}/{name}.md` declaration and each abstract to a shared file it extends.
+
+### Fixed
+
+- `global --adopt` change events carry no `path`, as docs/interface.md's JSON contract says.
+- Reconciliation retires only assets engine-sync owns; a registry link with no receipt that points at an engine-sync-generated file is recognized as ours, so a moved render repoints it, and a moved home store is retired only after the registry links repoint, so no link dangles into it.
+
 ## [0.2.0] - 2026-10-12
 
 ### Added
