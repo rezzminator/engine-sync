@@ -125,15 +125,12 @@
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
       "description": "Machine declaration base: an original, declaration or general-purpose. The file base equals name."
     },
-    "abstract": {
-      "const": true,
-      "description": "Machine-only shared layer; never installed or emitted."
-    },
     "extends": {
       "type": "array",
+      "description": "Shared files layered in order, each a path relative to the declaring file naming a .md below a subdirectory of the agents directory.",
       "items": {
         "type": "string",
-        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        "pattern": "^[^/\\\\][^\\\\]*\\.md$"
       }
     },
     "add": {
@@ -237,29 +234,7 @@
       "then": {
         "required": [
           "name"
-        ],
-        "not": {
-          "required": [
-            "abstract"
-          ]
-        }
-      }
-    },
-    {
-      "if": {
-        "required": [
-          "abstract"
         ]
-      },
-      "then": {
-        "required": [
-          "name"
-        ],
-        "not": {
-          "required": [
-            "from"
-          ]
-        }
       }
     }
   ]

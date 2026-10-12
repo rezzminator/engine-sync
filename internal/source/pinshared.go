@@ -26,11 +26,11 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 	}
 	for _, name := range names {
 		if _, ok := d.declarations[name]; !ok {
-			if _, ok := d.abstracts[name]; !ok {
+			if _, ok := d.shared[name]; !ok {
 				if err := d.failures[name]; err != nil {
 					return nil, err
 				}
-				return nil, fmt.Errorf("%s: no declaration or abstract %q", agentsDir, name)
+				return nil, fmt.Errorf("%s: no declaration or shared file %q", agentsDir, name)
 			}
 		}
 	}
@@ -59,10 +59,10 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 		}
 		w := writes[found.section.owner]
 		if w == nil {
-			owner := strings.TrimSuffix(filepath.Base(found.section.owner), ".md")
+			owner := d.ownerName(found.section.owner)
 			layer, ok := d.declarations[owner]
 			if !ok {
-				layer = d.abstracts[owner]
+				layer = d.shared[owner]
 			}
 			w = &rewrite{layer: layer, pins: map[string]string{}}
 			writes[found.section.owner] = w
@@ -72,7 +72,7 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 		}
 		w.pins[found.section.key] = found.now
 		variant := found.variant
-		owner := strings.TrimSuffix(filepath.Base(found.section.owner), ".md")
+		owner := d.ownerName(found.section.owner)
 		if slices.Contains(names, owner) {
 			variant = owner
 		}
@@ -82,7 +82,7 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 		return nil, err
 	}
 	for _, name := range names {
-		if layer, ok := d.abstracts[name]; ok {
+		if layer, ok := d.shared[name]; ok {
 			for _, section := range layer.sections {
 				if _, used := newPins[section.owner+"\x00"+section.key]; !used {
 					return nil, fmt.Errorf("%s: section %q has no declaration base to pin", layer.path, section.key)
@@ -138,7 +138,7 @@ func (d *variantsDecl) refuseSharedDrift(pins map[string]string) error {
 	var heading string
 	for _, use := range d.uses {
 		pin, rewritten := pins[use.section.owner+"\x00"+use.section.key]
-		if !rewritten || d.repin(use.variant) || d.repin(strings.TrimSuffix(filepath.Base(use.section.owner), ".md")) || !use.section.pinned || use.section.pin != use.now || pin == use.now {
+		if !rewritten || d.repin(use.variant) || d.repin(d.ownerName(use.section.owner)) || !use.section.pinned || use.section.pin != use.now || pin == use.now {
 			continue
 		}
 		if !slices.Contains(drifted, fmt.Sprintf("%q", use.variant)) {

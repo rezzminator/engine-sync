@@ -79,7 +79,7 @@ type Project struct {
 	// declaration's output.
 	Excluded []Agent
 	// Declares reports a machine source directory holding at least one
-	// from: or abstract: source, parsed or not.
+	// from: source, parsed or not.
 	Declares    bool
 	documents   map[string]document
 	directories map[string]directory
@@ -111,7 +111,7 @@ func LoadProject(root, home string, cfg config.Config) Project {
 			}
 			if front, body, ok := p.parsed(e.Path, report); ok {
 				if machineControls(front.Node) {
-					p.Problems = append(p.Problems, fmt.Sprintf("%s: declarations and abstracts are machine scope only", e.Path))
+					p.Problems = append(p.Problems, fmt.Sprintf("%s: declarations are machine scope only", e.Path))
 					continue
 				}
 				p.Agents = append(p.Agents, Agent{Name: strings.TrimSuffix(filepath.Base(e.Path), ".md"), Path: e.Path, Front: front, Body: body})

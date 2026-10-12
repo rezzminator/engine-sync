@@ -207,7 +207,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		readAgentFixture(t, filepath.Join(filepath.Join(home, ".codex", "agents"), "quirky.toml")),
 	)
 	head := ("# " + artifact.Prefix) + "agents/quirky.md" +
-		" — edit the source, then run: engine-sync build\n" +
+		" — edit the source, then run: engine-sync global\n" +
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
 		"model = \"gpt-6.1-sol\"\n" +
@@ -245,7 +245,7 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 		filepath.Join(filepath.Join(home, ".codex", "agents"), "quoted.toml"),
 	))
 	head := ("# " + artifact.Prefix) + "agents/quoted.md" +
-		" — edit the source, then run: engine-sync build\n" +
+		" — edit the source, then run: engine-sync global\n" +
 		"name = \"quoted\"\n" +
 		"description = \"a: b, \\\"c\\\"\"\n" +
 		"developer_instructions = \"\"\"\n"

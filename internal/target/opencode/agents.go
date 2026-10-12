@@ -125,6 +125,8 @@ func compileOpenCodeAgent(
 type openCodeAgentSpec struct {
 	Name, Path, Marker, Preamble, Output string
 	Generated                            bool
+	// Global marks a machine agent, which engine-sync global writes.
+	Global bool
 }
 
 // renderOpenCodeAgent is the one OpenCode agent renderer. An agent whose
@@ -169,7 +171,11 @@ func renderOpenCodeAgent(
 		mode = settings.Mode
 	}
 	description := chain.Apply(strings.TrimSpace(front.Fields["description"]), ctx)
-	content := "---\n" + artifact.Marker(artifact.YAMLFront, spec.Marker) + "\ndescription: " + quoteOpenCodeYAML(description) + "\nmode: " + mode + "\n"
+	marker := artifact.Marker(artifact.YAMLFront, spec.Marker)
+	if spec.Global {
+		marker = artifact.GlobalMarker(artifact.YAMLFront, spec.Marker)
+	}
+	content := "---\n" + marker + "\ndescription: " + quoteOpenCodeYAML(description) + "\nmode: " + mode + "\n"
 	alias := strings.TrimSpace(front.Model)
 	if pin := strings.TrimSpace(settings.Model); pin != "" {
 		if mapped := strings.TrimSpace(modelMap[pin]); mapped != "" {

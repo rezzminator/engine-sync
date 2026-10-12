@@ -30,7 +30,7 @@ func (d *variantsDecl) content(name string, r *renderedVariant) ([]byte, error) 
 	if err := enc.Close(); err != nil {
 		return nil, fmt.Errorf("render frontmatter: %w", err)
 	}
-	return []byte("---\n" + artifact.Marker(artifact.YAMLFront, source) + "\n" + head.String() + "---\n" + r.body), nil
+	return []byte("---\n" + artifact.GlobalMarker(artifact.YAMLFront, source) + "\n" + head.String() + "---\n" + r.body), nil
 }
 
 // render resolves one variant: its from (original, variant, or the built-in),
@@ -58,9 +58,6 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 		if !globalAgentVariantName.MatchString(layer.from) {
 			return nil, fmt.Errorf("%s: variant %q: \"from\" must name a source agent, a variant or %s, got %q", d.path, name, GeneralPurpose, layer.from)
 		}
-		if _, abstract := d.abstracts[layer.from]; abstract {
-			return nil, fmt.Errorf("%s: from %q is an abstract, use extends", layer.path, layer.from)
-		}
 		if failure := d.failures[layer.from]; failure != nil {
 			return nil, fmt.Errorf("%s: from %q: %w", layer.path, layer.from, failure)
 		}
@@ -81,7 +78,7 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 		}
 		base = renderedVariant{front: front, body: body, root: layer.from}
 	}
-	layers, err := d.abstractLayers(layer.extends, nil)
+	layers, err := d.sharedLayers(layer.path, layer.extends, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s: variant %q: %w", d.path, name, err)
 	}
@@ -138,7 +135,7 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 			return nil, sectionError(err, name, layer.from, s.key)
 		}
 		d.uses = append(d.uses, pinFound{variant: name, section: s, now: now})
-		if d.repin != nil && (d.repin(name) || d.repin(strings.TrimSuffix(filepath.Base(s.owner), ".md"))) {
+		if d.repin != nil && (d.repin(name) || d.repin(d.ownerName(s.owner))) {
 			d.pins = append(d.pins, pinFound{variant: name, section: s, now: now})
 		} else if !s.pinned {
 			return nil, fmt.Errorf("SECTION-UNPINNED %s: %s.md § %s has no pin — run engine-sync variants pin %s", name, layer.from, s.key, name)
@@ -167,17 +164,28 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 	return r, nil
 }
 
-func (d *variantsDecl) abstractLayers(names, chain []string) ([]variantLayer, error) {
+// sharedLayers resolves owner's extends paths, each relative to owner's own
+// directory, to shared files below a subdirectory of the agents directory:
+// their own extends first, outermost first.
+func (d *variantsDecl) sharedLayers(owner string, refs, chain []string) ([]variantLayer, error) {
 	var out []variantLayer
-	for _, name := range names {
-		if slices.Contains(chain, name) {
-			return nil, fmt.Errorf("extends cycle %s", strings.Join(append(slices.Clone(chain), name), " → "))
+	for _, ref := range refs {
+		key := d.ownerName(filepath.Join(filepath.Dir(owner), filepath.FromSlash(ref)))
+		if !strings.Contains(key, "/") || strings.HasPrefix(key, "../") {
+			return nil, fmt.Errorf("extends %q must name a shared file in a subdirectory of %s", ref, d.agentsDir)
 		}
-		layer, ok := d.abstracts[name]
+		if slices.Contains(chain, key) {
+			return nil, fmt.Errorf("extends cycle %s", strings.Join(append(slices.Clone(chain), key), " → "))
+		}
+		layer, ok := d.shared[key]
 		if !ok {
-			return nil, fmt.Errorf("unknown abstract %q", name)
+			if failure := d.failures[key]; failure != nil {
+				return nil, fmt.Errorf("extends %q: %w", ref, failure)
+			}
+			return nil, fmt.Errorf("extends %q: no shared file %s", ref, filepath.Join(d.agentsDir, filepath.FromSlash(key)))
 		}
-		parents, err := d.abstractLayers(layer.extends, append(slices.Clone(chain), name))
+		d.used[key] = true
+		parents, err := d.sharedLayers(layer.path, layer.extends, append(slices.Clone(chain), key))
 		if err != nil {
 			return nil, err
 		}

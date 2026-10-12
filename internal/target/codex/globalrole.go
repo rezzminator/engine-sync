@@ -23,4 +23,7 @@ var ReadGlobalRoleFile = reconciler.ReadGlobalRoleFile
 
 var ClassifyGlobalRole = reconciler.ClassifyGlobalRole
 
-func globalRoleHeader(source string) string { return artifact.Marker(artifact.TOML, source) + "\n" }
+// globalRoleHeader marks a machine role, which engine-sync global writes.
+func globalRoleHeader(source string) string {
+	return artifact.GlobalMarker(artifact.TOML, source) + "\n"
+}

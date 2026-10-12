@@ -22,7 +22,7 @@ Claude Code is the source: `CLAUDE.md`, `.claude/agents`, `.claude/commands`, `.
 | `opencode` | `build`, `check`, `doctor`; the existing OpenCode alias. |
 | `config` | `show`, `validate`, `schema`; effective settings, validation and schema. |
 | `global` | Machine roles, OpenCode agents and commands; `--plan`, `--uninstall`, `--adopt`, `--capability NAME`, account flags. |
-| `variants` | `pin [name]…`; rewrite only the `pins:` block of source declarations or abstracts. |
+| `variants` | `pin [name]…`; rewrite only the `pins:` block of source declarations or shared files (a shared file named by its path relative to the agents directory). |
 | `hook` | `claude mark`, `stop`, `start`; hook protocol on stdin/stdout. |
 | `version` | Print the binary version; `--version` is an alias. |
 | `help` | Print usage and registered targets; `-h` and `--help` are aliases. |
@@ -51,13 +51,13 @@ go build -o engine-sync ./cmd/engine-sync
 ./engine-sync global --plan
 ```
 
-No project configuration is required. Global roles come from `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/`; `global` and `doctor --machine` use the same source. `--source-repo R` selects `R/{machine.sourceAgentsDir}/` instead, including for `codex agents`. Plain sources already in their destination registry stay regular files; they are never replaced by links to themselves. Declarations (`from:`) and shared abstracts (`abstract: true`) must live outside every Claude agents registry; collocated controls are refused without changing their bytes. See [Variants](docs/interface.md#variants).
+No project configuration is required. Global roles come from `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/`; `global` and `doctor --machine` use the same source. `--source-repo R` selects `R/{machine.sourceAgentsDir}/` instead, including for `codex agents`. Plain sources already in their destination registry stay regular files; they are never replaced by links to themselves. Declarations (`from:`) and their shared files must live outside every Claude agents registry; collocated controls are refused without changing their bytes. See [Variants](docs/interface.md#variants).
 
 ## Configuration
 
 One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.3`; released assets report the plugin manifest version.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.4`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .

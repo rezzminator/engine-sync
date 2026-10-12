@@ -130,7 +130,7 @@ func TestCheckSourceVariantsRelativeRoot(t *testing.T) {
 }
 
 // TestCheckSourceVariantsIgnoresAProjectWithoutDeclarations: a project
-// whose agents directory holds no from: or abstract: source has nothing to
+// whose agents directory holds no from: source has nothing to
 // render, so a stray markdown file there (notes without frontmatter, an agent
 // missing its description) is never a check problem; one declaration among
 // them makes the directory a machine source again.

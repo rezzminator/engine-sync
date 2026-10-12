@@ -67,7 +67,7 @@ func renderOpenCodeMachineAgents(p source.Project, cfg config.Config) ([]artifac
 			name = strings.TrimSuffix(filepath.Base(a.Path), ".md")
 		}
 		renderOpenCodeAgent(openCodeAgentSpec{
-			Name: name, Path: a.Path, Generated: a.Generated,
+			Name: name, Path: a.Path, Generated: a.Generated, Global: true,
 			Marker: source.MachineMarkerSource(a.Path, p.AgentSourceDir, cfg.Machine.AgentMarkerDir),
 			Output: filepath.Join(dir, name+".md"),
 		}, a.Front, a.Body, map[string]string{}, cfg.OpenCode.ModelMap, nil, cfg.Rewrites, add, problem, warn, cfg)

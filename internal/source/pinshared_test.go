@@ -21,20 +21,23 @@ func TestPinRefusesDriftingAnUnaskedVariantAndWritesThroughALink(t *testing.T) {
 	}
 	for path, text := range map[string]string{
 		filepath.Join(dir, "lead.md"): agent("lead", "Spend little."), filepath.Join(dir, "other.md"): agent("other", "Spend little."),
-		shared:                     "---\nname: lane\nabstract: true\n---\n\n## Budget\n\nSpend more.\n",
-		filepath.Join(dir, "a.md"): "---\nname: a\nfrom: lead\nextends: [lane]\n---\n",
-		filepath.Join(dir, "b.md"): "---\nname: b\nfrom: other\nextends: [lane]\n---\n",
+		shared:                     "---\n---\n\n## Budget\n\nSpend more.\n",
+		filepath.Join(dir, "a.md"): "---\nname: a\nfrom: lead\nextends: [shared/lane.md]\n---\n",
+		filepath.Join(dir, "b.md"): "---\nname: b\nfrom: other\nextends: [shared/lane.md]\n---\n",
 	} {
 		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	link := filepath.Join(dir, "lane.md")
+	link := filepath.Join(dir, "shared", "lane.md")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(shared, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PinGlobalAgentVariants(dir, []string{"lane"}); err != nil {
-		t.Fatalf("pin abstract: %v", err)
+	if _, err := PinGlobalAgentVariants(dir, []string{"shared/lane.md"}); err != nil {
+		t.Fatalf("pin shared file: %v", err)
 	}
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("link replaced: %v (%v)", info, err)
@@ -63,7 +66,7 @@ func TestPinRefusesDriftingAnUnaskedVariantAndWritesThroughALink(t *testing.T) {
 }
 
 // TestPinIgnoresAnUnrelatedBrokenOriginal: `variants pin` with no names
-// refuses only on a declaration, an abstract, or a base one of them uses; an
+// refuses only on a declaration, a shared file, or a base one of them uses; an
 // original agent nobody derives from, with a header that does not parse,
 // stays its own problem.
 func TestPinIgnoresAnUnrelatedBrokenOriginal(t *testing.T) {

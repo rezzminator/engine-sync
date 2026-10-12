@@ -3,6 +3,7 @@ package source
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -37,7 +38,6 @@ type PinChange struct{ Variant, Heading, Pin string }
 type variantLayer struct {
 	from              string
 	hasFrom           bool
-	abstract          bool
 	extends           []string
 	set, add          *yaml.Node
 	unset             []string
@@ -57,7 +57,8 @@ type renamePair struct{ from, to string }
 type variantsDecl struct {
 	path, agentsDir, markerDir, outputDir string
 	declarations                          map[string]variantLayer
-	abstracts                             map[string]variantLayer
+	shared                                map[string]variantLayer
+	used                                  map[string]bool
 	failures                              map[string]error
 	rendered                              map[string]*renderedVariant
 	repin                                 func(string) bool
@@ -89,7 +90,7 @@ func LoadGlobalAgentVariants(agentsDir, outputDir string, markerDir ...string) (
 
 func readVariantsDecl(agentsDir, outputDir string, marker []string) (*variantsDecl, error) {
 	d := &variantsDecl{path: agentsDir, agentsDir: agentsDir, markerDir: filepath.Base(agentsDir), outputDir: outputDir,
-		declarations: map[string]variantLayer{}, abstracts: map[string]variantLayer{}, failures: map[string]error{}, rendered: map[string]*renderedVariant{}}
+		declarations: map[string]variantLayer{}, shared: map[string]variantLayer{}, used: map[string]bool{}, failures: map[string]error{}, rendered: map[string]*renderedVariant{}}
 	if len(marker) > 0 && marker[0] != "" {
 		d.markerDir = marker[0]
 	}
@@ -115,9 +116,9 @@ func readVariantsDecl(agentsDir, outputDir string, marker []string) (*variantsDe
 		}
 		name := strings.TrimSuffix(filepath.Base(path), ".md")
 		if err != nil {
-			// Only a declaration or abstract fails the render; an original
-			// that does not parse is its loader's problem, and a declaration
-			// built on it fails on the missing base.
+			// Only a declaration fails the render; an original that does not
+			// parse is its loader's problem, and a declaration built on it
+			// fails on the missing base.
 			if declarationLine.Match(raw) {
 				d.failures[name] = errors.New(DescribeParseError(path, err))
 			}
@@ -126,21 +127,73 @@ func readVariantsDecl(agentsDir, outputDir string, marker []string) (*variantsDe
 		if !machineControls(front) {
 			continue
 		}
-		layer, err := parseDeclaration(path, raw, front, body)
+		layer, err := parseDeclaration(path, raw, front, body, false)
 		if err != nil {
 			d.failures[name] = err
 			continue
 		}
-		if layer.abstract {
-			d.abstracts[name] = layer
-		} else {
-			d.declarations[name] = layer
-		}
+		d.declarations[name] = layer
+	}
+	if err := d.readShared(); err != nil {
+		return nil, err
 	}
 	return d, nil
 }
 
-func parseDeclaration(path string, raw []byte, front *yaml.Node, body string) (variantLayer, error) {
+// readShared loads every .md below a subdirectory of the agents directory:
+// a shared file, never an agent, reached only through a declaration's
+// extends path. Its key is its slash path relative to the agents directory.
+func (d *variantsDecl) readShared() error {
+	root := filepath.Clean(d.agentsDir)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Dir(path) == root || filepath.Ext(path) != ".md" || entry.Name() == "README.md" {
+			return nil
+		}
+		key := d.ownerName(path)
+		raw, err := paths.ReadRegular(path)
+		if err != nil {
+			d.failures[key] = fmt.Errorf("read shared file %s: %w", path, err)
+			return nil
+		}
+		header, body, found, err := Split(string(raw))
+		front := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		if err == nil && found {
+			front, err = ParseHeader(header)
+		}
+		if err != nil {
+			d.failures[key] = errors.New(DescribeParseError(path, err))
+			return nil
+		}
+		layer, err := parseDeclaration(path, raw, front, body, true)
+		if err != nil {
+			d.failures[key] = err
+			return nil
+		}
+		d.shared[key] = layer
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("enumerate shared files under %s: %w", root, err)
+	}
+	return nil
+}
+
+// ownerName names a source in pins and failures: an agent declaration by its
+// file base, a shared file by its slash path relative to the agents directory.
+func (d *variantsDecl) ownerName(path string) string {
+	rel, err := filepath.Rel(filepath.Clean(d.agentsDir), path)
+	if err != nil || !strings.Contains(filepath.ToSlash(rel), "/") {
+		return strings.TrimSuffix(filepath.Base(path), ".md")
+	}
+	return filepath.ToSlash(rel)
+}
+
+// parseDeclaration reads one agent declaration, or with shared one shared
+// file: the same layer keys, without name or from.
+func parseDeclaration(path string, raw []byte, front *yaml.Node, body string, shared bool) (variantLayer, error) {
 	l := variantLayer{path: path, raw: raw, set: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}}
 	resolved, err := resolveDeclaration(front)
 	if err != nil {
@@ -150,27 +203,29 @@ func parseDeclaration(path string, raw []byte, front *yaml.Node, body string) (v
 	fail := func(field string) (variantLayer, error) {
 		return l, fmt.Errorf("DECLARATION-INVALID %s: %s", path, field)
 	}
+	if MapValue(front, "abstract") != nil {
+		return fail("abstract is retired: move the file into a subdirectory, drop name and abstract, and name it by relative path in extends")
+	}
 	name := MapValue(front, "name")
-	if name == nil || name.Kind != yaml.ScalarNode || name.Tag != "!!str" || name.Value != strings.TrimSuffix(filepath.Base(path), ".md") || !globalAgentVariantName.MatchString(name.Value) {
-		return fail("name must equal the kebab-case file base")
-	}
-	if n := MapValue(front, "abstract"); n != nil {
-		if n.Kind != yaml.ScalarNode || n.Tag != "!!bool" || n.Value != "true" {
-			return fail("abstract must be true")
+	if shared {
+		if name != nil || MapValue(front, "from") != nil {
+			return fail("a shared file is not an agent: it carries no name and no from")
 		}
-		l.abstract = true
-	}
-	if n := MapValue(front, "from"); n != nil {
+	} else {
+		if name == nil || name.Kind != yaml.ScalarNode || name.Tag != "!!str" || name.Value != strings.TrimSuffix(filepath.Base(path), ".md") || !globalAgentVariantName.MatchString(name.Value) {
+			return fail("name must equal the kebab-case file base")
+		}
+		n := MapValue(front, "from")
+		if n == nil {
+			return fail("from is required")
+		}
 		if n.Kind != yaml.ScalarNode || n.Tag != "!!str" || !globalAgentVariantName.MatchString(n.Value) {
 			return fail("from must name an agent")
 		}
 		l.from, l.hasFrom = n.Value, true
-	}
-	if l.abstract == l.hasFrom {
-		return fail("exactly one of from or abstract: true is required")
-	}
-	if l.hasFrom && name.Value == GeneralPurpose {
-		return fail("general-purpose is the built-in, never a declaration")
+		if name.Value == GeneralPurpose {
+			return fail("general-purpose is the built-in, never a declaration")
+		}
 	}
 	for _, key := range []string{"extends", "unset"} {
 		n := MapValue(front, key)
@@ -190,6 +245,9 @@ func parseDeclaration(path string, raw []byte, front *yaml.Node, body string) (v
 				if first == "name" || first == "role" || slices.Contains(DeclarationKeys, first) {
 					return fail("unset cannot remove " + first)
 				}
+			}
+			if key == "extends" && (!strings.HasSuffix(item.Value, ".md") || filepath.IsAbs(item.Value) || strings.Contains(item.Value, "\\")) {
+				return fail("extends names a shared file by its relative path, e.g. shared/base.md")
 			}
 			values = append(values, item.Value)
 		}
@@ -340,10 +398,14 @@ func (d *variantsDecl) renderEach() (out []GlobalAgentVariant, failed map[string
 		}
 		out = append(out, GlobalAgentVariant{Name: name, From: d.declarations[name].from, Root: r.root, Path: filepath.Join(d.outputDir, name+".md"), Content: content})
 	}
-	// Abstract graph failures are validation problems, never agent rows.
-	for _, name := range slices.Sorted(maps.Keys(d.abstracts)) {
-		if _, err := d.abstractLayers([]string{name}, nil); err != nil {
-			failed[name] = err
+	// Shared-file failures are validation problems, never agent rows: a
+	// broken extends chain, or a shared file no declaration extends.
+	for _, key := range slices.Sorted(maps.Keys(d.shared)) {
+		layer := d.shared[key]
+		if _, err := d.sharedLayers(layer.path, layer.extends, []string{key}); err != nil {
+			failed[key] = fmt.Errorf("%s: %w", layer.path, err)
+		} else if !d.used[key] {
+			failed[key] = fmt.Errorf("SHARED-UNUSED %s: no declaration extends it — extend it, or delete it", layer.path)
 		}
 	}
 	return out, failed

@@ -18,12 +18,9 @@ type MachineOptions struct {
 	ClaudeConfigDirs []string
 }
 
-// declarationLine finds a top-level from: or abstract: key in a source whose
-// header does not parse.
-var declarationLine = regexp.MustCompile(`(?m)^(from|abstract):`)
-
-// abstractLine finds `abstract: true` in a source whose header does not parse.
-var abstractLine = regexp.MustCompile(`(?m)^abstract:\s*(true|'true'|"true")\s*$`)
+// declarationLine finds a top-level from: key in a source whose header does
+// not parse.
+var declarationLine = regexp.MustCompile(`(?m)^from:`)
 
 // LoadMachine snapshots original roles and declarations before rendering.
 func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions) (Project, error) {
@@ -69,11 +66,7 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 			// the others still load.
 			p.Problems = append(p.Problems, DescribeParseError(path, err))
 			brokenSources[strings.TrimSuffix(filepath.Base(path), ".md")] = true
-			// A broken abstract is a problem only: it is never an agent, so
-			// it has no installed copy to keep.
-			if !abstractLine.Match(raw) {
-				p.Failed = append(p.Failed, failedSourceNames(path, raw)...)
-			}
+			p.Failed = append(p.Failed, failedSourceNames(path, raw)...)
 			p.Declares = p.Declares || declarationLine.Match(raw)
 			continue
 		}
@@ -83,10 +76,7 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 				name := strings.TrimSuffix(filepath.Base(path), ".md")
 				blocked[name] = true
 				p.Problems = append(p.Problems, fmt.Sprintf("%s: Claude Code loads it raw from this agents dir; set sourceAgentsDir (or sourceRepo) to a directory outside every Claude agents dir", path))
-				resolved, resolveErr := resolveDeclaration(front.Node)
-				if resolveErr != nil || MapValue(resolved, "abstract") == nil {
-					p.Failed = append(p.Failed, name)
-				}
+				p.Failed = append(p.Failed, name)
 			}
 			continue
 		}
@@ -98,7 +88,6 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 	}
 	for name := range blocked {
 		delete(decl.declarations, name)
-		delete(decl.abstracts, name)
 		delete(decl.failures, name)
 	}
 	v, failed := decl.renderEach()
@@ -108,7 +97,8 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 			continue
 		}
 		p.Problems = append(p.Problems, variantProblem(failed[name]))
-		if _, abstract := decl.abstracts[name]; !abstract {
+		// A shared file is never an agent: its failure has no copy to keep.
+		if _, shared := decl.shared[name]; !shared && !strings.Contains(name, "/") {
 			p.Failed = append(p.Failed, name)
 		}
 	}

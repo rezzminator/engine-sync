@@ -310,7 +310,7 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 // validate and compile, and each agent whose requires the capabilities do
 // not meet is a SKIPPED warning. Each agent global would skip as broken is a
 // problem with global's message: both run skipBrokenAgents. A project whose
-// directory holds no from: or abstract: source has nothing to render and
+// directory holds no from: source has nothing to render and
 // reports nothing. A failed render is a problem, never an absent agent.
 func CheckSourceVariants(root, home string, cfg config.Config) (problems, warnings []string) {
 	// Resolve the project root before joining its configured agents directory.
