@@ -1,8 +1,6 @@
 package source
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -32,27 +30,6 @@ func failedSourceNames(path string, raw []byte) []string {
 			if name := strings.Trim(strings.TrimSpace(m[2]), `"'`); name != "" && name != names[0] {
 				names = append(names, name)
 			}
-		}
-	}
-	return names
-}
-
-// generatedNames is every rendered variant on disk in dir, kept while the
-// declaration that names them does not load. A directory that cannot be read
-// is a problem, never an empty keep set.
-func (p *Project) generatedNames(dir string) []string {
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		p.Problems = append(p.Problems, fmt.Sprintf("read generated agents %s: %v", dir, err))
-		return nil
-	}
-	var names []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
-			names = append(names, strings.TrimSuffix(entry.Name(), ".md"))
 		}
 	}
 	return names

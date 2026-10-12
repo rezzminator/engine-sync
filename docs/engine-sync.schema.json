@@ -358,9 +358,6 @@
         },
         "sourceAgentsDir": {
           "type": "string"
-        },
-        "variants": {
-          "type": "string"
         }
       },
       "type": "object"

@@ -93,8 +93,11 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		}
 		sourceRepo = abs
 	}
+	if len(claudeConfigDirs) == 0 {
+		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
+	}
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
+	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 	if err != nil {
 		return nil, fmt.Errorf("load machine agents from %s: %w", agentsDir, err)
 	}
@@ -113,9 +116,6 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 	compiled, err := compileMachineAgents(filtered, cfg)
 	if err != nil {
 		return nil, err
-	}
-	if len(claudeConfigDirs) == 0 {
-		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
 	}
 	if codexHomes == nil {
 		codexHomes = []string{filepath.Join(home, ".codex")}
@@ -305,29 +305,21 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 }
 
 // CheckSourceVariants validates the machine-global agents a project carries
-// in {root}/{machine.sourceAgentsDir} when it declares variants — the
-// declaration machine.variants names (relative to that directory), else its
-// variants.json: every source and every fully rendered variant must parse,
+// in {root}/{machine.sourceAgentsDir}, its declarations included: every
+// source and every rendered agent must parse,
 // validate and compile, and each agent whose requires the capabilities do
 // not meet is a SKIPPED warning. Each agent global would skip as broken is a
 // problem with global's message: both run skipBrokenAgents. A project without
-// a default declaration has nothing to check; a configured one that is
-// missing is a problem. A failed render is a problem, never an absent agent.
+// any declarations has nothing to render. A failed render is a problem,
+// never an absent agent.
 func CheckSourceVariants(root, home string, cfg config.Config) (problems, warnings []string) {
-	// The root resolves first: a relative variants path is read against the
-	// agents directory, so a relative agents directory would be joined twice.
+	// Resolve the project root before joining its configured agents directory.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return []string{fmt.Sprintf("resolve project root %q: %v", root, err)}, nil
 	}
 	agentsDir := filepath.Join(absRoot, filepath.FromSlash(cfg.Machine.SourceAgentsDir))
-	registry := source.VariantsDeclaration(agentsDir, cfg.Machine.Variants)
-	if _, err := os.Lstat(registry); errors.Is(err, fs.ErrNotExist) && cfg.Machine.Variants == "" {
-		return nil, nil
-	} else if err != nil {
-		return []string{fmt.Sprintf("variants declaration %s: %v", registry, err)}, nil
-	}
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), registry, cfg.Machine.AgentMarkerDir)
+	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: []string{cfg.ClaudeConfigDir}})
 	if err != nil {
 		return []string{err.Error()}, nil
 	}

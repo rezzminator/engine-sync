@@ -88,7 +88,6 @@ type Machine struct {
 	RetiredFiles         []string  `json:"retiredFiles"`
 	Rewrites             []Rewrite `json:"rewrites"`
 	CodexHomes           []string  `json:"codexHomes"`
-	Variants             string    `json:"variants"`
 	GeneratedAgentsDir   string    `json:"generatedAgentsDir"`
 }
 
@@ -348,11 +347,6 @@ func Validate(cfg Config) error {
 			return e
 		}
 	}
-	if cfg.Machine.Variants != "" && !filepath.IsAbs(cfg.Machine.Variants) {
-		if e := RelativePath(cfg.Machine.Variants, "machine.variants"); e != nil {
-			return e
-		}
-	}
 	if cfg.Version != 1 {
 		return fmt.Errorf("version %d unsupported (want 1)", cfg.Version)
 	}
@@ -474,6 +468,7 @@ func Describe(cfg Config) []SourceRow {
 // instead of being silently ignored or rejected as a bare unknown key.
 var removedKeys = []struct{ section, key, replacement string }{
 	{"machine", "modelMap", "codex.modelMap"},
+	{"machine", "variants", "{machine.sourceAgentsDir}/{name}.md declarations"},
 	{"opencode", "agent", "engines.opencode.permission in each agent's frontmatter"},
 }
 

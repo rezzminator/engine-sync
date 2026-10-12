@@ -73,9 +73,6 @@ func TestReviewSourceForms(t *testing.T) {
 	if len(problems) == 0 {
 		t.Error("listed missing project silently lost")
 	}
-	if _, e := LoadGlobalAgentVariants(root, filepath.Join(root, "generated"), "absent.json"); e == nil {
-		t.Error("configured variants silently absent")
-	}
 	empty := testjail.Scratch(t)
 	if e := os.WriteFile(filepath.Join(empty, "README.md"), []byte("help"), 0600); e != nil {
 		t.Fatal(e)

@@ -136,7 +136,7 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 			}
 		}
 		if a.Generated {
-			outputs = append(outputs, artifact.Artifact{Path: a.Path, Content: a.Raw, Source: filepath.Join(p.AgentSourceDir, "variants.json"), Syntax: artifact.YAMLFront})
+			outputs = append(outputs, artifact.Artifact{Path: a.Path, Content: a.Raw, Source: filepath.Join(p.AgentSourceDir, a.Name+".md"), Syntax: artifact.YAMLFront})
 		}
 		links, e := claudeRegistryLinks(p, a.Path)
 		if e != nil {

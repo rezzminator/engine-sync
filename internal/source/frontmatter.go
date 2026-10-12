@@ -268,9 +268,14 @@ func ValidateAgent(path string, front Frontmatter, passthrough []string, generat
 	if node == nil {
 		return nil, nil
 	}
+	if machineControls(node) {
+		return []string{fmt.Sprintf("%s: declarations and abstracts are machine scope only and must be compiled before loading", path)}, nil
+	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key, value := node.Content[i].Value, node.Content[i+1]
 		switch {
+		case slices.Contains(DeclarationKeys, key):
+			problems = append(problems, fmt.Sprintf("%s: %s is machine scope only and must be compiled before loading", path, key))
 		case RetiredKeys[key] != "":
 			problems = append(problems, fmt.Sprintf("%s: %s moved to %s", path, key, RetiredKeys[key]))
 		case key == "role" && !generated:

@@ -1,5 +1,5 @@
-# professor compiler fixture
+# Integration fixture
 
-Produced by the base 0.1.0 binary. Its machine file is a copy of Professor's shipped machine policy and its project file the repository-only delta, the split Professor ships; it exercises project, child, workbench, MCP and machine variants. Golden bytes are fixed except for normalized marker/rebuild-hint lines.
+The machine file copies the shipped integration policy and the project file supplies the repository-only delta. The fixture exercises project, child, workbench, MCP and machine source declarations.
 
-`input/project` and `input/home` are copied into a test jail. `golden/artifacts.json` records all generated surfaces, including link targets and file modes. Corresponding absolute roots become `{project}` and `{home}`; marker lines become `{marker}`. Regenerate with `scripts/golden-projects.py --binary PATH --fixture professor`; the Professor producer is the prescribed base binary, selected with `--base`.
+`input/project` and `input/home` are copied into a test jail. `golden/artifacts.json` records generated surfaces, link targets and file modes. Absolute roots become `{project}` and `{home}`; generated marker lines are retained. Regenerate with the current binary using `scripts/golden-projects.py --binary PATH --fixture professor`, without `--base`. Review the intended-only artifact diff.

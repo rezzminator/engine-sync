@@ -230,8 +230,12 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	if configErr != nil {
 		return []AgentsStatus{{Dir: config.MachinePath(home, paths.Getenv), State: AgentsUnreadable, Error: configErr.Error()}}
 	}
+	dirs := options.ClaudeConfigDirs
+	if len(dirs) == 0 {
+		dirs = []string{store}
+	}
 	agentsDir := source.AgentsDirectory(home, repo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
+	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: dirs})
 	if err != nil {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
 	}
@@ -252,10 +256,6 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	}
 	if len(sources) == 0 {
 		return append(broken, AgentsStatus{Dir: agentsDir, State: AgentsNoSources})
-	}
-	dirs := options.ClaudeConfigDirs
-	if len(dirs) == 0 {
-		dirs = []string{store}
 	}
 	statuses := broken
 	for _, dir := range dirs {

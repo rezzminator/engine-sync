@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
-	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"io/fs"
 	"os"
@@ -39,7 +38,7 @@ func fixture(t *testing.T) (home, repo string) {
 	repo = filepath.Join(home, "clone")
 	agents := filepath.Join(repo, "agents")
 	writeMachineFixture(t, filepath.Join(agents, "gamma.md"), "---\nname: gamma\ndescription: Gamma role.\nmodel: sonnet\neffort: medium\n---\n\nGamma body.\n")
-	writeMachineFixture(t, filepath.Join(agents, source.GlobalAgentVariantsFile), `{"version":2,"variants":{"gamma-deep":{"from":"gamma","set":{"effort":"high"}}}}`)
+	writeMachineFixture(t, filepath.Join(agents, "gamma-deep.md"), "---\nname: gamma-deep\nfrom: gamma\neffort: high\n---\n")
 	writeMachineFixture(t, filepath.Join(home, ".claude", "commands", "tidy.md"), "---\ndescription: Tidy.\n---\nTidy up.\n")
 	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"retiredAgents":["frr","rr-super"],"retiredFiles":[".codex/agents/explorer.toml"]}}`)
 	return home, repo
@@ -389,7 +388,9 @@ func TestCapabilityOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
 				}
 				writeMachineFixture(t, filepath.Join(repo, "agents", stem+".md"), "---\nname: "+name+"\ndescription: Routed.\nmodel: gpt-6.1-sol\neffort: medium\nrequires: [gpt-agents]\n---\nRouted.\n")
 			}
-			writeMachineFixture(t, filepath.Join(repo, "agents", source.GlobalAgentVariantsFile), `{"version":2,"variants":{"gamma-deep":{"from":"gamma","set":{"effort":"high"}},"routed-deep":{"from":"routed","set":{"effort":"high"}}}}`)
+			for _, name := range []string{"gamma", "routed"} {
+				writeMachineFixture(t, filepath.Join(repo, "agents", name+"-deep.md"), "---\nname: "+name+"-deep\nfrom: "+name+"\neffort: high\n---\n")
+			}
 			options := Options{Home: home, SourceRepo: repo, Config: capabilityPolicy(t, home, "gpt-agents")}
 			if report := RunMachine(options); report.Err != nil || !report.OK {
 				t.Fatalf("opt-in: %+v", report)

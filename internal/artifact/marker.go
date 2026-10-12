@@ -53,7 +53,7 @@ func Claims(header string) bool {
 			continue
 		}
 		if marker == LegacyVariant {
-			if strings.HasSuffix(tail, ".md + variants.json — edit the source") && len(tail) > len(".md + variants.json — edit the source") {
+			if source, ok := strings.CutSuffix(tail, " — edit the source"); ok && strings.Contains(source, ".md + ") && !strings.HasSuffix(source, ".md + ") {
 				return true
 			}
 			return strings.HasSuffix(tail, " — edit the source, then run: "+strings.Fields(LegacyCodex)[2]+" install --yes") && len(tail) > len(" — edit the source, then run: "+strings.Fields(LegacyCodex)[2]+" install --yes")

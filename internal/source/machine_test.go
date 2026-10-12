@@ -26,3 +26,29 @@ func TestMachineSourcesRemainFrozenAfterRemoval(t *testing.T) {
 		t.Fatalf("%q %+v %v", got, p.Agents, err)
 	}
 }
+
+func TestMachineDeclarationsExcludeAbstracts(t *testing.T) {
+	root := testjail.Scratch(t)
+	for file, text := range map[string]string{
+		"reader.md":  "---\nname: reader\ndescription: Read.\n---\nRead.\n",
+		"layer.md":   "---\nname: layer\nabstract: true\nmodel: sonnet\n---\n",
+		"derived.md": "---\nname: derived\nfrom: reader\nextends: [layer]\n---\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, file), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	model, err := LoadMachine(root, root, filepath.Join(root, "generated"))
+	if err != nil || len(model.Problems) != 0 || len(model.Agents) != 2 {
+		t.Fatalf("model = %+v (%v)", model, err)
+	}
+	for _, agent := range model.Agents {
+		if agent.Name == "derived" {
+			if !agent.Generated || agent.Front.Model != "sonnet" {
+				t.Fatalf("derived = %+v", agent)
+			}
+			return
+		}
+	}
+	t.Fatal("derived agent not rendered")
+}

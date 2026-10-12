@@ -104,7 +104,7 @@ func plantLink(t *testing.T, path string, content []byte) {
 
 // TestCheckSourceVariantsRelativeRoot pins the check a caller runs from the
 // project directory (`engine-sync check .`): the agents directory and its
-// variants.json resolve once, never joined twice.
+// source declarations resolve once, never joined twice.
 func TestCheckSourceVariantsRelativeRoot(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	dir := filepath.Join(root, "templates", "agents")
@@ -112,8 +112,8 @@ func TestCheckSourceVariantsRelativeRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
-		"lead.md":       "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n",
-		"variants.json": `{"version":2,"variants":{"lead-pro":{"from":"lead","set":{"description":"Leads more."}}}}`,
+		"lead.md":     "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n",
+		"lead-pro.md": "---\nname: lead-pro\nfrom: lead\ndescription: Leads more.\n---\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -128,29 +128,6 @@ func TestCheckSourceVariantsRelativeRoot(t *testing.T) {
 	}
 }
 
-// TestCheckSourceVariantsReadsTheConfiguredDeclaration: check validates the
-// declaration machine.variants names (relative to the agents directory), and
-// a configured declaration that is missing is a problem, never nothing.
-func TestCheckSourceVariantsReadsTheConfiguredDeclaration(t *testing.T) {
-	root, home := testjail.Scratch(t), testjail.Scratch(t)
-	dir := filepath.Join(root, "agents")
-	plantDir(t, dir)
-	plantFile(t, filepath.Join(dir, "lead.md"), []byte("---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n"))
-	plantFile(t, filepath.Join(dir, "custom.json"), []byte(`{"version":2,"variants":{"lead-pro":{"from":"ghost"}}}`))
-	for _, tc := range []struct{ variants, want string }{
-		{variants: "custom.json", want: "ghost"},
-		{variants: "absent.json", want: filepath.Join(dir, "absent.json")},
-	} {
-		cfg := config.Default()
-		cfg.Machine.SourceAgentsDir = "agents"
-		cfg.Machine.Variants = tc.variants
-		problems, _ := CheckSourceVariants(root, home, cfg)
-		if !strings.Contains(strings.Join(problems, "\n"), tc.want) {
-			t.Fatalf("%s: problems = %q, want one naming %q", tc.variants, problems, tc.want)
-		}
-	}
-}
-
 // TestCheckReportsEveryAgentGlobalSkips: check runs global's per-agent
 // decision, so an agent only its OpenCode render refuses (a server-wide MCP
 // tools entry) fails check with the message global skips it with.
@@ -159,7 +136,7 @@ func TestCheckReportsEveryAgentGlobalSkips(t *testing.T) {
 	dir := filepath.Join(root, "agents")
 	plantDir(t, dir)
 	plantFile(t, filepath.Join(dir, "lead.md"), []byte("---\nname: lead\ndescription: Leads.\ntools: Read, mcp__github\n---\nLead.\n"))
-	plantFile(t, filepath.Join(dir, "variants.json"), []byte(`{"version":2,"variants":{"lead-pro":{"from":"lead","set":{"description":"Leads more."}}}}`))
+	plantFile(t, filepath.Join(dir, "lead-pro.md"), []byte("---\nname: lead-pro\nfrom: lead\ndescription: Leads more.\n---\n"))
 	cfg := config.Default()
 	cfg.Machine.SourceAgentsDir = "agents"
 	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: root, Home: home, Config: &cfg})

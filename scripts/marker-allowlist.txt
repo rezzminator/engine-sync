@@ -37,7 +37,6 @@ internal/machine/globalagents_test.go	// a regular file of the same name that pf
 internal/machine/globalagents_test.go	// project role: read-only unless its tools grant a write tool or it is gitter,
 internal/machine/globalagents_test.go				file:        "gitter.md",
 internal/machine/globalagents_test.go				frontmatter: "name: gitter\ndescription: Commits.\ntools: Read, Grep, Glob, Bash\nengines:\n  codex:\n    sandbox: inherit\n",
-internal/machine/globalvariants_test.go	// The declaration shape the professor clone ships (a variants.json beside its
 internal/machine/review_test.go			"---\nname: gate\ndescription: Gates one flight.\ntools: Read\nmodel: opus\n---\n\n"+
 internal/machine/review_test.go				"Run `/code-review "+codeReviewSlot+"` over the flight's diff.\n",
 internal/machine/review_test.go			t.Fatalf("%s carries no flight-scoped review at the effort slot:\n%s", path, got)

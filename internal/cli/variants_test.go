@@ -25,7 +25,7 @@ func TestMachineAgentCast(t *testing.T) {
 	putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
 	putProjectFile(t, repo, "agents/lead.md", "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n\n## Budget\n\nSpend little.\n")
 	putProjectFile(t, repo, "agents/twin.md", "---\nname: twin\ndescription: Twins.\ntools: Read\nrequires: [gpt-agents]\n---\nTwin.\n")
-	putProjectFile(t, repo, "agents/variants.json", `{"version":2,"variants":{"lead-pro":{"from":"lead","sections":{"Budget":{"text":"Spend more."}}}}}`)
+	putProjectFile(t, repo, "agents/lead-pro.md", "---\nname: lead-pro\nfrom: lead\n---\n\n## Budget\n\nSpend more.\n")
 	claudeAgents := filepath.Join(home, ".claude", "agents")
 	openCodeAgents := filepath.Join(home, ".config", "opencode", "agents")
 
@@ -118,8 +118,8 @@ func TestMachineAgentCast(t *testing.T) {
 	if target, err := os.Readlink(filepath.Join(claudeAgents, "lead.md")); err != nil || target != filepath.Join(repo, "agents", "lead.md") {
 		t.Fatalf("lead link = %q (%v), want the clone source", target, err)
 	}
-	if raw, err := os.ReadFile(filepath.Join(repo, "agents", "variants.json")); err != nil || !strings.Contains(string(raw), `"pin"`) {
-		t.Fatalf("variants.json not pinned: %s (%v)", raw, err)
+	if raw, err := os.ReadFile(filepath.Join(repo, "agents", "lead-pro.md")); err != nil || !strings.Contains(string(raw), "pins:") {
+		t.Fatalf("declaration not pinned: %s (%v)", raw, err)
 	}
 	mine := filepath.Join(openCodeAgents, "mine.md")
 	if err := os.WriteFile(mine, []byte("mine\n"), 0o644); err != nil {
@@ -162,15 +162,16 @@ func TestMachineBrokenSourceIsSkippedAndNamed(t *testing.T) {
 // An agent skipped for an error never blocks the rest: a broken source and a
 // variant whose render fails are each named, the healthy agents install, the
 // run exits non-zero, and the copies an earlier install left stay on disk.
-// A declaration that fails to load as a whole skips every variant under one
-// named error while the originals still install.
+// A malformed declaration skips only itself while healthy declarations install.
 func TestMachineErrorSkipsKeepTheInstalledCopies(t *testing.T) {
 	home, _, e := auditEnv(t)
 	repo := filepath.Join(home, "clone")
 	putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
 	putProjectFile(t, repo, "agents/lead.md", "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n")
 	putProjectFile(t, repo, "agents/bad.md", "---\nname: bad\ndescription: Bad.\ntools: Read\n---\nBad.\n")
-	putProjectFile(t, repo, "agents/variants.json", `{"version":2,"variants":{"good":{"from":"lead"},"broken":{"from":"lead"}}}`)
+	for _, name := range []string{"good", "broken"} {
+		putProjectFile(t, repo, "agents/"+name+".md", "---\nname: "+name+"\nfrom: lead\n---\n")
+	}
 	if rc, out := auditRun(e, "global", "--source-repo", repo); rc != 0 {
 		t.Fatalf("first install rc=%d: %s", rc, out)
 	}
@@ -183,7 +184,7 @@ func TestMachineErrorSkipsKeepTheInstalledCopies(t *testing.T) {
 		return out
 	}
 	putProjectFile(t, repo, "agents/bad.md", "---\nname: bad\n\tdescription: Bad.\n---\nBad.\n")
-	putProjectFile(t, repo, "agents/variants.json", `{"version":2,"variants":{"good":{"from":"lead"},"broken":{"from":"lead","unset":["nokey"]}}}`)
+	putProjectFile(t, repo, "agents/broken.md", "---\nname: broken\nfrom: lead\nunset: [nokey]\n---\n")
 	putProjectFile(t, repo, "agents/fresh.md", "---\nname: fresh\ndescription: Fresh.\ntools: Read\n---\nFresh.\n")
 	rc, out := auditRun(e, "global", "--source-repo", repo)
 	if rc == 0 || !strings.Contains(out, "FRONTMATTER-INVALID "+filepath.Join(repo, "agents", "bad.md")+":3") || !strings.Contains(out, "UNSET-MISSING broken") {
@@ -212,10 +213,10 @@ func TestMachineErrorSkipsKeepTheInstalledCopies(t *testing.T) {
 		}
 	}
 	putProjectFile(t, repo, "agents/lead.md", "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n")
-	putProjectFile(t, repo, "agents/variants.json", `{"version":2,"variants":`)
+	putProjectFile(t, repo, "agents/broken.md", "---\nname: broken\nfrom: lead\nengines:\n  codex: [unclosed\n---\n")
 	putProjectFile(t, repo, "agents/later.md", "---\nname: later\ndescription: Later.\ntools: Read\n---\nLater.\n")
 	rc, out = auditRun(e, "global", "--source-repo", repo)
-	if rc == 0 || !strings.Contains(out, "VARIANTS-INVALID "+filepath.Join(repo, "agents", "variants.json")) || strings.Contains(out, "VARIANT-INVALID") {
+	if rc == 0 || !strings.Contains(out, "FRONTMATTER-INVALID "+filepath.Join(repo, "agents", "broken.md")) {
 		t.Fatalf("global rc=%d, want non-zero naming the declaration as the one error: %s", rc, out)
 	}
 	for _, path := range append(installed("later", "good", "broken"), filepath.Join(generated, "good.md")) {
@@ -273,7 +274,7 @@ func TestVariantsPinWaitsForTheWriterGuard(t *testing.T) {
 	home, _, e := auditEnv(t)
 	repo := filepath.Join(home, "clone")
 	putProjectFile(t, repo, "agents/lead.md", "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n")
-	putProjectFile(t, repo, "agents/variants.json", `{"version":2,"variants":{"lead-pro":{"from":"lead"}}}`)
+	putProjectFile(t, repo, "agents/lead-pro.md", "---\nname: lead-pro\nfrom: lead\n---\n")
 	done := make(chan int, 1)
 	early := false
 	_, err := guarded(e, []string{machine.GlobalRoot(filepath.Join(repo, "agents"))}, true, func() int {
@@ -296,5 +297,57 @@ func TestVariantsPinWaitsForTheWriterGuard(t *testing.T) {
 		if rc := <-done; rc != 0 {
 			t.Fatalf("pin after the guard was released rc=%d, want 0", rc)
 		}
+	}
+}
+
+// Claude loads registry files raw; neither adoption nor a directory alias may
+// turn machine source controls into a live agent or overwrite their bytes.
+func TestMachineRefusesRawDeclarationsInClaudeRegistry(t *testing.T) {
+	for _, form := range []string{"default", "physical alias", "second registry"} {
+		t.Run(form, func(t *testing.T) {
+			home, _, e := auditEnv(t)
+			store := filepath.Join(home, ".claude")
+			var args []string
+			if form == "second registry" {
+				store = filepath.Join(home, "second")
+			}
+			dir := filepath.Join(store, "agents")
+			plain := "---\nname: reader\ndescription: Read.\n---\nRead.\n"
+			files := map[string]string{"reader.md": plain, "derived.md": "---\nname: derived\nfrom: general-purpose\n---\nDerived.\n", "layer.md": "---\nname: layer\nabstract: true\nmodel: sonnet\n---\n"}
+			for name, raw := range files {
+				putProjectFile(t, store, "agents/"+name, raw)
+			}
+			if form == "physical alias" {
+				repo := filepath.Join(home, "clone")
+				putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
+				if err := os.Symlink(dir, filepath.Join(repo, "agents")); err != nil {
+					t.Fatal(err)
+				}
+				args = []string{"--source-repo", repo}
+			}
+			if form == "second registry" {
+				raw := `{"version":1,"machine":{"claudeAgentsDir":"` + dir + `"}}`
+				putProjectFile(t, home, ".config/engine-sync/config.json", raw)
+				putProjectFile(t, home, ".config/engine-sync/targets.json", `{"claudeConfigDirs":["`+filepath.Join(home, ".claude")+`","`+store+`"]}`)
+			}
+			for _, command := range [][]string{append([]string{"global", "--adopt"}, args...), append([]string{"doctor", "--machine"}, args...)} {
+				out := auditBad(t, e, "Claude Code loads it raw", command...)
+				for _, text := range []string{"derived.md", "layer.md", "sourceAgentsDir", "sourceRepo", "outside every Claude agents dir"} {
+					if !strings.Contains(out, text) {
+						t.Fatalf("%v output lacks %q: %s", command, text, out)
+					}
+				}
+				for name, want := range files {
+					got, err := os.ReadFile(filepath.Join(dir, name))
+					if err != nil || string(got) != want {
+						t.Fatalf("source %s changed: %q (%v)", name, got, err)
+					}
+				}
+			}
+			got, err := os.ReadFile(filepath.Join(home, ".codex", "agents", "reader.toml"))
+			if err != nil || !strings.Contains(string(got), `name = "reader"`) {
+				t.Fatalf("healthy plain agent not installed: %q (%v)", got, err)
+			}
+		})
 	}
 }

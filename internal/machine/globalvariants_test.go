@@ -1,7 +1,6 @@
 package machine
 
 import (
-	"encoding/json"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
@@ -27,18 +26,15 @@ func TestGlobalAgentVariantsAbsentDeclarationIsNoVariants(t *testing.T) {
 	}
 }
 
-// The machine path refuses what the loader refuses: a retired version 1
-// declaration fails the run as one named problem, naming the rewrite, while
-// the original still compiles (every other declaration error is
-// TestVariantsV2Render's, in internal/source).
-func TestGlobalAgentVariantsRetiredDeclarationFailsTheRun(t *testing.T) {
+// A malformed source declaration is named while healthy originals compile.
+func TestGlobalAgentDeclarationFailureKeepsHealthyAgents(t *testing.T) {
 	home := testjail.Scratch(t)
 	dir := variantAgentsDir(home)
 	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
-	writeAgentFixture(t, filepath.Join(dir, source.GlobalAgentVariantsFile), `{"super-lead":{"from":"lead","effort":"medium"}}`)
+	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: [lead]\n---\n")
 	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
-	if err != nil || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], "VARIANTS-INVALID ") || !strings.Contains(result.Problems[0], "version 1 is retired") || len(result.Compiled) == 0 {
-		t.Fatalf("result = %+v, err = %v; want the version 1 retirement as the one problem", result, err)
+	if err != nil || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], "DECLARATION-INVALID") || len(result.Compiled) == 0 {
+		t.Fatalf("result = %+v (%v)", result, err)
 	}
 }
 
@@ -47,8 +43,7 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 	dir := variantAgentsDir(home)
 	second := filepath.Join(home, ".cc", "2")
 	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
-	writeAgentFixture(t, filepath.Join(dir, source.GlobalAgentVariantsFile),
-		`{"version":2,"variants":{"super-lead":{"from":"lead","set":{"description":"Deep lead.","effort":"medium"}}}}`)
+	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: lead\ndescription: Deep lead.\neffort: medium\n---\n")
 	options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home, ClaudeConfigDirs: []string{filepath.Join(home, ".claude"), second}}
 	generatedMD := filepath.Join(paths.GeneratedClaudeAgentsDir(home), "super-lead.md")
 
@@ -83,9 +78,6 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 		assertGlobalSymlink(t, filepath.Join(config, "agents", "super-lead.md"), generatedMD)
 		assertGlobalSymlink(t, filepath.Join(config, "agents", "lead.md"), filepath.Join(dir, "lead.md"))
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".claude", "agents", source.GlobalAgentVariantsFile)); !os.IsNotExist(err) {
-		t.Fatalf("the declaration itself was linked as an agent (err=%v)", err)
-	}
 	toml := filepath.Join(home, ".codex", "agents", "super-lead.toml")
 	assertGlobalRoleFile(t, toml)
 	content := string(readAgentFixture(t, toml))
@@ -104,28 +96,10 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 	}
 }
 
-// The declaration shape the professor clone ships (a variants.json beside its
-// global agents) must render through the real compiler: a swap whose text has
-// drifted from its source agent is an error naming the variant. The input is
-// this repository's own fixture, never a path outside it, so a missing
-// fixture is a failure here and not an empty loop; the clone's real file is
-// rendered by that clone's gate with the built binary.
+// Source-file fixtures render through the real compiler, pins included.
 func TestShippedGlobalAgentVariantsRender(t *testing.T) {
 	agentsDir := filepath.Join("testdata", "global-variants")
-	raw, err := os.ReadFile(filepath.Join(agentsDir, source.GlobalAgentVariantsFile))
-	if err != nil {
-		t.Fatalf("variants fixture: %v", err)
-	}
-	var file struct {
-		Variants map[string]json.RawMessage `json:"variants"`
-	}
-	if err := json.Unmarshal(raw, &file); err != nil {
-		t.Fatalf("parse variants fixture: %v", err)
-	}
-	declared := file.Variants
-	if len(declared) == 0 {
-		t.Fatalf("variants fixture declares no variant: the test would prove nothing")
-	}
+	declared := []string{"digger-pro", "digger-max"}
 	variants, err := source.LoadGlobalAgentVariants(agentsDir, testjail.Scratch(t))
 	if err != nil {
 		t.Fatalf("variants fixture: %v", err)

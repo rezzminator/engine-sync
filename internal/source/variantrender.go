@@ -17,9 +17,9 @@ import (
 )
 
 func (d *variantsDecl) content(name string, r *renderedVariant) ([]byte, error) {
-	source := filepath.ToSlash(filepath.Join(d.markerDir, filepath.Base(d.path)))
+	source := filepath.ToSlash(filepath.Join(d.markerDir, name+".md"))
 	if r.root != GeneralPurpose {
-		source = filepath.ToSlash(filepath.Join(d.markerDir, r.root+".md")) + " + " + filepath.Base(d.path)
+		source = filepath.ToSlash(filepath.Join(d.markerDir, r.root+".md")) + " + " + name + ".md"
 	}
 	var head bytes.Buffer
 	enc := yaml.NewEncoder(&head)
@@ -43,12 +43,12 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 		return nil, fmt.Errorf("%s: \"from\" cycle %s", d.path, strings.Join(append(chain, name), " → "))
 	}
 	chain = append(chain, name)
-	layer := d.variants[name]
+	layer := d.declarations[name]
 	var base renderedVariant
 	switch {
 	case layer.from == GeneralPurpose:
 		base = renderedVariant{front: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}, root: GeneralPurpose}
-	case d.variants[layer.from].hasFrom:
+	case d.declarations[layer.from].hasFrom:
 		parent, err := d.render(layer.from, chain)
 		if err != nil {
 			return nil, err
@@ -57,6 +57,12 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 	default:
 		if !globalAgentVariantName.MatchString(layer.from) {
 			return nil, fmt.Errorf("%s: variant %q: \"from\" must name a source agent, a variant or %s, got %q", d.path, name, GeneralPurpose, layer.from)
+		}
+		if _, abstract := d.abstracts[layer.from]; abstract {
+			return nil, fmt.Errorf("%s: from %q is an abstract, use extends", layer.path, layer.from)
+		}
+		if failure := d.failures[layer.from]; failure != nil {
+			return nil, fmt.Errorf("%s: from %q: %w", layer.path, layer.from, failure)
 		}
 		sourcePath := filepath.Join(d.agentsDir, layer.from+".md")
 		raw, err := paths.ReadRegular(sourcePath)
@@ -75,7 +81,7 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 		}
 		base = renderedVariant{front: front, body: body, root: layer.from}
 	}
-	layers, err := d.profileLayers(layer.profile, nil)
+	layers, err := d.abstractLayers(layer.extends, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s: variant %q: %w", d.path, name, err)
 	}
@@ -118,10 +124,10 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 				renames = append(renames, r)
 			}
 		}
-		if l.prepend != nil {
+		if l.prepend != nil && *l.prepend != "" {
 			prepends = append(prepends, *l.prepend)
 		}
-		if l.appendix != nil {
+		if l.appendix != nil && *l.appendix != "" {
 			appends = append(appends, *l.appendix)
 		}
 	}
@@ -132,7 +138,7 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 			return nil, sectionError(err, name, layer.from, s.key)
 		}
 		d.uses = append(d.uses, pinFound{variant: name, section: s, now: now})
-		if d.repin != nil && d.repin(name) {
+		if d.repin != nil && (d.repin(name) || d.repin(strings.TrimSuffix(filepath.Base(s.owner), ".md"))) {
 			d.pins = append(d.pins, pinFound{variant: name, section: s, now: now})
 		} else if !s.pinned {
 			return nil, fmt.Errorf("SECTION-UNPINNED %s: %s.md § %s has no pin — run engine-sync variants pin %s", name, layer.from, s.key, name)
@@ -161,22 +167,24 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 	return r, nil
 }
 
-func (d *variantsDecl) profileLayers(name string, chain []string) ([]variantLayer, error) {
-	if name == "" {
-		return nil, nil
+func (d *variantsDecl) abstractLayers(names, chain []string) ([]variantLayer, error) {
+	var out []variantLayer
+	for _, name := range names {
+		if slices.Contains(chain, name) {
+			return nil, fmt.Errorf("extends cycle %s", strings.Join(append(slices.Clone(chain), name), " → "))
+		}
+		layer, ok := d.abstracts[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown abstract %q", name)
+		}
+		parents, err := d.abstractLayers(layer.extends, append(slices.Clone(chain), name))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, parents...)
+		out = append(out, layer)
 	}
-	if slices.Contains(chain, name) {
-		return nil, fmt.Errorf("profile cycle %s", strings.Join(append(chain, name), " → "))
-	}
-	profile, ok := d.profiles[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown profile %q", name)
-	}
-	outer, err := d.profileLayers(profile.profile, append(chain, name))
-	if err != nil {
-		return nil, err
-	}
-	return append(outer, profile), nil
+	return out, nil
 }
 
 func joinNonEmpty(a, b string) string {

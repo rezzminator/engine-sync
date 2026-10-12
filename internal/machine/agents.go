@@ -150,12 +150,17 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 	sourceRoot = filepath.Clean(sourceRoot)
 
+	claudeConfigDirs := options.ClaudeConfigDirs
+	if len(claudeConfigDirs) == 0 {
+		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
+	}
+
 	// Phase 1: compile and validate every role's TOML before touching disk —
 	// a failed compile or an unparseable TOML aborts before any install, the
 	// same fail-loud order the host script used.
 	model := options.Source
 	if model == nil {
-		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
+		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 		if e != nil {
 			return GlobalAgentsResult{}, e
 		}
@@ -173,10 +178,6 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 
 	// One Claude agents/ registry per configured account; an installer that
 	// never names its accounts keeps the single {Home}/.claude registry.
-	claudeConfigDirs := options.ClaudeConfigDirs
-	if len(claudeConfigDirs) == 0 {
-		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
-	}
 
 	// One Codex agents/ registry per configured Codex home; a caller that
 	// never names its accounts (a nil roster, `engine-sync codex agents`) keeps the
@@ -363,12 +364,12 @@ type compiledAgent struct {
 }
 
 // compileGlobalAgents renders every machine-global agent — originals plus the
-// variants variants.json declares — that global installs: an agent whose
+// rendered declarations — that global installs: an agent whose
 // requires is unmet or that skipBrokenAgents skips is left out, as global
 // leaves it out, and the caller names those (InspectRegistries' BROKEN row).
 func compileGlobalAgents(home, sourceRepo string, cfg *config.Config) ([]compiledAgent, error) {
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
+	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: []string{cfg.ClaudeConfigDir}})
 	if err != nil {
 		return nil, err
 	}

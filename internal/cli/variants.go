@@ -10,7 +10,7 @@ import (
 
 // runVariants is `engine-sync variants pin [name …]`: it recomputes the
 // section pins of the named variants (every variant when none is named) and
-// rewrites variants.json in place, keeping its key order and indentation. It
+// rewrites source pins blocks in place, keeping every other byte. It
 // prints each pin it changes.
 func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 	const usage = "usage: engine-sync variants pin [name]... [--home H] [--source-repo R]"
@@ -19,8 +19,8 @@ func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 		return 2
 	}
 	flags := NewFlagSet("variants pin", usage, stderr)
-	home := flags.String("home", "", "the home whose machine agents directory holds variants.json")
-	sourceRepo := flags.String("source-repo", "", "the repository whose configured agents directory holds variants.json")
+	home := flags.String("home", "", "the home whose machine agents directory holds source declarations")
+	sourceRepo := flags.String("source-repo", "", "the repository whose configured agents directory holds source declarations")
 	names, code, ok := ParseFlagsAnywhere(flags, args[1:])
 	if !ok {
 		return code
@@ -46,7 +46,7 @@ func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 	// The pin runs under its agents directory's writer guard: a second pin
 	// waits, then re-reads the declaration the first one rewrote.
 	code, err = guarded(e, []string{machine.GlobalRoot(agentsDir)}, true, func() int {
-		changes, err := source.PinGlobalAgentVariants(agentsDir, names, policy.Machine.Variants)
+		changes, err := source.PinGlobalAgentVariants(agentsDir, names)
 		if err != nil {
 			fmt.Fprintf(stderr, "engine-sync variants pin: %v\n", err)
 			return 1

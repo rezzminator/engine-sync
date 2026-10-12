@@ -1,11 +1,8 @@
 package source
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -151,95 +148,117 @@ func stampIdentity(front *yaml.Node, name, root string) {
 	}
 }
 
-// jsonNode converts one JSON value to a YAML node, keeping object key order
-// and leaving every style to the encoder.
-func jsonNode(raw []byte) (*yaml.Node, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var value func() (*yaml.Node, error)
-	value = func() (*yaml.Node, error) {
-		tok, err := dec.Token()
-		if err != nil {
-			return nil, err
+// machineControls also recognizes controls inherited through YAML merge keys.
+func machineControls(node *yaml.Node) bool {
+	seen := map[*yaml.Node]bool{}
+	var walk func(*yaml.Node) bool
+	walk = func(n *yaml.Node) bool {
+		if n == nil || seen[n] {
+			return false
 		}
-		switch t := tok.(type) {
-		case json.Delim:
-			node := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-			if t == '{' {
-				node = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-			}
-			for dec.More() {
-				if t == '{' {
-					key, err := dec.Token()
-					if err != nil {
-						return nil, err
-					}
-					node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key.(string)})
+		seen[n] = true
+		if n.Kind == yaml.AliasNode {
+			return walk(n.Alias)
+		}
+		if n.Kind == yaml.SequenceNode {
+			for _, c := range n.Content {
+				if walk(c) {
+					return true
 				}
-				child, err := value()
+			}
+		}
+		if n.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				if n.Content[i].Value == "from" || n.Content[i].Value == "abstract" {
+					return true
+				}
+				if n.Content[i].Tag == "!!merge" && walk(n.Content[i+1]) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(node)
+}
+
+// resolveDeclaration expands YAML aliases and merge keys before layer edits.
+// Explicit map keys override merged keys; the first merged map wins.
+func resolveDeclaration(node *yaml.Node) (*yaml.Node, error) {
+	active := map[*yaml.Node]bool{}
+	var resolve func(*yaml.Node) (*yaml.Node, error)
+	resolve = func(n *yaml.Node) (*yaml.Node, error) {
+		if n == nil {
+			return nil, nil
+		}
+		if active[n] {
+			return nil, fmt.Errorf("cyclic YAML alias")
+		}
+		active[n] = true
+		defer delete(active, n)
+		if n.Kind == yaml.AliasNode {
+			return resolve(n.Alias)
+		}
+		out := *n
+		out.Anchor = ""
+		out.Content = nil
+		if n.Kind != yaml.MappingNode {
+			for _, child := range n.Content {
+				c, err := resolve(child)
 				if err != nil {
 					return nil, err
 				}
-				node.Content = append(node.Content, child)
+				out.Content = append(out.Content, c)
 			}
-			if _, err := dec.Token(); err != nil {
+			return &out, nil
+		}
+		seen := map[string]bool{}
+		var merges []*yaml.Node
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			if key.Kind != yaml.ScalarNode {
+				return nil, fmt.Errorf("mapping key must be scalar")
+			}
+			if seen[key.Value] {
+				return nil, fmt.Errorf("duplicate key %s", key.Value)
+			}
+			seen[key.Value] = true
+			c, err := resolve(value)
+			if err != nil {
 				return nil, err
 			}
-			return node, nil
-		case string:
-			return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: t}, nil
-		case json.Number:
-			tag := "!!int"
-			if strings.ContainsAny(t.String(), ".eE") {
-				tag = "!!float"
+			if key.Tag == "!!merge" {
+				merges = append(merges, c)
+				continue
 			}
-			return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: t.String()}, nil
-		case bool:
-			return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(t)}, nil
-		default:
-			return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}, nil
+			out.Content = append(out.Content, cloneNode(key), c)
 		}
-	}
-	return value()
-}
-
-// jsonOffsets maps each value's JSON path (keys joined by NUL) to its byte
-// span in raw.
-func jsonOffsets(raw []byte) (map[string][2]int, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	out := map[string][2]int{}
-	var walk func(path []string) error
-	walk = func(path []string) error {
-		before := int(dec.InputOffset())
-		tok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		start := before
-		for start < len(raw) && strings.IndexByte(" \t\r\n:,", raw[start]) >= 0 {
-			start++
-		}
-		key := strings.Join(path, "\x00")
-		if delim, ok := tok.(json.Delim); ok {
-			out[key] = [2]int{start, start + 1}
-			for i := 0; dec.More(); i++ {
-				child := strconv.Itoa(i)
-				if delim == '{' {
-					k, err := dec.Token()
-					if err != nil {
+		var merge func(*yaml.Node) error
+		merge = func(m *yaml.Node) error {
+			if m.Kind == yaml.SequenceNode {
+				for _, c := range m.Content {
+					if err := merge(c); err != nil {
 						return err
 					}
-					child = k.(string)
 				}
-				if err := walk(append(slices.Clone(path), child)); err != nil {
-					return err
+				return nil
+			}
+			if m.Kind != yaml.MappingNode {
+				return fmt.Errorf("YAML merge must name a map or list of maps")
+			}
+			for i := 0; i+1 < len(m.Content); i += 2 {
+				if MapValue(&out, m.Content[i].Value) == nil {
+					out.Content = append(out.Content, m.Content[i], m.Content[i+1])
 				}
 			}
-			_, err := dec.Token()
-			return err
+			return nil
 		}
-		out[key] = [2]int{start, int(dec.InputOffset())}
-		return nil
+		for _, m := range merges {
+			if err := merge(m); err != nil {
+				return nil, err
+			}
+		}
+		return &out, nil
 	}
-	return out, walk(nil)
+	return resolve(node)
 }

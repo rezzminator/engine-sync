@@ -17,7 +17,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 
 ## Binary and exits
 
-Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.3.0-alpha.1` for development, the plugin manifest version for release assets.
+Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.3.0-alpha.2` for development, the plugin manifest version for release assets.
 
 Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error. Hooks preserve the hook protocol described below. `--json` prints exactly one stdout object for exits 0 and 1; usage errors print no JSON. Legacy-config deprecation notices go to stderr even with `--json`.
 
@@ -33,7 +33,7 @@ Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error
 | `opencode` | `build`, `check`, `doctor`; the existing OpenCode alias. |
 | `config` | `show`, `validate`, `schema`; effective settings, validation and schema. |
 | `global` | Machine roles, OpenCode agents and commands; `--plan`, `--uninstall`, `--adopt`, `--capability NAME`, account flags. |
-| `variants` | `pin [name]…`; recompute and rewrite the section pins of `variants.json`. |
+| `variants` | `pin [name]…`; rewrite only the `pins:` block of source declarations or abstracts. |
 | `hook` | `claude mark`, `stop`, `start`; hook protocol on stdin/stdout. |
 | `version` | Print the binary version; `--version` is an alias. |
 | `help` | Print usage and registered targets; `-h` and `--help` are aliases. |
@@ -64,7 +64,7 @@ Project commands also accept `--engine codex|opencode`; the neutral selection ru
 
 One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.1`; released assets report the plugin manifest version.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.2`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .
@@ -109,7 +109,6 @@ engine-sync config schema
 | `machine.retiredFiles` | `[]` | Home-relative paths, including backups; configured retired skill paths suppress model-invocable command skills. |
 | `machine.rewrites` | `[]` | Ordered rules applied at machine scope. |
 | `machine.codexHomes` | `[]` | Unconfigured: environment/default Codex home; configured empty list: no homes. |
-| `machine.variants` | `""` | Optional variants declaration, absolute or relative to the agents source directory; empty uses `variants.json`. |
 | `machine.generatedAgentsDir` | `".local/state/engine-sync/generated/claude-agents"` | Home-relative generated variant store; separate from source agents. |
 
 Removed keys: `machine.modelMap` (use `codex.modelMap`) and `opencode.agent` (use each agent's `engines.opencode.permission`). A configuration carrying either fails to load, naming its replacement.
@@ -140,7 +139,7 @@ Each rewrite has `engines` and `kinds` lists (empty or omitted means all), a non
 A machine example:
 
 ```json
-{"version":1,"machine":{"claudeAgentsDir":".claude/agents","generatedAgentsDir":".local/state/engine-sync/generated/claude-agents","legacyCodexAgentsDir":".local/state/engine-sync/generated/codex-agents","codexHomes":["/example/codex"],"retiredAgents":["old-reader"],"retiredFiles":[".codex/skills/old-workflow"],"variants":"variants.json","rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"old protocol","replace":"current protocol"}]}}
+{"version":1,"machine":{"claudeAgentsDir":".claude/agents","generatedAgentsDir":".local/state/engine-sync/generated/claude-agents","legacyCodexAgentsDir":".local/state/engine-sync/generated/codex-agents","codexHomes":["/example/codex"],"retiredAgents":["old-reader"],"retiredFiles":[".codex/skills/old-workflow"],"rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"old protocol","replace":"current protocol"}]}}
 ```
 
 Global roles use the Claude configuration directory by default; `--source-repo R` selects `R/{machine.sourceAgentsDir}/`. An agent's `engines.codex` block overrides its role settings (see [Agent frontmatter](#agent-frontmatter)). `engines.codex.sandbox` accepts `inherit`, `read-only`, or `workspace-write`; otherwise a tools list without Write, Edit, MultiEdit or NotebookEdit selects read-only; Bash alone does not declare write intent. Use `sandbox: inherit` for a role that writes through Bash. No role name has special treatment. `codex.modelMap` maps model aliases for project and machine roles alike.
@@ -170,36 +169,41 @@ Model precedence per engine is `engines.{engine}.model`, then the engine's model
 
 ## Variants
 
-`{machine agents source}/variants.json` (or `machine.variants`) declares machine-global agents rendered from another agent. Version 2 is required; a version 1 file fails with `variants.json: version 1 is retired — rewrite as version 2 (see docs/interface.md)`.
+A machine source `{machine.sourceAgentsDir}/{name}.md` carrying `from:` declares a rendered agent. Its `name` must equal the kebab-case file base. `from` names an original, another declaration, or `general-purpose` (empty frontmatter and body). A cycle is an error naming the chain. `machine.variants` is refused with `{machine.sourceAgentsDir}/{name}.md declarations` as its replacement.
 
-```jsonc
-{
-  "version": 2,
-  "fragments": { "{name}": "text" },
-  "profiles":  { "{name}": { /* any variant field except "from"; may name "profile" */ } },
-  "variants":  {
-    "{name}": {
-      "from": "{original} | {variant} | general-purpose",
-      "profile": "{profile}",
-      "set":   { "{key}": "{any JSON value}" },
-      "add":   { "{key}": "{list or map}" },
-      "unset": [ "{dotted.path}" ],
-      "sections": { "{heading text}": { "pin": "sha256:{hex}", "text": "… | @fragment", "heading": "{optional new heading text}" } },
-      "prepend": "… | @fragment",
-      "append":  "… | @fragment",
-      "rename":  { "{agent name}": "{new name}" }
-    }
-  }
-}
+```yaml
+---
+name: reader-pro
+from: reader
+extends: [shared]
+model: sonnet
+add:
+  tools: Write, Grep
+unset: [skills]
+retitle:
+  Budget: Budget (pro)
+pins:
+  Budget: sha256:{hex}
+prepend: |-
+  Follow the return law.
+---
+
+## Budget (pro)
+
+Spend more time reviewing.
 ```
 
-Names are kebab-case and never collide with an original. `from` names an original, another variant, or `general-purpose` (an empty frontmatter and body); `from` and `profile` chains are acyclic, and a cycle is an error naming it. A variant is its profile chain's layers, outermost first, then its own. Each layer applies `unset` (a missing path is `UNSET-MISSING`), then `set` (maps deep-merge, scalars and lists replace), then `add` (lists append, maps deep-merge; a scalar target is an error) to the parent's rendered frontmatter. `name` and `role` are never set, added or unset. `tools` takes a list or a comma string and always renders `tools: A, B, C`.
+An `abstract: true` source has no `from`, names its own file base, and is a shared layer, never an installed agent or a doctor agent row. Its validation problems remain visible. `extends: [a, b]` applies abstracts in order, each abstract's own ancestors first; missing abstracts and cycles are named errors. Layer order is the rendered `from` base, then `extends`, then the declaration itself.
 
-The body merges `sections` by heading and `rename` by key (the later layer wins) and concatenates `prepend` and `append` in layer order, then applies sections, rename, prepend (`text + "\n\n" + body`) and append (`body + "\n\n" + text`). A section key is a heading's text; `(intro)` is the text before the first heading. Its extent runs to the next heading of the same or a higher level. Its pin is `sha256:` and the hex SHA-256 of the extent's lines joined with `\n`, leading and trailing blank lines removed. A replacement writes the heading (or `heading` at the same level), one blank line, the text, and one blank line before the next heading. Errors: `SECTION-DRIFT {variant}: {from}.md § {heading} changed since pinned (pin {old}, now {new}) — review the override, then run engine-sync variants pin {variant}`, `SECTION-MISSING`, `SECTION-AMBIGUOUS` (a heading that occurs twice), `SECTION-UNPINNED` (an override without a pin). A string that is exactly `@{name}` resolves to `fragments[name]`; an unknown name is an error. `rename` replaces whole-name occurrences in the body only, every key at once in one pass over the original body (`{"a": "b", "b": "c"}` turns `a` into `b` and `b` into `c`); a key the original body does not carry is `RENAME-UNUSED {variant}: {name} matched 0 times`.
+Each layer applies `unset` (a missing dotted path is `UNSET-MISSING`), native frontmatter keys (maps deep-merge, scalars and lists replace), then `add` (lists append, maps deep-merge; a scalar target is an error). `name` and `role` cannot be set, added or unset: the compiler stamps `name` and `role: {root original}` after it, omitting role for `general-purpose`. `tools` accepts a list or comma string and renders `tools: A, B, C`. Controls `from`, `extends`, `abstract`, `add`, `unset`, `rename`, `prepend`, `append`, `pins` and `retitle` never reach rendered frontmatter.
 
-The rendered Claude file is written into `machine.generatedAgentsDir` and linked; `role: {root original}` is stamped after `name` unless the root is `general-purpose`. Codex and OpenCode artifacts follow its rendered `engines` block, and its rendered `requires` decides installation. `check` validates a project's declaration — `machine.variants` (relative to `{machine.sourceAgentsDir}`) when set, else `{machine.sourceAgentsDir}/variants.json` — with every source and every rendered variant, when the project carries one; a configured declaration that is missing is a problem.
+Each real `## Heading` in the source body overrides the base's same-named section; fenced headings do not count. Nonempty text before the first heading overrides `(intro)`, preserving the base's leading blank line; empty intro inherits. `retitle: {old heading: new heading}` names the base section while the body writes the new heading. A section's extent runs to the next heading of the same or higher level. Its pin is `sha256:` followed by SHA-256 of its extent's lines joined with `\n`, leading and trailing blank lines removed. Missing, repeated, unpinned and changed base sections are `SECTION-MISSING`, `SECTION-AMBIGUOUS`, `SECTION-UNPINNED` and `SECTION-DRIFT` respectively. Review an override before running `engine-sync variants pin {name}`.
 
-`global` skips what fails and installs the rest, exiting 1: a machine source whose header fails is `FRONTMATTER-INVALID`, a variant whose render fails is named by its own error (`VARIANT-INVALID {error}` when it carries no code), and a `variants.json` that fails to load skips every variant under `VARIANTS-INVALID {path} — {error}`. An agent skipped for an error keeps its installed copy (`{source} did not build; output kept: {output}`); only an unmet `requires` retires one.
+Later layers win section and rename keys. `rename` replaces whole-name occurrences in the body, simultaneously over the original body (`{a: b, b: c}` turns `a` into `b` and `b` into `c`); an unused key is `RENAME-UNUSED {name}: {key} matched 0 times`. `prepend` and `append` concatenate in layer order and join only nonempty parts with two newlines.
+
+The rendered Claude file is written into `machine.generatedAgentsDir` and linked. Its marker credits the declaration file. Codex and OpenCode follow its rendered `engines`, and `requires` decides installation. `check` validates sources and rendered declarations in the configured source directory. Project `.claude/agents/*.md` files with `from:` or `abstract:` are named problems: Claude Code would load them raw, so these controls are machine scope only.
+
+`global` skips each broken source and installs healthy agents, exiting 1. A malformed header is `FRONTMATTER-INVALID`; invalid declarations and rendering failures are named by their own errors. An agent skipped for an error keeps its installed copies; only unmet `requires` retires one.
 
 ## Global commands
 
@@ -215,11 +219,13 @@ engine-sync doctor --machine [--home H] [--source-repo R] [--claude-config-dir C
 engine-sync variants pin [name …] [--home H] [--source-repo R]
 ```
 
-`--adopt` moves an unowned regular file at a declared agent's destination to `{engine-sync state}/adopted/{UTC timestamp}/{path relative to home}`, then writes the managed artifact in its place; without it the file stays a conflict. A file reached through two spellings moves once; a destination already taken gets the next free `{stem}.{n}{ext}`, so no earlier adopted file is replaced; ownership is checked again right before each move (a file gone, no longer regular, or now carrying the marker stays and is named); across filesystems the move is a copy, synced, then the original removed. `variants pin` recomputes the section pins of the named variants (every variant when none is named), rewrites the declaration in place, keeping its key order and indentation (a new `pin` is inserted at its section's indentation), and prints `pinned {variant} § {heading} {pin}` for each pin it changes. Named variants that share a section (a profile or fragment) with a variant not named are refused, naming it, when the rewrite would turn that variant from current to `SECTION-DRIFT`. A symlinked declaration is written through to its target.
+`--adopt` moves an unowned regular file at a declared agent's destination to `{engine-sync state}/adopted/{UTC timestamp}/{path relative to home}`, then writes the managed artifact in its place; without it the file stays a conflict. A file reached through two spellings moves once; a destination already taken gets the next free `{stem}.{n}{ext}`, so no earlier adopted file is replaced; ownership is checked again right before each move (a file gone, no longer regular, or now carrying the marker stays and is named); across filesystems the move is a copy, synced, then the original removed. `variants pin` recomputes section pins for named declarations or abstracts (all when none is named), rewrites only their `pins:` block, and keeps every other byte unchanged. It prints `pinned {name} § {heading} {pin}` for each change. A shared abstract's rewrite is refused, naming the consumer, if it would make an unasked current declaration drift. A symlinked source is written through to its target.
 
 Global role sources default to `machine.claudeAgentsDir`, whose neutral value is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/` for all three commands. Explicit `--source-repo R` selects `R/{machine.sourceAgentsDir}/`; targets may select the repository for `global` and machine doctor. Global commands resolve only the machine policy file; a source repository supplies templates, never project policy. `--home` defaults to `$HOME`.
 
-`global` plans or applies role TOMLs, rendered variants, Claude agent links, retirements and the global command mirror. Codex role TOMLs are marker-owned regular files: Codex refuses symlinked roles. A source already in its destination Claude registry stays a regular file. With no source directory, global reports a skip; doctor names `NO-SOURCES` without clone-specific wording. A source agent global skips as broken is one doctor `BROKEN` row naming it, and every healthy agent's registries are still inspected.
+If the machine source agents directory physically resolves to any Claude agents directory being installed into, every source carrying `from:` or `abstract:` is a named validation problem: Claude Code loads it raw there. engine-sync never renders, links over, replaces, moves or adopts it, including with `--adopt`. Set `sourceAgentsDir` (or `sourceRepo`) to a directory outside every Claude agents dir. Plain agents in the registry keep their existing behavior. Doctor reports the same validation problem, with no additional state.
+
+`global` plans or applies role TOMLs, rendered variants, Claude agent links, retirements and the global command mirror. Codex role TOMLs are marker-owned regular files: Codex refuses symlinked roles. A plain source already in its destination Claude registry stays a regular file. With no source directory, global reports a skip; doctor names `NO-SOURCES` without clone-specific wording. A source agent global skips as broken is one doctor `BROKEN` row naming it, and every healthy agent's registries are still inspected.
 
 `engines.codex.sandbox` accepts `inherit` (no sandbox line), `read-only`, or `workspace-write`. Otherwise a tools allow-list lacking write tools compiles read-only; omitted tools inherit. There is no agent-name exception.
 

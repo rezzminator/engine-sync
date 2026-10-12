@@ -47,3 +47,22 @@ func TestLoadProjectNamesAHeaderThatDoesNotParse(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadProjectRefusesMachineDeclarations(t *testing.T) {
+	for _, key := range []string{"from: reader", "abstract: true", "<<: {from: reader}", "<<: {abstract: true}"} {
+		t.Run(key, func(t *testing.T) {
+			root := testjail.Scratch(t)
+			path := filepath.Join(root, ".claude", "agents", "derived.md")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("---\nname: derived\n"+key+"\n---\nBody.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			model := source.LoadProject(root, filepath.Join(root, "home"), config.Default())
+			if !strings.Contains(strings.Join(model.Problems, "\n"), "machine scope only") {
+				t.Fatalf("problems = %q", model.Problems)
+			}
+		})
+	}
+}

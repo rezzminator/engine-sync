@@ -328,7 +328,7 @@ func (r *run) retireOrphanGlobalAgents(model source.Project) error {
 			if within(target, generatedDir) && !keep[filepath.Base(target)] {
 				if err := r.retire(
 					path,
-					"retired global agent variant — "+entry.Name()+" is no longer declared in variants.json",
+					"retired global agent variant — "+entry.Name()+" has no source declaration",
 				); err != nil {
 					return err
 				}

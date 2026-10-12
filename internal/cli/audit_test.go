@@ -411,7 +411,9 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 	for _, form := range []string{"tampered variant", "tampered role", "orphan role", "stale prompt", "deleted skill", "unreadable prompts", "fifo skill", "corrupt writer", "bad targets", "second registry"} {
 		t.Run(form, func(t *testing.T) {
 			home, _, e := auditEnv(t)
-			putProjectFile(t, home, ".claude/agents/reader.md", auditAgent)
+			if form != "tampered variant" {
+				putProjectFile(t, home, ".claude/agents/reader.md", auditAgent)
+			}
 			putProjectFile(t, home, ".claude/commands/hello.md", "---\ndescription: Hello.\n---\nHello\n")
 			putProjectFile(t, home, ".claude/commands/family/SKILL.md", "---\nname: family\ndescription: Family.\n---\nFamily\n")
 			if form == "second registry" {
@@ -419,7 +421,13 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 				putProjectFile(t, home, ".config/engine-sync/targets.json", string(raw))
 			}
 			if form == "tampered variant" {
-				putProjectFile(t, home, ".claude/agents/variants.json", `{"version":2,"variants":{"reader-pro":{"from":"reader","set":{"description":"Deep read."}}}}`)
+				putProjectFile(t, home, "agent-sources/reader.md", auditAgent)
+				putProjectFile(t, home, "agent-sources/reader-pro.md", "---\nname: reader-pro\nfrom: reader\ndescription: Deep read.\n---\n")
+				raw, err := json.Marshal(map[string]any{"version": 1, "machine": map[string]any{"claudeAgentsDir": filepath.Join(home, "agent-sources")}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				putProjectFile(t, home, ".config/engine-sync/config.json", string(raw))
 			}
 			auditOK(t, e, "global")
 			switch form {

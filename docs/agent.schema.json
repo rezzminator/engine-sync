@@ -119,6 +119,82 @@
           ]
         }
       }
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Machine declaration base: an original, declaration or general-purpose. The file base equals name."
+    },
+    "abstract": {
+      "const": true,
+      "description": "Machine-only shared layer; never installed or emitted."
+    },
+    "extends": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+      }
+    },
+    "add": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "array"
+          },
+          {
+            "type": "object"
+          }
+        ]
+      },
+      "properties": {
+        "tools": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "unset": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rename": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "prepend": {
+      "type": "string"
+    },
+    "append": {
+      "type": "string"
+    },
+    "pins": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^sha256:[a-f0-9]{64}$"
+      }
+    },
+    "retitle": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
     }
   },
   "not": {
@@ -150,5 +226,41 @@
       }
     ]
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "from"
+        ]
+      },
+      "then": {
+        "required": [
+          "name"
+        ],
+        "not": {
+          "required": [
+            "abstract"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "abstract"
+        ]
+      },
+      "then": {
+        "required": [
+          "name"
+        ],
+        "not": {
+          "required": [
+            "from"
+          ]
+        }
+      }
+    }
+  ]
 }

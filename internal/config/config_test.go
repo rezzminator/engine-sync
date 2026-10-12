@@ -35,6 +35,8 @@ func TestReviewLayeredPolicy(t *testing.T) {
 		bad                          bool
 	}{
 		{"bare permission", `{"version":1,"opencode":{"permission":"deny"}}`, `{"version":1,"opencode":{"permission":{"bash":"allow"}}}`, "", false},
+		{"machine declarations replace carrier", `{"version":1,"machine":{"variants":"custom.json"}}`, "", "machine.variants is removed; use {machine.sourceAgentsDir}/{name}.md declarations", true},
+		{"machine empty carrier refused", `{"version":1,"machine":{"variants":""}}`, "", "machine.variants is removed; use {machine.sourceAgentsDir}/{name}.md declarations", true},
 		{"machine modelMap removed", `{"version":1,"machine":{"modelMap":{"opus":"model-a"}}}`, "", "machine.modelMap is removed; use codex.modelMap", true},
 		{"opencode agent removed", "", `{"version":1,"opencode":{"agent":{"reader":{"permission":"deny"}}}}`, "opencode.agent is removed; use engines.opencode.permission", true},
 		{"missing model alias", `{"version":1,"codex":{"modelMap":{"opus":"model-a"}}}`, `{"version":1,"codex":{"rootAdapter":"Use {{index .Models \"opus\"}} or {{index .Models \"haiku\"}}."}}`, `model alias "haiku" is not in the engine's modelMap`, true},

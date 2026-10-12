@@ -8,11 +8,36 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
-// LoadMachine snapshots original roles and declared variants before rendering.
-func LoadMachine(home, agentsDir, generatedDir string, variants ...string) (Project, error) {
+// MachineOptions identifies provenance and every Claude registry receiving agents.
+type MachineOptions struct {
+	MarkerDir        string
+	ClaudeConfigDirs []string
+}
+
+// LoadMachine snapshots original roles and declarations before rendering.
+func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions) (Project, error) {
+	opts := MachineOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	if len(opts.ClaudeConfigDirs) == 0 {
+		opts.ClaudeConfigDirs = []string{filepath.Join(home, ".claude")}
+	}
+	for i, dir := range opts.ClaudeConfigDirs {
+		if dir == "" {
+			opts.ClaudeConfigDirs = slices.Clone(opts.ClaudeConfigDirs)
+			opts.ClaudeConfigDirs[i] = filepath.Join(home, ".claude")
+		}
+	}
 	p := Project{Root: agentsDir, Home: home, Scope: MachineScope, AgentSourceDir: agentsDir, documents: map[string]document{}, directories: map[string]directory{}}
+	collides, err := machineSourceInRegistry(agentsDir, opts.ClaudeConfigDirs)
+	if err != nil {
+		return p, err
+	}
+	blocked := map[string]bool{}
 	paths, err := filepath.Glob(filepath.Join(agentsDir, "*.md"))
 	if err != nil {
 		return p, err
@@ -38,24 +63,40 @@ func LoadMachine(home, agentsDir, generatedDir string, variants ...string) (Proj
 			p.Failed = append(p.Failed, failedSourceNames(path, raw)...)
 			continue
 		}
+		if machineControls(front.Node) {
+			if collides {
+				name := strings.TrimSuffix(filepath.Base(path), ".md")
+				blocked[name] = true
+				p.Problems = append(p.Problems, fmt.Sprintf("%s: Claude Code loads it raw from this agents dir; set sourceAgentsDir (or sourceRepo) to a directory outside every Claude agents dir", path))
+				resolved, resolveErr := resolveDeclaration(front.Node)
+				if resolveErr != nil || MapValue(resolved, "abstract") == nil {
+					p.Failed = append(p.Failed, name)
+				}
+			}
+			continue
+		}
 		p.Agents = append(p.Agents, Agent{Name: front.Fields["name"], Path: path, Raw: raw, Front: front, Body: body})
 	}
-	declPath, _ := variantsPath(agentsDir, variants)
-	decl, err := readVariantsDecl(agentsDir, generatedDir, variants)
-	var v []GlobalAgentVariant
+	decl, err := readVariantsDecl(agentsDir, generatedDir, []string{opts.MarkerDir})
 	if err != nil {
-		// The declaration fails as a whole: every variant is skipped under
-		// this one error and keeps its installed copy; the originals load.
-		p.Problems = append(p.Problems, fmt.Sprintf("VARIANTS-INVALID %s — %v", declPath, err))
-		p.Failed = append(p.Failed, p.generatedNames(generatedDir)...)
-	} else if decl != nil {
-		var failed map[string]error
-		v, failed = decl.renderEach()
-		for _, name := range slices.Sorted(maps.Keys(failed)) {
-			p.Problems = append(p.Problems, variantProblem(failed[name]))
+		return p, err
+	}
+	for name := range blocked {
+		delete(decl.declarations, name)
+		delete(decl.abstracts, name)
+		delete(decl.failures, name)
+	}
+	v, failed := decl.renderEach()
+	for _, name := range slices.Sorted(maps.Keys(failed)) {
+		if slices.Contains(p.Failed, name) {
+			continue
+		}
+		p.Problems = append(p.Problems, variantProblem(failed[name]))
+		if _, abstract := decl.abstracts[name]; !abstract {
 			p.Failed = append(p.Failed, name)
 		}
 	}
+
 	for _, a := range v {
 		front, body, err := Parse(string(a.Content))
 		if err != nil {
@@ -107,7 +148,7 @@ func AgentsDirectory(home, repo string, cfg config.Config) string {
 }
 
 // MachineMarkerSource names what a machine-global agent's generated marker
-// credits: the clone path of an original agent, or variants.json for a
+// credits: the clone path of an original agent, or its declaration for a
 // variant, whose Markdown only ever existed in the engine-sync-owned
 // generated directory. It is deliberately clone-relative — a host-absolute
 // path in a marker says nothing an operator on another machine can act on.
@@ -118,8 +159,30 @@ func MachineMarkerSource(mdPath, agentsDir, markerDir string) string {
 		relDir = markerDir
 	}
 	relDir = filepath.ToSlash(relDir) + "/"
-	if filepath.Dir(mdPath) == filepath.Clean(agentsDir) {
-		return relDir + filepath.Base(mdPath)
+	return relDir + filepath.Base(mdPath)
+}
+
+// Directory identity follows aliases, rather than comparing spelling alone.
+func machineSourceInRegistry(agentsDir string, configDirs []string) (bool, error) {
+	source, err := os.Stat(agentsDir)
+	if os.IsNotExist(err) {
+		return false, nil
 	}
-	return relDir + "variants.json"
+	if err != nil {
+		return false, fmt.Errorf("inspect machine agents source %s: %w", agentsDir, err)
+	}
+	for _, dir := range configDirs {
+		registry := filepath.Join(dir, "agents")
+		dest, err := os.Stat(registry)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("inspect Claude agents dir %s: %w", registry, err)
+		}
+		if os.SameFile(source, dest) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

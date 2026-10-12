@@ -1,6 +1,7 @@
 package source
 
 import (
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"os"
@@ -100,6 +101,10 @@ func LoadProject(root, home string, cfg config.Config) Project {
 				continue
 			}
 			if front, body, ok := p.parsed(e.Path, report); ok {
+				if machineControls(front.Node) {
+					p.Problems = append(p.Problems, fmt.Sprintf("%s: declarations and abstracts are machine scope only", e.Path))
+					continue
+				}
 				p.Agents = append(p.Agents, Agent{Name: strings.TrimSuffix(filepath.Base(e.Path), ".md"), Path: e.Path, Front: front, Body: body})
 			}
 		}
