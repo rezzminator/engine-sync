@@ -228,6 +228,6 @@ func (r *run) adoptOne(a adoption) error {
 		r.skip(fmt.Sprintf("%s not adopted: move to %s: %v", a.from, to, err))
 		return nil
 	}
-	r.add(VerbChange, "adopted "+a.from+" -> "+to, a.from)
+	r.add(VerbChange, "adopted "+a.from+" -> "+to, "")
 	return nil
 }

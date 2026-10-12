@@ -81,6 +81,9 @@ func TestAdoptOneRechecksOwnershipAndKeepsEarlierCopies(t *testing.T) {
 	var text []string
 	for _, e := range r.report.Events {
 		text = append(text, e.Message)
+		if e.Path != "" && e.Verb != VerbRetire {
+			t.Fatalf("%s event %q carries path %q: a path appears only on retire", e.Verb, e.Message, e.Path)
+		}
 	}
 	all := strings.Join(text, "\n")
 	for _, want := range []string{owned + " not adopted: it carries the engine-sync marker", linked + " not adopted: no longer a regular file", "adopted " + mine + " -> " + filepath.Join(adopted, "lead.1.md")} {
