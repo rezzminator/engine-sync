@@ -61,3 +61,51 @@ func TestPinRefusesDriftingAnUnaskedVariantAndWritesThroughALink(t *testing.T) {
 		t.Fatalf("incompatible shared pins = %v", err)
 	}
 }
+
+// TestPinIgnoresAnUnrelatedBrokenOriginal: `variants pin` with no names
+// refuses only on a declaration, an abstract, or a base one of them uses; an
+// original agent nobody derives from, with a header that does not parse,
+// stays its own problem.
+func TestPinIgnoresAnUnrelatedBrokenOriginal(t *testing.T) {
+	dir := testjail.Scratch(t)
+	for name, text := range map[string]string{
+		"lead.md":     "---\nname: lead\ndescription: Leads.\n---\nLead.\n\n## Budget\n\nSpend little.\n",
+		"lead-pro.md": "---\nname: lead-pro\nfrom: lead\n---\n\n## Budget\n\nSpend more.\n",
+		"notes.md":    "---\nname: notes\ndescription: Notes.\nengines:\n\tcodex: false\n---\nNotes.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changes, err := PinGlobalAgentVariants(dir, nil)
+	if err != nil || len(changes) != 1 {
+		t.Fatalf("pin = %v (%v), want lead-pro's Budget pinned despite notes.md", changes, err)
+	}
+}
+
+// TestPinReportsWhatItWroteBeforeAFailedWrite: pins span several files; when a
+// later write fails, the pins already written are returned with the error.
+func TestPinReportsWhatItWroteBeforeAFailedWrite(t *testing.T) {
+	dir := testjail.Scratch(t)
+	for name, text := range map[string]string{
+		"lead.md":  "---\nname: lead\ndescription: Leads.\n---\nLead.\n\n## Budget\n\nSpend little.\n",
+		"a-pro.md": "---\nname: a-pro\nfrom: lead\n---\n\n## Budget\n\nSpend more.\n",
+		"b-pro.md": "---\nname: b-pro\nfrom: lead\n---\n\n## Budget\n\nSpend most.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	real := writePins
+	t.Cleanup(func() { writePins = real })
+	writePins = func(path string, data []byte, mode os.FileMode) error {
+		if filepath.Base(path) == "b-pro.md" {
+			return os.ErrPermission
+		}
+		return real(path, data, mode)
+	}
+	changes, err := PinGlobalAgentVariants(dir, nil)
+	if err == nil || len(changes) != 1 || changes[0].Variant != "a-pro" {
+		t.Fatalf("pin = %v (%v), want a-pro's pin reported with b-pro's write error", changes, err)
+	}
+}

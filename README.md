@@ -57,7 +57,7 @@ No project configuration is required. Global roles come from `${CLAUDE_CONFIG_DI
 
 One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.2`; released assets report the plugin manifest version.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.3`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .
@@ -103,6 +103,7 @@ engine-sync config schema
 | `machine.rewrites` | `[]` | Ordered rules applied at machine scope. |
 | `machine.codexHomes` | `[]` | Unconfigured: environment/default Codex home; configured empty list: no homes. |
 | `machine.generatedAgentsDir` | `".local/state/engine-sync/generated/claude-agents"` | Home-relative generated variant store; separate from source agents. |
+| `machine.sourceGeneratedAgentsDir` | `""` | Source-repository-relative directory declarations render into instead of `machine.generatedAgentsDir`, so the rendered agents live beside their sources; empty keeps the home store. `--uninstall` never removes it. |
 
 Adapters and preambles use Go `text/template` fields `{{.Name}}`, `{{.Engine}}` (`Codex` or `OpenCode`), `{{.Source}}`, and `{{.Root}}` (`AGENTS.md`). Unknown fields and malformed templates fail at entry. Legacy `${name}` in a preamble is converted with one deprecation notice; in `codex.rootAdapter` it remains literal for compatibility. The neutral preamble is shared by both targets:
 

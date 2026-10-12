@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -16,6 +17,13 @@ type MachineOptions struct {
 	MarkerDir        string
 	ClaudeConfigDirs []string
 }
+
+// declarationLine finds a top-level from: or abstract: key in a source whose
+// header does not parse.
+var declarationLine = regexp.MustCompile(`(?m)^(from|abstract):`)
+
+// abstractLine finds `abstract: true` in a source whose header does not parse.
+var abstractLine = regexp.MustCompile(`(?m)^abstract:\s*(true|'true'|"true")\s*$`)
 
 // LoadMachine snapshots original roles and declarations before rendering.
 func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions) (Project, error) {
@@ -32,12 +40,12 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 			opts.ClaudeConfigDirs[i] = filepath.Join(home, ".claude")
 		}
 	}
-	p := Project{Root: agentsDir, Home: home, Scope: MachineScope, AgentSourceDir: agentsDir, documents: map[string]document{}, directories: map[string]directory{}}
+	p := Project{Root: agentsDir, Home: home, Scope: MachineScope, AgentSourceDir: agentsDir, GeneratedDir: generatedDir, documents: map[string]document{}, directories: map[string]directory{}}
 	collides, err := machineSourceInRegistry(agentsDir, opts.ClaudeConfigDirs)
 	if err != nil {
 		return p, err
 	}
-	blocked := map[string]bool{}
+	blocked, brokenSources := map[string]bool{}, map[string]bool{}
 	paths, err := filepath.Glob(filepath.Join(agentsDir, "*.md"))
 	if err != nil {
 		return p, err
@@ -60,10 +68,17 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 			// One broken source is skipped and named, its installed copy kept;
 			// the others still load.
 			p.Problems = append(p.Problems, DescribeParseError(path, err))
-			p.Failed = append(p.Failed, failedSourceNames(path, raw)...)
+			brokenSources[strings.TrimSuffix(filepath.Base(path), ".md")] = true
+			// A broken abstract is a problem only: it is never an agent, so
+			// it has no installed copy to keep.
+			if !abstractLine.Match(raw) {
+				p.Failed = append(p.Failed, failedSourceNames(path, raw)...)
+			}
+			p.Declares = p.Declares || declarationLine.Match(raw)
 			continue
 		}
 		if machineControls(front.Node) {
+			p.Declares = true
 			if collides {
 				name := strings.TrimSuffix(filepath.Base(path), ".md")
 				blocked[name] = true
@@ -88,7 +103,8 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 	}
 	v, failed := decl.renderEach()
 	for _, name := range slices.Sorted(maps.Keys(failed)) {
-		if slices.Contains(p.Failed, name) {
+		// A source that did not parse is already named above.
+		if brokenSources[name] || slices.Contains(p.Failed, name) {
 			continue
 		}
 		p.Problems = append(p.Problems, variantProblem(failed[name]))
@@ -132,6 +148,16 @@ func LoadMachineCommands(home, sourceHome string, uninstall bool, policies ...co
 	}
 	p.frozen = true
 	return p
+}
+
+// GeneratedDirectory is where declarations render: the source repository's
+// machine.sourceGeneratedAgentsDir when set, else the home store
+// machine.generatedAgentsDir.
+func GeneratedDirectory(home, repo string, cfg config.Config) string {
+	if cfg.Machine.SourceGeneratedAgentsDir != "" {
+		return filepath.Join(paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), filepath.FromSlash(cfg.Machine.SourceGeneratedAgentsDir))
+	}
+	return filepath.Join(home, cfg.Machine.GeneratedAgentsDir)
 }
 
 func AgentsDirectory(home, repo string, cfg config.Config) string {

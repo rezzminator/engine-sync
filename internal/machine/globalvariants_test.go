@@ -1,6 +1,7 @@
 package machine
 
 import (
+	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
@@ -125,5 +126,82 @@ func TestShippedGlobalAgentVariantsRender(t *testing.T) {
 	if got := byName["digger-max"]; !strings.Contains(got, "`surveyor` digs a repository") ||
 		!strings.Contains(got, "tools: WebSearch, WebFetch, Write, Agent\n") {
 		t.Fatalf("digger-max did not apply its swap and override:\n%s", got)
+	}
+}
+
+// TestGlobalAgentsRenderIntoTheSourceRepository: with
+// machine.sourceGeneratedAgentsDir set, a declaration renders into that
+// directory of the source repository, every Claude registry links there, and
+// a second run plans nothing.
+func TestGlobalAgentsRenderIntoTheSourceRepository(t *testing.T) {
+	home := testjail.Scratch(t)
+	dir := variantAgentsDir(home)
+	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
+	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: lead\ndescription: Deep lead.\neffort: medium\n---\n")
+	cfg, err := config.LoadConfigLayers("", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Codex.ModelMap = fixtureMachinePolicy().Codex.ModelMap
+	cfg.Codex.Review = fixtureMachinePolicy().Codex.Review
+	cfg.Machine.SourceGeneratedAgentsDir = "generated/agents"
+	repo := filepath.Join(home, "source-repo")
+	options := GlobalAgentsOptions{SourceRepo: repo, Home: home, Config: &cfg, Mode: ModeBuild}
+	if _, err := RunGlobalAgents(options); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	rendered := filepath.Join(repo, "generated", "agents", "super-lead.md")
+	assertGlobalSymlink(t, filepath.Join(home, ".claude", "agents", "super-lead.md"), rendered)
+	if !strings.Contains(string(readAgentFixture(t, rendered)), "Lead body, byte for byte.") {
+		t.Fatalf("%s lacks the base body", rendered)
+	}
+	if _, err := os.Lstat(filepath.Join(paths.GeneratedClaudeAgentsDir(home), "super-lead.md")); !os.IsNotExist(err) {
+		t.Fatalf("home store written too (err=%v)", err)
+	}
+	options.Mode = ModeCheck
+	settled, err := RunGlobalAgents(options)
+	if err != nil || len(settled.Actions) != 0 || len(settled.Problems) != 0 {
+		t.Fatalf("re-check: actions=%#v problems=%#v (%v)", settled.Actions, settled.Problems, err)
+	}
+	// A declaration the host's capabilities exclude keeps its repository
+	// render, without a link.
+	writeAgentFixture(t, filepath.Join(dir, "gated-lead.md"), "---\nname: gated-lead\nfrom: lead\ndescription: Gated lead.\nrequires: [gated]\n---\n")
+	options.Mode = ModeBuild
+	if _, err := RunGlobalAgents(options); err != nil {
+		t.Fatalf("build with an excluded declaration: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "generated", "agents", "gated-lead.md")); err != nil {
+		t.Fatalf("excluded declaration's repository render missing: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "agents", "gated-lead.md")); !os.IsNotExist(err) {
+		t.Fatalf("excluded declaration linked (err=%v)", err)
+	}
+}
+
+// TestDoctorNamesAGeneratedOrphan: a rendered file in the generated directory
+// whose declaration is gone is an ORPHAN row that fails doctor; a declared
+// one is not named.
+func TestDoctorNamesAGeneratedOrphan(t *testing.T) {
+	home := testjail.Scratch(t)
+	dir := variantAgentsDir(home)
+	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
+	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: lead\ndescription: Deep lead.\n---\n")
+	cfg, err := config.LoadConfigLayers("", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Machine.SourceGeneratedAgentsDir = "generated/agents"
+	repo := filepath.Join(home, "source-repo")
+	generated := filepath.Join(repo, "generated", "agents")
+	writeAgentFixture(t, filepath.Join(generated, "super-lead.md"), "---\nname: super-lead\n---\n")
+	writeAgentFixture(t, filepath.Join(generated, "ghost.md"), "---\nname: ghost\n---\n")
+	var orphan *AgentsStatus
+	for _, status := range InspectRegistries(DoctorOptions{Config: &cfg, Home: home, SourceRepo: repo}) {
+		if status.State == AgentsOrphan {
+			orphan = &status
+		}
+	}
+	if orphan == nil || orphan.Level() != LevelFail || len(orphan.Names) != 1 || filepath.Base(orphan.Names[0]) != "ghost.md" {
+		t.Fatalf("orphan row = %#v, want one failing ORPHAN naming ghost.md", orphan)
 	}
 }

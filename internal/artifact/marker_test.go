@@ -38,9 +38,12 @@ func TestReviewOwnershipRequiresCompleteMarker(t *testing.T) {
 }
 
 func TestReviewReleasedVariantHeader(t *testing.T) {
-	header := "# " + LegacyVariant + "reader.md + retired-carrier — edit the source"
+	header := "# " + LegacyVariant + "reader.md + variants.json — edit the source"
 	if !Claims(header) {
 		t.Fatal("complete released variant ownership lost")
+	}
+	if Claims("# " + LegacyVariant + "reader.md + notes.txt — edit the source") {
+		t.Fatal("a legacy header the released writer never emitted is claimed")
 	}
 	if Claims("# " + LegacyVariant + "reader.md") {
 		t.Fatal("partial header claimed")

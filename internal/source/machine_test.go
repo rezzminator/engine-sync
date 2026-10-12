@@ -52,3 +52,31 @@ func TestMachineDeclarationsExcludeAbstracts(t *testing.T) {
 	}
 	t.Fatal("derived agent not rendered")
 }
+
+// TestMachineBrokenAbstractIsAProblemOnly: an abstract whose header does not
+// parse is named as a problem and never listed as a failed agent, since it
+// has no installed copy to keep.
+func TestMachineBrokenAbstractIsAProblemOnly(t *testing.T) {
+	root := testjail.Scratch(t)
+	for name, content := range map[string]string{
+		"layer.md":  "---\nname: layer\nabstract: true\nengines:\n\tcodex: false\n---\n",
+		"reader.md": "---\nname: reader\ndescription: Read.\n---\nRead files.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := LoadMachine(root, root, filepath.Join(root, "generated"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Problems) == 0 {
+		t.Fatal("broken abstract: no problem named")
+	}
+	if len(p.Failed) != 0 {
+		t.Fatalf("Failed = %q, want no failed agent for a broken abstract", p.Failed)
+	}
+	if !p.Declares {
+		t.Fatal("a broken abstract still marks the directory as declaring")
+	}
+}

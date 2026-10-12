@@ -121,7 +121,7 @@ func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
 		return []artifact.Root{{Path: filepath.Join(p.Home, ".config", openCodeName(), "command"), SourceRoots: []string{p.SourceCommandDir}}}
 	}
 	if p.Scope == claudesource.MachineScope {
-		sources := []string{p.AgentSourceDir, filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), p.Root}
+		sources := []string{p.AgentSourceDir, p.GeneratedDir, filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), p.Root}
 		return []artifact.Root{{Path: MachineAgentsDir(p.Home), SourceRoots: sources, InspectForeign: true}}
 	}
 	sources := []string{filepath.Join(p.Root, ".claude"), filepath.Join(p.Home, ".claude")}

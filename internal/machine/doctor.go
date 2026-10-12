@@ -34,6 +34,9 @@ const (
 	AgentsSymlink    AgentsState = "SYMLINK"
 	AgentsMismatch   AgentsState = "MISMATCH"
 	AgentsBroken     AgentsState = "BROKEN"
+	// AgentsOrphan: a rendered agent in the generated directory whose
+	// declaration source is gone.
+	AgentsOrphan AgentsState = AgentsState(reconciler.Orphan)
 )
 
 // The row levels.
@@ -105,6 +108,9 @@ func (status AgentsStatus) Describe() string {
 	case AgentsBroken:
 		return line + ` note="engine-sync global skips each named agent and keeps its installed copies"` +
 			` hint="fix the named sources"`
+	case AgentsOrphan:
+		return line + ` note="each named file was rendered from a declaration that no longer exists"` +
+			` hint="restore its declaration, or delete it (engine-sync global retires it)"`
 	default:
 		return line + ` hint="run engine-sync global"`
 	}
@@ -117,7 +123,7 @@ func (status AgentsStatus) Level() string {
 	switch status.State {
 	case AgentsLinked, AgentsInstalled, AgentsNoClaude:
 		return LevelOK
-	case AgentsMissing, AgentsUnreadable, AgentsSymlink, AgentsMismatch, AgentsBroken:
+	case AgentsMissing, AgentsUnreadable, AgentsSymlink, AgentsMismatch, AgentsBroken, AgentsOrphan:
 		return LevelFail
 	default:
 		return LevelWarn
@@ -235,12 +241,16 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 		dirs = []string{store}
 	}
 	agentsDir := source.AgentsDirectory(home, repo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: dirs})
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, repo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: dirs})
 	if err != nil {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
 	}
 	if len(model.Warnings) != 0 {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: strings.Join(model.Warnings, "; ")}}
+	}
+	orphans, err := generatedOrphans(model)
+	if err != nil {
+		return []AgentsStatus{{Dir: model.GeneratedDir, State: AgentsUnreadable, Error: err.Error()}}
 	}
 	// A broken agent is global's to skip, never the directory's to fail: it
 	// is one BROKEN row naming it, and every healthy agent is still inspected.
@@ -249,6 +259,9 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	var broken []AgentsStatus
 	if len(model.Problems) != 0 || len(model.Failed) != 0 {
 		broken = []AgentsStatus{{Dir: agentsDir, State: AgentsBroken, Names: model.Failed, Error: strings.Join(model.Problems, "; ")}}
+	}
+	if len(orphans) != 0 {
+		broken = append(broken, AgentsStatus{Dir: model.GeneratedDir, State: AgentsOrphan, Names: orphans})
 	}
 	var sources []string
 	for _, agent := range model.Agents {
@@ -261,7 +274,7 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	for _, dir := range dirs {
 		statuses = append(statuses, inspectStore(dir, paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), sources))
 	}
-	roles, err := CompileGlobalRoles(home, repo, cfg)
+	roles, err := CompileGlobalRoles(home, repo, dirs, cfg)
 	if err != nil {
 		return append(statuses, AgentsStatus{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()})
 	}
@@ -365,4 +378,35 @@ func inspectStore(store, repo string, sources []string) AgentsStatus {
 func isSymlink(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode()&os.ModeSymlink != 0
+}
+
+// generatedOrphans names each rendered file in the model's generated
+// directory that no declaration renders any more, a capability-skipped or
+// failed declaration still counting as declared. A directory that is absent
+// has none; one that cannot be read is an error, never an empty list.
+func generatedOrphans(model source.Project) ([]string, error) {
+	entries, err := os.ReadDir(model.GeneratedDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read generated agents %s: %w", model.GeneratedDir, err)
+	}
+	declared := map[string]bool{}
+	for _, agent := range model.Agents {
+		if agent.Generated {
+			declared[agent.Name] = true
+		}
+	}
+	for _, name := range model.Failed {
+		declared[name] = true
+	}
+	var orphans []string
+	for _, entry := range entries {
+		name, ok := strings.CutSuffix(entry.Name(), ".md")
+		if ok && !entry.IsDir() && !declared[name] {
+			orphans = append(orphans, filepath.Join(model.GeneratedDir, entry.Name()))
+		}
+	}
+	return orphans, nil
 }

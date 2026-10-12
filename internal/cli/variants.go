@@ -47,12 +47,12 @@ func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 	// waits, then re-reads the declaration the first one rewrote.
 	code, err = guarded(e, []string{machine.GlobalRoot(agentsDir)}, true, func() int {
 		changes, err := source.PinGlobalAgentVariants(agentsDir, names)
+		for _, change := range changes {
+			fmt.Fprintf(stdout, "pinned %s § %s %s\n", change.Variant, change.Heading, change.Pin)
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "engine-sync variants pin: %v\n", err)
 			return 1
-		}
-		for _, change := range changes {
-			fmt.Fprintf(stdout, "pinned %s § %s %s\n", change.Variant, change.Heading, change.Pin)
 		}
 		return 0
 	})

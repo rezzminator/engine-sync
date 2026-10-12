@@ -115,7 +115,12 @@ func readVariantsDecl(agentsDir, outputDir string, marker []string) (*variantsDe
 		}
 		name := strings.TrimSuffix(filepath.Base(path), ".md")
 		if err != nil {
-			d.failures[name] = errors.New(DescribeParseError(path, err))
+			// Only a declaration or abstract fails the render; an original
+			// that does not parse is its loader's problem, and a declaration
+			// built on it fails on the missing base.
+			if declarationLine.Match(raw) {
+				d.failures[name] = errors.New(DescribeParseError(path, err))
+			}
 			continue
 		}
 		if !machineControls(front) {

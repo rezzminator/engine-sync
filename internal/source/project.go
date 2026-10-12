@@ -47,10 +47,12 @@ type directory struct {
 	Unresolved         []Unresolved
 }
 type Project struct {
-	SourceHome                   string
-	SourceCommandDir             string
-	MachineCommands              bool
-	AgentSourceDir               string
+	SourceHome       string
+	SourceCommandDir string
+	MachineCommands  bool
+	AgentSourceDir   string
+	// GeneratedDir is where a machine project's declarations render.
+	GeneratedDir                 string
 	CodexHomes, ClaudeConfigDirs []string
 	Home                         string
 	Workbench                    bool
@@ -71,7 +73,14 @@ type Project struct {
 	Problems, Warnings           []string
 	// Failed names each machine agent skipped for an error: its installed
 	// copies are kept, never retired, until it builds again.
-	Failed      []string
+	Failed []string
+	// Excluded holds each rendered declaration skipped for an unmet
+	// requires: no link, no role, but its rendered file is still the
+	// declaration's output.
+	Excluded []Agent
+	// Declares reports a machine source directory holding at least one
+	// from: or abstract: source, parsed or not.
+	Declares    bool
 	documents   map[string]document
 	directories map[string]directory
 }

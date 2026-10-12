@@ -14,7 +14,11 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// writePins is atomicfile.Write; a variable so a test can refuse a write.
+var writePins = atomicfile.Write
+
 // PinGlobalAgentVariants rewrites only source pins blocks, through symlinks.
+// On a failed write it returns the pins already written with the error.
 func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, error) {
 	d, err := readVariantsDecl(agentsDir, agentsDir, nil)
 	if err != nil {
@@ -120,8 +124,9 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 		if err != nil || !bytes.Equal(current, e.raw) {
 			return nil, fmt.Errorf("%s changed while pinning (%v) — run variants pin again", e.path, err)
 		}
-		if err := atomicfile.Write(e.path, e.out, e.mode); err != nil {
-			return nil, err
+		if err := writePins(e.path, e.out, e.mode); err != nil {
+			// Files written before this one stay pinned: name them.
+			return changes, fmt.Errorf("write %s: %w", e.path, err)
 		}
 		changes = append(changes, e.changes...)
 	}

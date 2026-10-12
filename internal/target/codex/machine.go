@@ -24,8 +24,14 @@ func machineRoots(p source.Project, cfg config.Config) []artifact.Root {
 		}
 		return roots
 	}
-	roots = append(roots, artifact.Root{Path: filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), Boundary: p.Home, Suffix: ".md", SourceRoots: []string{p.AgentSourceDir}})
-	sources := []string{p.AgentSourceDir, filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), filepath.Join(p.Home, cfg.Machine.LegacyCodexAgentsDir), p.Root}
+	// A generated directory inside the source repository is bounded there,
+	// the home store by home.
+	boundary := p.Home
+	if rel, err := filepath.Rel(p.Home, p.GeneratedDir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		boundary = filepath.Dir(p.GeneratedDir)
+	}
+	roots = append(roots, artifact.Root{Path: p.GeneratedDir, Boundary: boundary, Suffix: ".md", SourceRoots: []string{p.AgentSourceDir}})
+	sources := []string{p.AgentSourceDir, p.GeneratedDir, filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), filepath.Join(p.Home, cfg.Machine.LegacyCodexAgentsDir), p.Root}
 	for _, home := range p.CodexHomes {
 		roots = append(roots, artifact.Root{Path: filepath.Join(home, "agents"), SourceRoots: sources, InspectForeign: true})
 		roots = append(roots, artifact.Root{Path: filepath.Join(home, "config.toml"), ValidateOnly: true})
@@ -109,7 +115,15 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 		for _, home := range p.CodexHomes {
 			outputs = append(outputs, artifact.Artifact{Path: filepath.Join(home, "agents", name+".toml"), Kept: &artifact.SourceLink{Path: name}})
 		}
-		outputs = append(outputs, artifact.Artifact{Path: filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
+		outputs = append(outputs, artifact.Artifact{Path: filepath.Join(p.GeneratedDir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
+	}
+	// A generated directory inside the source repository holds every
+	// declaration's render, capability or not: only links and roles are
+	// gated, so the repository copy never depends on the host.
+	if cfg.Machine.SourceGeneratedAgentsDir != "" {
+		for _, a := range p.Excluded {
+			outputs = append(outputs, artifact.Artifact{Path: a.Path, Content: a.Raw, Source: filepath.Join(p.AgentSourceDir, a.Name+".md"), Syntax: artifact.YAMLFront})
+		}
 	}
 	for _, a := range p.Agents {
 		problems, warnings := source.ValidateAgent(a.Path, a.Front, cfg.Agents.PassthroughKeys, a.Generated)

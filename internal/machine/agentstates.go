@@ -97,7 +97,7 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
 	}
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 	if err != nil {
 		return nil, fmt.Errorf("load machine agents from %s: %w", agentsDir, err)
 	}
@@ -309,9 +309,9 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 // source and every rendered agent must parse,
 // validate and compile, and each agent whose requires the capabilities do
 // not meet is a SKIPPED warning. Each agent global would skip as broken is a
-// problem with global's message: both run skipBrokenAgents. A project without
-// any declarations has nothing to render. A failed render is a problem,
-// never an absent agent.
+// problem with global's message: both run skipBrokenAgents. A project whose
+// directory holds no from: or abstract: source has nothing to render and
+// reports nothing. A failed render is a problem, never an absent agent.
 func CheckSourceVariants(root, home string, cfg config.Config) (problems, warnings []string) {
 	// Resolve the project root before joining its configured agents directory.
 	absRoot, err := filepath.Abs(root)
@@ -319,9 +319,22 @@ func CheckSourceVariants(root, home string, cfg config.Config) (problems, warnin
 		return []string{fmt.Sprintf("resolve project root %q: %v", root, err)}, nil
 	}
 	agentsDir := filepath.Join(absRoot, filepath.FromSlash(cfg.Machine.SourceAgentsDir))
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: []string{cfg.ClaudeConfigDir}})
+	// The roster global installs into: a source inside any of its agents
+	// directories is the collision global names.
+	claudeConfigDirs := []string{cfg.ClaudeConfigDir}
+	targets, found, err := config.LoadTargets(paths.Getenv, home)
 	if err != nil {
 		return []string{err.Error()}, nil
+	}
+	if found && len(targets.ClaudeConfigDirs) != 0 {
+		claudeConfigDirs = targets.ClaudeConfigDirs
+	}
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, absRoot, cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
+	if err != nil {
+		return []string{err.Error()}, nil
+	}
+	if !model.Declares {
+		return nil, nil
 	}
 	problems = append(problems, model.Problems...)
 	for _, agent := range model.Agents {

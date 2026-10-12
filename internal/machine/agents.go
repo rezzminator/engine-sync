@@ -160,7 +160,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	// same fail-loud order the host script used.
 	model := options.Source
 	if model == nil {
-		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
+		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 		if e != nil {
 			return GlobalAgentsResult{}, e
 		}
@@ -367,9 +367,12 @@ type compiledAgent struct {
 // rendered declarations — that global installs: an agent whose
 // requires is unmet or that skipBrokenAgents skips is left out, as global
 // leaves it out, and the caller names those (InspectRegistries' BROKEN row).
-func compileGlobalAgents(home, sourceRepo string, cfg *config.Config) ([]compiledAgent, error) {
+func compileGlobalAgents(home, sourceRepo string, cfg *config.Config, claudeConfigDirs []string) ([]compiledAgent, error) {
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: []string{cfg.ClaudeConfigDir}})
+	if len(claudeConfigDirs) == 0 {
+		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
+	}
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +425,10 @@ type GlobalRole struct {
 
 // CompileGlobalRoles is the read-only half of RunGlobalAgents' compile phase,
 // for callers that need the desired bytes without installing anything.
-func CompileGlobalRoles(home, sourceRepo string, policies ...*config.Config) ([]GlobalRole, error) {
+// claudeConfigDirs is the Claude roster global installs into, so a source
+// directory inside any of them is the same named collision global reports;
+// empty means the policy's one config dir.
+func CompileGlobalRoles(home, sourceRepo string, claudeConfigDirs []string, policies ...*config.Config) ([]GlobalRole, error) {
 	resolvedHome, err := resolveMachineHome(home)
 	if err != nil {
 		return nil, err
@@ -438,7 +444,7 @@ func CompileGlobalRoles(home, sourceRepo string, policies ...*config.Config) ([]
 		}
 		cfg = &resolved
 	}
-	compiled, err := compileGlobalAgents(resolvedHome, sourceRepo, cfg)
+	compiled, err := compileGlobalAgents(resolvedHome, sourceRepo, cfg, claudeConfigDirs)
 	if err != nil {
 		return nil, err
 	}
@@ -478,6 +484,9 @@ func filterMachineAgents(model source.Project, capabilities []string) (source.Pr
 	for _, agent := range model.Agents {
 		if unmet := source.Unmet(agent.Front.Requires, capabilities); unmet != "" {
 			skipped = append(skipped, source.Skipped(agentName(agent), unmet))
+			if agent.Generated {
+				model.Excluded = append(model.Excluded, agent)
+			}
 			continue
 		}
 		agents = append(agents, agent)

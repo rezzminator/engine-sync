@@ -89,6 +89,9 @@ type Machine struct {
 	Rewrites             []Rewrite `json:"rewrites"`
 	CodexHomes           []string  `json:"codexHomes"`
 	GeneratedAgentsDir   string    `json:"generatedAgentsDir"`
+	// SourceGeneratedAgentsDir, when set, renders declarations into this
+	// directory of the source repository instead of the home store.
+	SourceGeneratedAgentsDir string `json:"sourceGeneratedAgentsDir"`
 }
 
 type MachineFile struct {
@@ -364,6 +367,11 @@ func Validate(cfg Config) error {
 	}
 	for key, value := range map[string]string{"machine.generatedAgentsDir": cfg.Machine.GeneratedAgentsDir, "machine.legacyCodexAgentsDir": cfg.Machine.LegacyCodexAgentsDir} {
 		if err := RelativePath(value, key); err != nil {
+			return err
+		}
+	}
+	if cfg.Machine.SourceGeneratedAgentsDir != "" {
+		if err := RelativePath(cfg.Machine.SourceGeneratedAgentsDir, "machine.sourceGeneratedAgentsDir"); err != nil {
 			return err
 		}
 	}

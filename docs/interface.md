@@ -17,7 +17,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 
 ## Binary and exits
 
-Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.3.0-alpha.2` for development, the plugin manifest version for release assets.
+Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.3.0-alpha.3` for development, the plugin manifest version for release assets.
 
 Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error. Hooks preserve the hook protocol described below. `--json` prints exactly one stdout object for exits 0 and 1; usage errors print no JSON. Legacy-config deprecation notices go to stderr even with `--json`.
 
@@ -64,7 +64,7 @@ Project commands also accept `--engine codex|opencode`; the neutral selection ru
 
 One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `{engine-sync config}/config.json` < `{root}/.claude/engine-sync.json` < environment < flags. Maps merge by key, lists replace, and scalars replace. In `opencode.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine`.
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.2`; released assets report the plugin manifest version.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.3.0-alpha.3`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .
@@ -110,6 +110,7 @@ engine-sync config schema
 | `machine.rewrites` | `[]` | Ordered rules applied at machine scope. |
 | `machine.codexHomes` | `[]` | Unconfigured: environment/default Codex home; configured empty list: no homes. |
 | `machine.generatedAgentsDir` | `".local/state/engine-sync/generated/claude-agents"` | Home-relative generated variant store; separate from source agents. |
+| `machine.sourceGeneratedAgentsDir` | `""` | Source-repository-relative directory declarations render into instead of `machine.generatedAgentsDir`, so the rendered agents live beside their sources; empty keeps the home store. `--uninstall` never removes it. |
 
 Removed keys: `machine.modelMap` (use `codex.modelMap`) and `opencode.agent` (use each agent's `engines.opencode.permission`). A configuration carrying either fails to load, naming its replacement.
 
@@ -201,7 +202,7 @@ Each real `## Heading` in the source body overrides the base's same-named sectio
 
 Later layers win section and rename keys. `rename` replaces whole-name occurrences in the body, simultaneously over the original body (`{a: b, b: c}` turns `a` into `b` and `b` into `c`); an unused key is `RENAME-UNUSED {name}: {key} matched 0 times`. `prepend` and `append` concatenate in layer order and join only nonempty parts with two newlines.
 
-The rendered Claude file is written into `machine.generatedAgentsDir` and linked. Its marker credits the declaration file. Codex and OpenCode follow its rendered `engines`, and `requires` decides installation. `check` validates sources and rendered declarations in the configured source directory. Project `.claude/agents/*.md` files with `from:` or `abstract:` are named problems: Claude Code would load them raw, so these controls are machine scope only.
+The rendered Claude file is written into `machine.sourceGeneratedAgentsDir` of the source repository when set, else into `machine.generatedAgentsDir`, and linked. When the source-repository directory is set, `global` retires every owned file left in the home store. `doctor --machine` names each rendered file whose declaration is gone in a failing `ORPHAN` row. Its marker credits the declaration file. Codex and OpenCode follow its rendered `engines`, and `requires` decides installation. `check` validates sources and rendered declarations in the configured source directory. Project `.claude/agents/*.md` files with `from:` or `abstract:` are named problems: Claude Code would load them raw, so these controls are machine scope only.
 
 `global` skips each broken source and installs healthy agents, exiting 1. A malformed header is `FRONTMATTER-INVALID`; invalid declarations and rendering failures are named by their own errors. An agent skipped for an error keeps its installed copies; only unmet `requires` retires one.
 

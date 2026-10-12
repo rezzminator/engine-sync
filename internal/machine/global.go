@@ -208,6 +208,13 @@ func (r *run) wireAgents() error {
 	if err := r.retireOrphanGlobalAgents(*plan.Source); err != nil {
 		return err
 	}
+	// Declarations that now render into the source repository leave nothing
+	// owned in the home store they rendered into before.
+	if store := filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir); r.policy.Machine.SourceGeneratedAgentsDir != "" && filepath.Clean(store) != filepath.Clean(plan.Source.GeneratedDir) {
+		if err := r.retireOwnedEntries(store, "generated agents now render into "+plan.Source.GeneratedDir); err != nil {
+			return err
+		}
+	}
 	if r.options.Plan {
 		return nil
 	}
@@ -286,7 +293,7 @@ func (r *run) retireCodexRoles(registry, generated, legacyDir string, keep map[s
 // to a rendered variant no longer declared, then every rendered variant
 // source nothing declares.
 func (r *run) retireOrphanGlobalAgents(model source.Project) error {
-	generatedDir := filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir)
+	generatedDir := model.GeneratedDir
 	keep := make(map[string]bool, len(model.Agents))
 	for _, agent := range model.Agents {
 		if within(agent.Path, generatedDir) {
@@ -428,6 +435,8 @@ func (r *run) unwireGeneratedAgents() error {
 		}
 	}
 
+	// A generated directory inside the source repository is the repository's;
+	// uninstall removes only the home store.
 	if err := r.removeDir(filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir), "generated Claude agents directory"); err != nil {
 		return err
 	}
