@@ -14,7 +14,7 @@ type Targets = config.Targets
 
 func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 	flags := NewFlagSet("global", "usage: engine-sync global [--home H] [--source-repo R] [--claude-config-dir C]... "+
-		"[--codex-home X]... [--no-codex-home] [--source-home S] [--plan] [--uninstall] [--json]", stderr)
+		"[--codex-home X]... [--no-codex-home] [--source-home S] [--plan] [--uninstall] [--gpt-agents] [--json]", stderr)
 	home := flags.String("home", "", "the home every default is anchored on")
 	sourceRepo := flags.String("source-repo", "", "the source repository (default Claude config dir agents)")
 	var claudeDirs, codexHomes repeatString
@@ -24,6 +24,7 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 	sourceHome := flags.String("source-home", "", "the home whose .claude/commands the global commands compile from")
 	plan := flags.Bool("plan", false, "write nothing; list what an apply would do")
 	uninstall := flags.Bool("uninstall", false, "retire every generated role and managed command")
+	gptAgents := flags.Bool("gpt-agents", false, "include provider-specific GPT agents")
 	asJSON := flags.Bool("json", false, "print one JSON object")
 	positionals, code, ok := ParseFlagsAnywhere(flags, args)
 	if !ok {
@@ -39,6 +40,7 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 	}
 	if err == nil {
 		options.Plan, options.Uninstall = *plan, *uninstall
+		options.GptAgents = *gptAgents
 		if options.CodexHomes == nil && options.Config.Sources["machine.codexHomes"] != "default" {
 			options.CodexHomes = options.Config.Machine.CodexHomes
 		}

@@ -103,7 +103,7 @@ func CodexUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --suffix-mode MODE [--suffix-prefix TEXT]")
 	fmt.Fprintln(w, "  --json                    one JSON result object on stdout")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "usage: engine-sync codex agents [--home PATH] [--source-repo PATH]")
+	fmt.Fprintln(w, "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--gpt-agents]")
 	fmt.Fprintln(w, "  compiles every {Claude config dir}/agents/*.md, symlinks")
 	fmt.Fprintln(w, "  {home}/.claude/agents to the .md sources, and writes {home}/.codex/agents/*.toml as")
 	fmt.Fprintln(w, "  regular files — Codex refuses to load a role through a symlink.")

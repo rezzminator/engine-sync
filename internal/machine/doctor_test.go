@@ -1,8 +1,10 @@
 package machine
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +73,27 @@ func TestMachineDoctorRows(t *testing.T) {
 				t.Fatalf("rows\n got %#v\nwant %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestMachineDoctorReportsDanglingSources(t *testing.T) {
+	home, repo := fixture(t)
+	path := filepath.Join(repo, "agents", "broken.md")
+	if err := os.Symlink(filepath.Join(repo, "missing.md"), path); err != nil {
+		t.Fatal(err)
+	}
+	statuses := InspectRegistries(DoctorOptions{Home: home, SourceRepo: repo})
+	if len(statuses) != 1 || statuses[0].State != AgentsUnreadable || !strings.Contains(statuses[0].Error, path) {
+		t.Fatalf("dangling source rendered absent: %+v", statuses)
+	}
+	rows := Doctor(DoctorOptions{Home: home, SourceRepo: repo})
+	found := false
+	for _, row := range rows {
+		if row.Level == LevelFail && strings.Contains(row.Message, path) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("doctor omitted source failure: %+v", rows)
 	}
 }

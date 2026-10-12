@@ -2,6 +2,7 @@ package machine
 
 import (
 	"errors"
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
@@ -312,5 +313,148 @@ func TestUninstallWithAnEmptyRosterRetiresTheCommandMirror(t *testing.T) {
 	}
 	if left := mirrored(); len(left) != 0 {
 		t.Fatalf("the managed command mirror survived uninstall: %q (events %#v)", left, report.Events)
+	}
+}
+
+func TestGptMachineAgentsOptInAndRetireOwnedOnly(t *testing.T) {
+	home, repo := fixture(t)
+	for i := range 8 {
+		name := fmt.Sprintf("gpt-role-%d", i)
+		writeMachineFixture(t, filepath.Join(repo, "agents", name+".md"), "---\nname: "+name+"\ndescription: Routed role.\nmodel: gpt-6.1-sol\neffort: high\n---\n\nRouted role.\n")
+	}
+	options := Options{Home: home, SourceRepo: repo}
+	report := RunMachine(options)
+	if report.Err != nil || !report.OK {
+		t.Fatalf("default install: %+v", report)
+	}
+	target := filepath.Join(home, ".claude", "agents", "gpt-role-0.md")
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Errorf("default installed GPT role: %v", err)
+	}
+	options.GptAgents = true
+	report = RunMachine(options)
+	if report.Err != nil || !report.OK {
+		t.Fatalf("opt-in install: %+v", report)
+	}
+	for i := range 8 {
+		name := fmt.Sprintf("gpt-role-%d", i)
+		if _, err := os.Readlink(filepath.Join(home, ".claude", "agents", name+".md")); err != nil {
+			t.Fatal(err)
+		}
+		if info, err := os.Lstat(filepath.Join(home, ".codex", "agents", name+".toml")); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("Codex GPT role=%v %v", info, err)
+		}
+	}
+	operator := filepath.Join(home, ".codex", "agents", "gpt-role-0.toml")
+	writeMachineFixture(t, operator, `name = "operator"`)
+	options.GptAgents = false
+	report = RunMachine(options)
+	if report.Err != nil || !report.OK {
+		t.Fatalf("opt-out install: %+v", report)
+	}
+	if body, err := os.ReadFile(operator); err != nil || string(body) != `name = "operator"` {
+		t.Fatalf("operator role changed: %q %v", body, err)
+	}
+	for i := range 8 {
+		name := fmt.Sprintf("gpt-role-%d", i)
+		if _, err := os.Lstat(filepath.Join(home, ".claude", "agents", name+".md")); !os.IsNotExist(err) {
+			t.Errorf("disabled Claude GPT role remains: %v", err)
+		}
+		if i > 0 {
+			if _, err := os.Lstat(filepath.Join(home, ".codex", "agents", name+".toml")); !os.IsNotExist(err) {
+				t.Errorf("disabled Codex GPT role remains: %v", err)
+			}
+		}
+	}
+	for _, row := range Doctor(DoctorOptions{Home: home, SourceRepo: repo}) {
+		if strings.Contains(row.Message, "gpt-role") {
+			t.Errorf("disabled doctor expects GPT role: %+v", row)
+		}
+	}
+}
+
+func TestGptOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
+	for _, door := range []string{"plan", "global", "agents"} {
+		t.Run(door, func(t *testing.T) {
+			home, repo := fixture(t)
+			for _, stem := range []string{"routed", "operator", "foreign"} {
+				name := stem
+				if stem == "routed" {
+					name = "routed-v2"
+				}
+				writeMachineFixture(t, filepath.Join(repo, "agents", stem+".md"), "---\nname: "+name+"\ndescription: Routed.\nmodel: gpt-6.1-sol\neffort: medium\n---\nRouted.\n")
+			}
+			writeMachineFixture(t, filepath.Join(repo, "agents", source.GlobalAgentVariantsFile), `{"gamma-deep":{"from":"gamma","effort":"high"},"routed-deep":{"from":"routed","effort":"high"}}`)
+			options := Options{Home: home, SourceRepo: repo, GptAgents: true}
+			if report := RunMachine(options); report.Err != nil || !report.OK {
+				t.Fatalf("opt-in: %+v", report)
+			}
+			for _, stem := range []string{"routed", "routed-deep"} {
+				if _, err := os.Readlink(filepath.Join(home, ".claude", "agents", stem+".md")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			operator := filepath.Join(home, ".claude", "agents", "operator.md")
+			foreign := filepath.Join(home, ".claude", "agents", "foreign.md")
+			for _, path := range []string{operator, foreign} {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeMachineFixture(t, operator, "operator body")
+			if err := os.Symlink(operator, foreign); err != nil {
+				t.Fatal(err)
+			}
+			options.GptAgents = false
+			if door == "plan" {
+				options.Plan = true
+				report := RunMachine(options)
+				if report.Err != nil || !report.OK {
+					t.Fatalf("plan: %+v", report)
+				}
+				planPaths := []string{
+					filepath.Join(home, ".codex", "agents", "routed-v2.toml"),
+					filepath.Join(home, ".codex", "agents", "routed-deep.toml"),
+					filepath.Join(home, ".claude", "agents", "routed-deep.md"),
+					filepath.Join(home, paths.ClaudeVariantStore, "routed-deep.md"),
+				}
+				for _, path := range planPaths {
+					count := 0
+					for _, event := range report.Events {
+						if strings.Contains(event.Message, path) {
+							count++
+							if strings.Contains(event.Message, "no longer declared") || strings.Contains(event.Message, "undeclared generated") {
+								t.Errorf("opt-out has false missing-declaration reason: %s", event.Message)
+							}
+						}
+					}
+					if count != 1 {
+						t.Errorf("plan reports %s %d times, want once", path, count)
+					}
+				}
+				return
+			}
+			if door == "global" {
+				if report := RunMachine(options); report.Err != nil || !report.OK {
+					t.Fatalf("opt-out: %+v", report)
+				}
+			} else {
+				if result, err := RunGlobalAgents(GlobalAgentsOptions{Home: home, SourceRepo: repo}); err != nil || len(result.Problems) > 0 {
+					t.Fatalf("agents opt-out: %+v %v", result, err)
+				}
+			}
+			for _, stem := range []string{"routed", "routed-deep"} {
+				path := filepath.Join(home, ".claude", "agents", stem+".md")
+				if _, err := os.Lstat(path); !os.IsNotExist(err) {
+					t.Errorf("owned excluded Claude link remains at %s: %v", path, err)
+				}
+			}
+			if body, err := os.ReadFile(operator); err != nil || string(body) != "operator body" {
+				t.Errorf("operator changed: %q %v", body, err)
+			}
+			if target, err := os.Readlink(foreign); err != nil || target != operator {
+				t.Errorf("foreign link changed: %q %v", target, err)
+			}
+		})
 	}
 }

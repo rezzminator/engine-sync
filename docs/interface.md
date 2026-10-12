@@ -145,12 +145,14 @@ Generated file markers and rebuild hints name `engine-sync build`. MCP regions r
 
 ## Global commands
 
+`--gpt-agents` defaults false for all three machine commands. Only true includes agents whose model starts with `gpt-`; callers carry the same opt-in to install, direct role compilation and machine doctor. With the flag off, reconciliation retires only owned excluded artifacts and preserves operator entries.
+
 ```text
 engine-sync global [--home H] [--source-repo R] [--claude-config-dir C]… [--codex-home X]…
-                   [--no-codex-home] [--source-home S] [--plan] [--uninstall] [--json]
-engine-sync codex agents [--home H] [--source-repo R]
+                   [--no-codex-home] [--source-home S] [--plan] [--uninstall] [--gpt-agents] [--json]
+engine-sync codex agents [--home H] [--source-repo R] [--gpt-agents]
 engine-sync doctor --machine [--home H] [--source-repo R] [--claude-config-dir C]
-                            [--codex-home X]… [--claude-absent] [--json]
+                            [--codex-home X]… [--claude-absent] [--gpt-agents] [--json]
 ```
 
 Global role sources default to `machine.claudeAgentsDir`, whose neutral value is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/` for all three commands. Explicit `--source-repo R` selects `R/{machine.sourceAgentsDir}/`; targets may select the repository for `global` and machine doctor. Global commands resolve only the machine policy file; a source repository supplies templates, never project policy. `--home` defaults to `$HOME`.

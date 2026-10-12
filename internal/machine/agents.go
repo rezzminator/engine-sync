@@ -21,9 +21,10 @@ import (
 // configured Codex home — there as a REGULAR FILE holding the compiled TOML,
 // because Codex refuses to load a role through a symlink (globalrole.go).
 type GlobalAgentsOptions struct {
-	Source *source.Project
-	Config *config.Config
-	Home   string
+	GptAgents bool
+	Source    *source.Project
+	Config    *config.Config
+	Home      string
 	// SourceRepo selects machine.sourceAgentsDir inside a repository. Empty
 	// uses the Claude config directory's agents registry as its source.
 	SourceRepo string
@@ -160,6 +161,9 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		}
 		model = &loaded
 	}
+	unfiltered := *model
+	filtered := filterMachineAgents(*model, options.GptAgents)
+	model = &filtered
 	compiledAgents, err := compileMachineAgents(*model, cfg)
 	if err != nil {
 		return GlobalAgentsResult{}, err
@@ -196,7 +200,8 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		target  string
 		content []byte
 	}
-	result := GlobalAgentsResult{Source: model}
+	// Preserve declarations for the orphan sweep and the next build pass.
+	result := GlobalAgentsResult{Source: &unfiltered}
 	links := make([]desiredLink, 0, len(compiledAgents)*len(claudeConfigDirs))
 	roles := make([]desiredRole, 0, len(compiledAgents)*len(codexHomes))
 	for _, agent := range compiledAgents {
@@ -292,9 +297,24 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	if options.Mode == ModeCheck {
 		mode = reconciler.Plan
 	}
+
+	cleanup := run{options: Options{Home: home, SourceRepo: sourceRepo, ClaudeConfigDirs: claudeConfigDirs, CodexHomes: codexHomes, Plan: options.Mode == ModeCheck}, policy: *cfg}
+	if !options.GptAgents {
+		if err := cleanup.retireExcludedMachineAgents(unfiltered); err != nil {
+			return GlobalAgentsResult{}, fmt.Errorf("retire excluded Claude agents: %w", err)
+		}
+	}
 	applied, _ := engine.Execute(*model, *cfg, mode, target.Render, target.Roots, target.Validate)
 	result.Warnings = applied.Warnings
 	result.Actions = nil
+	for _, event := range cleanup.report.Events {
+		if event.Verb == VerbRetire {
+			result.Actions = append(result.Actions, GlobalAgentAction{Kind: "delete", Path: event.Path})
+		}
+		if event.Verb == VerbSkip {
+			result.Warnings = append(result.Warnings, event.Message)
+		}
+	}
 	for _, a := range applied.Actions {
 		result.Actions = append(result.Actions, GlobalAgentAction{Kind: a.Kind, Path: a.Path, Target: a.Target})
 	}
@@ -334,13 +354,13 @@ type compiledAgent struct {
 // before any caller touches disk. An emitter that ships an unparseable
 // artifact has done nothing useful, so this returns an error rather than a
 // partial roster.
-func compileGlobalAgents(home, sourceRepo string, cfg *config.Config) ([]compiledAgent, error) {
+func compileGlobalAgents(home, sourceRepo string, cfg *config.Config, gptAgents bool) ([]compiledAgent, error) {
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
 	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
 	if err != nil {
 		return nil, err
 	}
-	return compileMachineAgents(model, cfg)
+	return compileMachineAgents(filterMachineAgents(model, gptAgents), cfg)
 }
 func compileMachineAgents(model source.Project, cfg *config.Config) ([]compiledAgent, error) {
 	agentsDir := model.AgentSourceDir
@@ -382,7 +402,7 @@ type GlobalRole struct {
 
 // CompileGlobalRoles is the read-only half of RunGlobalAgents' compile phase,
 // for callers that need the desired bytes without installing anything.
-func CompileGlobalRoles(home, sourceRepo string, policies ...*config.Config) ([]GlobalRole, error) {
+func CompileGlobalRoles(home, sourceRepo string, gptAgents bool, policies ...*config.Config) ([]GlobalRole, error) {
 	resolvedHome, err := resolveMachineHome(home)
 	if err != nil {
 		return nil, err
@@ -398,7 +418,7 @@ func CompileGlobalRoles(home, sourceRepo string, policies ...*config.Config) ([]
 		}
 		cfg = &resolved
 	}
-	compiled, err := compileGlobalAgents(resolvedHome, sourceRepo, cfg)
+	compiled, err := compileGlobalAgents(resolvedHome, sourceRepo, cfg, gptAgents)
 	if err != nil {
 		return nil, err
 	}
@@ -425,4 +445,20 @@ func sameGlobalAgentFile(path string, content []byte) (bool, error) {
 		return false, fmt.Errorf("read global agent artifact %s: %w", path, err)
 	}
 	return string(raw) == string(content), nil
+}
+
+// machineAgentEnabled gates provider-specific GPT roles independently of their names.
+func machineAgentEnabled(agent source.Agent, gptAgents bool) bool {
+	return gptAgents || !strings.HasPrefix(strings.ToLower(agent.Front.Fields["model"]), "gpt-")
+}
+
+func filterMachineAgents(model source.Project, gptAgents bool) source.Project {
+	agents := make([]source.Agent, 0, len(model.Agents))
+	for _, agent := range model.Agents {
+		if machineAgentEnabled(agent, gptAgents) {
+			agents = append(agents, agent)
+		}
+	}
+	model.Agents = agents
+	return model
 }

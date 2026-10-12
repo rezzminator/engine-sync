@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/rezzminator/engine-sync/internal/config"
@@ -65,6 +64,7 @@ type Row struct {
 // SourceRepo is the no-clone state, the clone a first install would use being
 // {Home}/.claude.
 type DoctorOptions struct {
+	GptAgents        bool
 	Config           *config.Config
 	Home             string
 	SourceRepo       string
@@ -129,7 +129,7 @@ func Doctor(options DoctorOptions) []Row {
 		rows = append(rows, Row{Level: status.Level(), Message: "global-agents " + status.Describe()})
 	}
 	if !options.ClaudeAbsent {
-		plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, Plan: true})
+		plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, GptAgents: options.GptAgents, Plan: true})
 		for _, event := range plan.Events {
 			if event.Verb == VerbChange || event.Verb == VerbRetire || event.Verb == VerbConflict {
 				rows = append(rows, Row{Level: LevelFail, Message: event.Message})
@@ -178,26 +178,20 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 		return []AgentsStatus{{Dir: config.MachinePath(home, paths.Getenv), State: AgentsUnreadable, Error: configErr.Error()}}
 	}
 	agentsDir := source.AgentsDirectory(home, repo, *cfg)
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
-	}
-	var sources []string
-	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".md") && !strings.EqualFold(entry.Name(), "README.md") {
-			sources = append(sources, filepath.Join(agentsDir, entry.Name()))
-		}
-	}
-	if len(sources) == 0 {
-		return []AgentsStatus{{Dir: agentsDir, State: AgentsNoSources}}
-	}
-	sort.Strings(sources)
-	variants, err := source.LoadGlobalAgentVariants(agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
+	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
 	if err != nil {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
 	}
-	for _, variant := range variants {
-		sources = append(sources, variant.Path)
+	if len(model.Warnings) != 0 {
+		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: strings.Join(model.Warnings, "; ")}}
+	}
+	model = filterMachineAgents(model, options.GptAgents)
+	var sources []string
+	for _, agent := range model.Agents {
+		sources = append(sources, agent.Path)
+	}
+	if len(sources) == 0 {
+		return []AgentsStatus{{Dir: agentsDir, State: AgentsNoSources}}
 	}
 	dirs := options.ClaudeConfigDirs
 	if len(dirs) == 0 {
@@ -207,7 +201,7 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	for _, dir := range dirs {
 		statuses = append(statuses, inspectStore(dir, paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), sources))
 	}
-	roles, err := CompileGlobalRoles(home, repo, cfg)
+	roles, err := CompileGlobalRoles(home, repo, options.GptAgents, cfg)
 	if err != nil {
 		return append(statuses, AgentsStatus{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()})
 	}

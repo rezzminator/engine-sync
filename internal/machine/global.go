@@ -37,6 +37,7 @@ type Event struct {
 // Options select the homes and the source clone. A nil CodexHomes means
 // {Home}/.codex alone; a non-nil empty one means no Codex home at all.
 type Options struct {
+	GptAgents        bool
 	Config           *config.Config
 	Home             string
 	SourceRepo       string
@@ -179,6 +180,7 @@ func (r *run) wireAgents() error {
 		ClaudeConfigDirs: r.claudeConfigDirs(),
 		CodexHomes:       r.codexHomes(),
 		Mode:             ModeCheck,
+		GptAgents:        r.options.GptAgents,
 	}
 	plan, err := RunGlobalAgents(agents)
 	if err != nil {
@@ -200,7 +202,7 @@ func (r *run) wireAgents() error {
 		r.add(VerbConflict, problem, "")
 	}
 
-	if err := r.retireOrphanGlobalAgents(plan.Installed); err != nil {
+	if err := r.retireOrphanGlobalAgents(*plan.Source); err != nil {
 		return err
 	}
 	if r.options.Plan {
@@ -280,12 +282,12 @@ func (r *run) retireCodexRoles(registry, generated, legacyDir string, keep map[s
 // retireOrphanGlobalAgents retires, in every Claude agents registry, a link
 // to a rendered variant no longer declared, then every rendered variant
 // source nothing declares.
-func (r *run) retireOrphanGlobalAgents(installed []GlobalAgentInstalled) error {
+func (r *run) retireOrphanGlobalAgents(model source.Project) error {
 	generatedDir := filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir)
-	keep := make(map[string]bool, len(installed))
-	for _, entry := range installed {
-		if within(entry.Source, generatedDir) {
-			keep[filepath.Base(entry.Source)] = true
+	keep := make(map[string]bool, len(model.Agents))
+	for _, agent := range model.Agents {
+		if within(agent.Path, generatedDir) {
+			keep[filepath.Base(agent.Path)] = true
 		}
 	}
 	for _, config := range r.claudeConfigDirs() {
@@ -464,4 +466,41 @@ func (r *run) retirementBoundary(path string) string {
 		}
 	}
 	return filepath.Dir(path)
+}
+
+// retireExcludedMachineAgents removes only exact receipt-owned excluded Claude links.
+func (r *run) retireExcludedMachineAgents(model source.Project) error {
+	for _, agent := range model.Agents {
+		if machineAgentEnabled(agent, false) {
+			continue
+		}
+		for _, dir := range r.claudeConfigDirs() {
+			path := filepath.Join(dir, "agents", filepath.Base(agent.Path))
+			info, err := os.Lstat(path)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("inspect excluded agent %s: %w", path, err)
+			}
+			if info.Mode()&os.ModeSymlink == 0 {
+				r.skip("preserve operator agent " + path)
+				continue
+			}
+			target, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("read excluded agent %s: %w", path, err)
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			if filepath.Clean(target) == filepath.Clean(agent.Path) {
+				if err := r.retire(path, "provider-specific agent disabled"); err != nil {
+					return err
+				}
+			}
+		}
+
+	}
+	return nil
 }

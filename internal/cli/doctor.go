@@ -11,7 +11,7 @@ import (
 
 func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	flags := NewFlagSet("doctor --machine", "usage: engine-sync doctor --machine [--home H] [--source-repo R] "+
-		"[--claude-config-dir C] [--codex-home X]... [--claude-absent] [--json]", stderr)
+		"[--claude-config-dir C] [--codex-home X]... [--claude-absent] [--gpt-agents] [--json]", stderr)
 	flags.Bool("machine", true, "the machine rows")
 	home := flags.String("home", "", "the home whose registries are classified")
 	sourceRepo := flags.String("source-repo", "", "the source clone; absent is the no-clone state")
@@ -19,6 +19,7 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	var codexHomes repeatString
 	flags.Var(&codexHomes, "codex-home", "a Codex home; repeatable")
 	claudeAbsent := flags.Bool("claude-absent", false, "no Claude Code binary is installed")
+	gptAgents := flags.Bool("gpt-agents", false, "include provider-specific GPT agents")
 	asJSON := flags.Bool("json", false, "print one JSON object")
 	positionals, code, ok := ParseFlagsAnywhere(flags, args)
 	if !ok {
@@ -58,7 +59,7 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	}
 	var rows []machine.Row
 	_, guardErr := guarded(e, optionGuardRoots(options), false, func() int {
-		rows = machine.Doctor(machine.DoctorOptions{Config: policy, Home: resolvedHome, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, ClaudeAbsent: *claudeAbsent})
+		rows = machine.Doctor(machine.DoctorOptions{Config: policy, Home: resolvedHome, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, ClaudeAbsent: *claudeAbsent, GptAgents: *gptAgents})
 		return 0
 	})
 	if guardErr != nil {

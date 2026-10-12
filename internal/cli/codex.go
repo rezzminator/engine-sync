@@ -40,9 +40,10 @@ func runCodex(args []string, stdout, stderr io.Writer, e env) int {
 // runCodexAgents compiles the global (host-level) agents: no repository root,
 // every source and destination anchored on --home.
 func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
-	flags := NewFlagSet("codex agents", "usage: engine-sync codex agents [--home PATH] [--source-repo PATH]", stderr)
+	flags := NewFlagSet("codex agents", "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--gpt-agents]", stderr)
 	home := flags.String("home", "", "host HOME whose global agents get compiled and installed")
 	sourceRepo := flags.String("source-repo", "", "repository whose configured agent directory supplies the roles")
+	gptAgents := flags.Bool("gpt-agents", false, "include provider-specific GPT agents")
 	positionals, code, ok := ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
@@ -74,7 +75,7 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
 		return 1
 	}
 	code, err = guarded(e, optionGuardRoots(options), true, func() int {
-		result, err := machine.RunGlobalAgents(machine.GlobalAgentsOptions{Home: resolvedHome, SourceRepo: options.SourceRepo, Config: policy, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes})
+		result, err := machine.RunGlobalAgents(machine.GlobalAgentsOptions{Home: resolvedHome, SourceRepo: options.SourceRepo, Config: policy, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, GptAgents: *gptAgents})
 		if err != nil {
 			fmt.Fprintf(stderr, "engine-sync codex agents: %v\n", err)
 			return 1
