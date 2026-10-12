@@ -2,8 +2,9 @@ package machine
 
 import (
 	"errors"
+	"fmt"
+	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
-	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"io/fs"
 	"os"
@@ -37,7 +38,7 @@ func fixture(t *testing.T) (home, repo string) {
 	repo = filepath.Join(home, "clone")
 	agents := filepath.Join(repo, "agents")
 	writeMachineFixture(t, filepath.Join(agents, "gamma.md"), "---\nname: gamma\ndescription: Gamma role.\nmodel: sonnet\neffort: medium\n---\n\nGamma body.\n")
-	writeMachineFixture(t, filepath.Join(agents, source.GlobalAgentVariantsFile), `{"gamma-deep":{"from":"gamma","effort":"high"}}`)
+	writeMachineFixture(t, filepath.Join(agents, "gamma-deep.md"), "---\nname: gamma-deep\nfrom: gamma\neffort: high\n---\n")
 	writeMachineFixture(t, filepath.Join(home, ".claude", "commands", "tidy.md"), "---\ndescription: Tidy.\n---\nTidy up.\n")
 	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"retiredAgents":["frr","rr-super"],"retiredFiles":[".codex/agents/explorer.toml"]}}`)
 	return home, repo
@@ -179,7 +180,11 @@ func TestNoCodexHomeWritesNoRoleAndSkipsTheMirrors(t *testing.T) {
 	if report.Err != nil {
 		t.Fatal(report.Err)
 	}
+	// OpenCode's global agents are no Codex home's: they are still written,
+	// and the fixture's unmapped OpenCode aliases still warn.
 	want := []string{
+		`unmapped OpenCode model alias "sonnet" in ` + filepath.Join(repo, "agents", "gamma.md") + " — model omitted",
+		`unmapped OpenCode model alias "sonnet" in ` + filepath.Join(paths.GeneratedClaudeAgentsDir(home), "gamma-deep.md") + " — model omitted",
 		"no Codex accounts configured — command mirror has nothing to write",
 		"no Codex accounts configured — agent mirror has nothing to write",
 	}
@@ -312,5 +317,192 @@ func TestUninstallWithAnEmptyRosterRetiresTheCommandMirror(t *testing.T) {
 	}
 	if left := mirrored(); len(left) != 0 {
 		t.Fatalf("the managed command mirror survived uninstall: %q (events %#v)", left, report.Events)
+	}
+}
+
+func TestCapabilityMachineAgentsOptInAndRetireOwnedOnly(t *testing.T) {
+	home, repo := fixture(t)
+	for i := range 8 {
+		name := fmt.Sprintf("gpt-role-%d", i)
+		writeMachineFixture(t, filepath.Join(repo, "agents", name+".md"), "---\nname: "+name+"\ndescription: Routed role.\nmodel: gpt-6.1-sol\neffort: high\nrequires: [gpt-agents]\n---\n\nRouted role.\n")
+	}
+	options := Options{Home: home, SourceRepo: repo, Config: capabilityPolicy(t, home)}
+	report := RunMachine(options)
+	if report.Err != nil || !report.OK {
+		t.Fatalf("default install: %+v", report)
+	}
+	target := filepath.Join(home, ".claude", "agents", "gpt-role-0.md")
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Errorf("default installed GPT role: %v", err)
+	}
+	options.Config = capabilityPolicy(t, home, "gpt-agents")
+	report = RunMachine(options)
+	if report.Err != nil || !report.OK {
+		t.Fatalf("opt-in install: %+v", report)
+	}
+	for i := range 8 {
+		name := fmt.Sprintf("gpt-role-%d", i)
+		if _, err := os.Readlink(filepath.Join(home, ".claude", "agents", name+".md")); err != nil {
+			t.Fatal(err)
+		}
+		if info, err := os.Lstat(filepath.Join(home, ".codex", "agents", name+".toml")); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("Codex GPT role=%v %v", info, err)
+		}
+	}
+	operator := filepath.Join(home, ".codex", "agents", "gpt-role-0.toml")
+	writeMachineFixture(t, operator, `name = "operator"`)
+	options.Config = capabilityPolicy(t, home)
+	report = RunMachine(options)
+	if report.Err != nil || !report.OK {
+		t.Fatalf("opt-out install: %+v", report)
+	}
+	if body, err := os.ReadFile(operator); err != nil || string(body) != `name = "operator"` {
+		t.Fatalf("operator role changed: %q %v", body, err)
+	}
+	for i := range 8 {
+		name := fmt.Sprintf("gpt-role-%d", i)
+		if _, err := os.Lstat(filepath.Join(home, ".claude", "agents", name+".md")); !os.IsNotExist(err) {
+			t.Errorf("disabled Claude GPT role remains: %v", err)
+		}
+		if i > 0 {
+			if _, err := os.Lstat(filepath.Join(home, ".codex", "agents", name+".toml")); !os.IsNotExist(err) {
+				t.Errorf("disabled Codex GPT role remains: %v", err)
+			}
+		}
+	}
+	for _, row := range Doctor(DoctorOptions{Home: home, SourceRepo: repo, Config: capabilityPolicy(t, home)}) {
+		if row.Level == LevelFail && strings.Contains(row.Message, "gpt-role") {
+			t.Errorf("disabled doctor expects GPT role: %+v", row)
+		}
+	}
+}
+
+func TestCapabilityOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
+	for _, door := range []string{"plan", "global", "agents"} {
+		t.Run(door, func(t *testing.T) {
+			home, repo := fixture(t)
+			for _, stem := range []string{"routed", "operator", "foreign"} {
+				name := stem
+				if stem == "routed" {
+					name = "routed-v2"
+				}
+				writeMachineFixture(t, filepath.Join(repo, "agents", stem+".md"), "---\nname: "+name+"\ndescription: Routed.\nmodel: gpt-6.1-sol\neffort: medium\nrequires: [gpt-agents]\n---\nRouted.\n")
+			}
+			for _, name := range []string{"gamma", "routed"} {
+				writeMachineFixture(t, filepath.Join(repo, "agents", name+"-deep.md"), "---\nname: "+name+"-deep\nfrom: "+name+"\neffort: high\n---\n")
+			}
+			options := Options{Home: home, SourceRepo: repo, Config: capabilityPolicy(t, home, "gpt-agents")}
+			if report := RunMachine(options); report.Err != nil || !report.OK {
+				t.Fatalf("opt-in: %+v", report)
+			}
+			for _, stem := range []string{"routed", "routed-deep"} {
+				if _, err := os.Readlink(filepath.Join(home, ".claude", "agents", stem+".md")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			operator := filepath.Join(home, ".claude", "agents", "operator.md")
+			foreign := filepath.Join(home, ".claude", "agents", "foreign.md")
+			for _, path := range []string{operator, foreign} {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeMachineFixture(t, operator, "operator body")
+			if err := os.Symlink(operator, foreign); err != nil {
+				t.Fatal(err)
+			}
+			options.Config = capabilityPolicy(t, home)
+			if door == "plan" {
+				options.Plan = true
+				report := RunMachine(options)
+				if report.Err != nil || !report.OK {
+					t.Fatalf("plan: %+v", report)
+				}
+				planPaths := []string{
+					filepath.Join(home, ".codex", "agents", "routed-v2.toml"),
+					filepath.Join(home, ".codex", "agents", "routed-deep.toml"),
+					filepath.Join(home, ".claude", "agents", "routed-deep.md"),
+					filepath.Join(home, paths.ClaudeVariantStore, "routed-deep.md"),
+				}
+				for _, path := range planPaths {
+					count := 0
+					for _, event := range report.Events {
+						if strings.Contains(event.Message, path) {
+							count++
+							if strings.Contains(event.Message, "no longer declared") || strings.Contains(event.Message, "undeclared generated") {
+								t.Errorf("opt-out has false missing-declaration reason: %s", event.Message)
+							}
+						}
+					}
+					if count != 1 {
+						t.Errorf("plan reports %s %d times, want once", path, count)
+					}
+				}
+				return
+			}
+			if door == "global" {
+				if report := RunMachine(options); report.Err != nil || !report.OK {
+					t.Fatalf("opt-out: %+v", report)
+				}
+			} else {
+				if result, err := RunGlobalAgents(GlobalAgentsOptions{Home: home, SourceRepo: repo}); err != nil || len(result.Problems) > 0 {
+					t.Fatalf("agents opt-out: %+v %v", result, err)
+				}
+			}
+			for _, stem := range []string{"routed", "routed-deep"} {
+				path := filepath.Join(home, ".claude", "agents", stem+".md")
+				if _, err := os.Lstat(path); !os.IsNotExist(err) {
+					t.Errorf("owned excluded Claude link remains at %s: %v", path, err)
+				}
+			}
+			if body, err := os.ReadFile(operator); err != nil || string(body) != "operator body" {
+				t.Errorf("operator changed: %q %v", body, err)
+			}
+			if target, err := os.Readlink(foreign); err != nil || target != operator {
+				t.Errorf("foreign link changed: %q %v", target, err)
+			}
+		})
+	}
+}
+
+// capabilityPolicy is the home's resolved policy with the host capability
+// set an agent's requires tests.
+func capabilityPolicy(t *testing.T, home string, capabilities ...string) *config.Config {
+	t.Helper()
+	cfg, err := config.LoadConfigLayers("", home)
+	if err != nil {
+		t.Fatalf("load policy for %s: %v", home, err)
+	}
+	cfg.Capabilities = capabilities
+	return &cfg
+}
+
+// TestMovedGeneratedDirRepointsReceiptlessLinksBeforeRetiringTheStore: a host
+// whose registry links into the home store carry no receipt moves to
+// machine.sourceGeneratedAgentsDir in one run — every link repoints into the
+// source repository, no link dangles, and the store is retired after.
+func TestMovedGeneratedDirRepointsReceiptlessLinksBeforeRetiringTheStore(t *testing.T) {
+	home, repo := fixture(t)
+	if report := RunMachine(Options{Home: home, SourceRepo: repo, CodexHomes: []string{}}); report.Err != nil {
+		t.Fatalf("first run: %v", report.Err)
+	}
+	link := filepath.Join(home, ".claude", "agents", "gamma-deep.md")
+	store := filepath.Join(home, paths.ClaudeVariantStore, "gamma-deep.md")
+	if got, _ := os.Readlink(link); got != store {
+		t.Fatalf("first run linked %s -> %q, want %q", link, got, store)
+	}
+	if err := os.RemoveAll(filepath.Join(paths.EngineSyncState(paths.Getenv, home), "links")); err != nil {
+		t.Fatal(err)
+	}
+	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"sourceGeneratedAgentsDir":"generated/agents"}}`)
+	report := RunMachine(Options{Home: home, SourceRepo: repo, CodexHomes: []string{}})
+	if report.Err != nil || len(messages(report.Events, VerbConflict)) != 0 {
+		t.Fatalf("move run: err=%v conflicts=%q", report.Err, messages(report.Events, VerbConflict))
+	}
+	if got, _ := os.Readlink(link); got != filepath.Join(repo, "generated", "agents", "gamma-deep.md") {
+		t.Fatalf("link not repointed into the source repository: -> %q", got)
+	}
+	if _, err := os.Lstat(store); !os.IsNotExist(err) {
+		t.Fatalf("home store entry not retired (err=%v)", err)
 	}
 }

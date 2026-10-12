@@ -30,6 +30,9 @@ type Options struct {
 	Home         string
 	Mode         Mode
 	CLIOverrides CLIOverrides
+	// Capabilities are the --capability values; the run's capability set
+	// adds the targets.json list (config.Capabilities).
+	Capabilities []string
 	Config       *config.Config
 	Source       *claudesource.Project
 }
@@ -273,7 +276,7 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 			continue
 		}
 		if project == "." {
-			adapter, err := config.RenderTemplate(cfg.RootAdapter, config.TemplateData{Engine: "Codex", Source: "CLAUDE.md", Root: "AGENTS.md"})
+			adapter, err := config.RenderTemplate(cfg.RootAdapter, config.TemplateData{Engine: "Codex", Source: "CLAUDE.md", Root: "AGENTS.md", Models: cfg.ModelMap})
 			if err != nil {
 				problem(fmt.Sprintf("render codex.rootAdapter for %s: %v", src, err))
 				continue
@@ -289,7 +292,7 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 		)
 	}
 
-	compileAgents(root, projects, cfg, transform, add, problem, warn, &result)
+	compileAgents(root, projects, cfgAll, transform, add, problem, warn, &result)
 	compileRepoCommands(root, cfg, transform, roster, add, problem, warn, &result)
 	compileRepoSkills(root, add, problem, &result)
 

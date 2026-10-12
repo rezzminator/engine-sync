@@ -36,3 +36,19 @@ func TestPipelinePlansBeforePublishingAndValidates(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// One problem named by the source loader and again by the target that reads
+// the same file is one line.
+func TestPipelineNamesEachProblemOnce(t *testing.T) {
+	root := testjail.Scratch(t)
+	named := "FRONTMATTER-INVALID " + filepath.Join(root, "bad.md") + ":3 — broken"
+	render := func(source.Project, config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
+		return nil, []diag.Diagnostic{{Severity: diag.Finding, Message: named}, {Severity: diag.Finding, Message: named}}
+	}
+	roots := func(source.Project, config.Config) []artifact.Root { return []artifact.Root{{Path: root}} }
+	validate := func([]artifact.Artifact) []diag.Diagnostic { return nil }
+	r, ok := Execute(source.Project{}, config.Default(), reconcile.Check, render, roots, validate)
+	if ok || len(r.Problems) != 1 || r.Problems[0] != named {
+		t.Fatalf("problems %q, want %q once", r.Problems, named)
+	}
+}

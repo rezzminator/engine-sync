@@ -179,7 +179,7 @@ func compileCommandFile(
 	front, body, parseErr := options.Source.Frontmatter(entry.Path)
 	fields := front.Fields
 	if parseErr != nil {
-		problem(fmt.Sprintf("parse %s: %v", entry.Path, parseErr))
+		problem(claudesource.DescribeParseError(entry.Path, parseErr))
 		return
 	}
 	flat := flatName(filepath.ToSlash(entry.Rel))

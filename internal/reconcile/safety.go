@@ -74,7 +74,7 @@ func ownedLink(path, target string) (bool, error) {
 	}
 	raw, e := paths.ReadRegular(p)
 	if os.IsNotExist(e) {
-		return false, nil
+		return linksGeneratedFile(path, target)
 	}
 	if e != nil {
 		return false, e
@@ -86,7 +86,33 @@ func ownedLink(path, target string) (bool, error) {
 	return record.Target == target, nil
 }
 
-// Claimable requires a complete marker or a receipt for this exact link.
+// linksGeneratedFile claims a link with no receipt when it points at a regular
+// file carrying a complete engine-sync marker: a link written before receipts
+// existed, or by an installer that predates them, into a store engine-sync owns.
+func linksGeneratedFile(path, target string) (bool, error) {
+	resolved := target
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(filepath.Dir(path), resolved)
+	}
+	info, e := os.Lstat(resolved)
+	if os.IsNotExist(e) {
+		return false, nil
+	}
+	if e != nil {
+		return false, fmt.Errorf("inspect link target %s of %s: %w", resolved, path, e)
+	}
+	if !info.Mode().IsRegular() {
+		return false, nil
+	}
+	raw, e := paths.ReadHeader(resolved)
+	if e != nil {
+		return false, fmt.Errorf("read link target %s of %s: %w", resolved, path, e)
+	}
+	return artifact.Claims(string(raw)), nil
+}
+
+// Claimable requires a complete marker, a receipt for this exact link, or a
+// link to a file carrying a complete marker.
 func Claimable(path string, roots []artifact.Root) (bool, error) {
 	info, e := os.Lstat(path)
 	if os.IsNotExist(e) {

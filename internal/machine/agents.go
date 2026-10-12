@@ -8,6 +8,7 @@ import (
 	reconciler "github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/target/codex"
+	"github.com/rezzminator/engine-sync/internal/target/opencode"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,17 +150,27 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 	sourceRoot = filepath.Clean(sourceRoot)
 
+	claudeConfigDirs := options.ClaudeConfigDirs
+	if len(claudeConfigDirs) == 0 {
+		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
+	}
+
 	// Phase 1: compile and validate every role's TOML before touching disk —
 	// a failed compile or an unparseable TOML aborts before any install, the
 	// same fail-loud order the host script used.
 	model := options.Source
 	if model == nil {
-		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
+		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 		if e != nil {
 			return GlobalAgentsResult{}, e
 		}
 		model = &loaded
 	}
+	unfiltered := *model
+	filtered, skipped := filterMachineAgents(*model, cfg.Capabilities)
+	filtered = skipBrokenAgents(filtered, cfg)
+	unfiltered.Problems, unfiltered.Failed = filtered.Problems, filtered.Failed
+	model = &filtered
 	compiledAgents, err := compileMachineAgents(*model, cfg)
 	if err != nil {
 		return GlobalAgentsResult{}, err
@@ -167,10 +178,6 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 
 	// One Claude agents/ registry per configured account; an installer that
 	// never names its accounts keeps the single {Home}/.claude registry.
-	claudeConfigDirs := options.ClaudeConfigDirs
-	if len(claudeConfigDirs) == 0 {
-		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
-	}
 
 	// One Codex agents/ registry per configured Codex home; a caller that
 	// never names its accounts (a nil roster, `engine-sync codex agents`) keeps the
@@ -196,11 +203,16 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		target  string
 		content []byte
 	}
-	result := GlobalAgentsResult{Source: model}
+	// Preserve declarations for the orphan sweep and the next build pass.
+	result := GlobalAgentsResult{Source: &unfiltered}
+	result.Problems = append(result.Problems, unfiltered.Problems...)
 	links := make([]desiredLink, 0, len(compiledAgents)*len(claudeConfigDirs))
 	roles := make([]desiredRole, 0, len(compiledAgents)*len(codexHomes))
 	for _, agent := range compiledAgents {
 		for _, codexHome := range codexHomes {
+			if agent.tomlContent == nil {
+				break
+			}
 			target := filepath.Join(codexHome, "agents", agent.name+".toml")
 			roles = append(roles, desiredRole{target: target, content: agent.tomlContent})
 			result.Compiled = append(
@@ -292,9 +304,31 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	if options.Mode == ModeCheck {
 		mode = reconciler.Plan
 	}
+
+	cleanup := run{options: Options{Home: home, SourceRepo: sourceRepo, ClaudeConfigDirs: claudeConfigDirs, CodexHomes: codexHomes, Plan: options.Mode == ModeCheck}, policy: *cfg}
+	if err := cleanup.retireExcludedMachineAgents(unfiltered); err != nil {
+		return GlobalAgentsResult{}, fmt.Errorf("retire excluded Claude agents: %w", err)
+	}
+	// The source problems are reported once above; a skipped agent never
+	// stops the healthy ones from building.
+	model.Problems = nil
 	applied, _ := engine.Execute(*model, *cfg, mode, target.Render, target.Roots, target.Validate)
-	result.Warnings = applied.Warnings
+	openCodeTarget := opencode.Target{}
+	openCodeApplied, _ := engine.Execute(*model, *cfg, mode, openCodeTarget.Render, openCodeTarget.Roots, openCodeTarget.Validate)
+	applied.Warnings = append(applied.Warnings, openCodeApplied.Warnings...)
+	applied.Actions = append(applied.Actions, openCodeApplied.Actions...)
+	applied.Rebuildable = append(applied.Rebuildable, openCodeApplied.Rebuildable...)
+	applied.Problems = append(applied.Problems, openCodeApplied.Problems...)
+	result.Warnings = append(skipped, applied.Warnings...)
 	result.Actions = nil
+	for _, event := range cleanup.report.Events {
+		if event.Verb == VerbRetire {
+			result.Actions = append(result.Actions, GlobalAgentAction{Kind: "delete", Path: event.Path})
+		}
+		if event.Verb == VerbSkip {
+			result.Warnings = append(result.Warnings, event.Message)
+		}
+	}
 	for _, a := range applied.Actions {
 		result.Actions = append(result.Actions, GlobalAgentAction{Kind: a.Kind, Path: a.Path, Target: a.Target})
 	}
@@ -330,17 +364,20 @@ type compiledAgent struct {
 }
 
 // compileGlobalAgents renders every machine-global agent — originals plus the
-// variants variants.json declares — and validates that each one's TOML parses
-// before any caller touches disk. An emitter that ships an unparseable
-// artifact has done nothing useful, so this returns an error rather than a
-// partial roster.
-func compileGlobalAgents(home, sourceRepo string, cfg *config.Config) ([]compiledAgent, error) {
+// rendered declarations — that global installs: an agent whose
+// requires is unmet or that skipBrokenAgents skips is left out, as global
+// leaves it out, and the caller names those (InspectRegistries' BROKEN row).
+func compileGlobalAgents(home, sourceRepo string, cfg *config.Config, claudeConfigDirs []string) ([]compiledAgent, error) {
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
+	if len(claudeConfigDirs) == 0 {
+		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
+	}
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 	if err != nil {
 		return nil, err
 	}
-	return compileMachineAgents(model, cfg)
+	filtered, _ := filterMachineAgents(model, cfg.Capabilities)
+	return compileMachineAgents(skipBrokenAgents(filtered, cfg), cfg)
 }
 func compileMachineAgents(model source.Project, cfg *config.Config) ([]compiledAgent, error) {
 	agentsDir := model.AgentSourceDir
@@ -355,6 +392,12 @@ func compileMachineAgents(model source.Project, cfg *config.Config) ([]compiledA
 		if parseErr := codex.ValidateRole(content); parseErr != nil {
 			return nil, fmt.Errorf("%s: does not parse: %w", src.Path, parseErr)
 		}
+		// engines.codex: false — Claude still links the agent; no role
+		// file is desired, and the reconcile orphan walk retires an owned one.
+		var toml []byte
+		if !src.Front.Engines.CodexOff() {
+			toml = []byte(content)
+		}
 		compiled = append(compiled, compiledAgent{
 			name:     name,
 			mdSource: src.Path,
@@ -364,7 +407,7 @@ func compileMachineAgents(model source.Project, cfg *config.Config) ([]compiledA
 				}
 				return nil
 			}(),
-			tomlContent: []byte(content),
+			tomlContent: toml,
 		})
 	}
 	return compiled, nil
@@ -382,7 +425,10 @@ type GlobalRole struct {
 
 // CompileGlobalRoles is the read-only half of RunGlobalAgents' compile phase,
 // for callers that need the desired bytes without installing anything.
-func CompileGlobalRoles(home, sourceRepo string, policies ...*config.Config) ([]GlobalRole, error) {
+// claudeConfigDirs is the Claude roster global installs into, so a source
+// directory inside any of them is the same named collision global reports;
+// empty means the policy's one config dir.
+func CompileGlobalRoles(home, sourceRepo string, claudeConfigDirs []string, policies ...*config.Config) ([]GlobalRole, error) {
 	resolvedHome, err := resolveMachineHome(home)
 	if err != nil {
 		return nil, err
@@ -398,12 +444,15 @@ func CompileGlobalRoles(home, sourceRepo string, policies ...*config.Config) ([]
 		}
 		cfg = &resolved
 	}
-	compiled, err := compileGlobalAgents(resolvedHome, sourceRepo, cfg)
+	compiled, err := compileGlobalAgents(resolvedHome, sourceRepo, cfg, claudeConfigDirs)
 	if err != nil {
 		return nil, err
 	}
 	roles := make([]GlobalRole, 0, len(compiled))
 	for _, agent := range compiled {
+		if agent.tomlContent == nil {
+			continue
+		}
 		roles = append(roles, GlobalRole{Name: agent.name, Content: agent.tomlContent})
 	}
 	return roles, nil
@@ -425,4 +474,31 @@ func sameGlobalAgentFile(path string, content []byte) (bool, error) {
 		return false, fmt.Errorf("read global agent artifact %s: %w", path, err)
 	}
 	return string(raw) == string(content), nil
+}
+
+// filterMachineAgents keeps the agents whose requires the host's
+// capabilities meet and names each other one in a SKIPPED line.
+func filterMachineAgents(model source.Project, capabilities []string) (source.Project, []string) {
+	agents := make([]source.Agent, 0, len(model.Agents))
+	var skipped []string
+	for _, agent := range model.Agents {
+		if unmet := source.Unmet(agent.Front.Requires, capabilities); unmet != "" {
+			skipped = append(skipped, source.Skipped(agentName(agent), unmet))
+			if agent.Generated {
+				model.Excluded = append(model.Excluded, agent)
+			}
+			continue
+		}
+		agents = append(agents, agent)
+	}
+	model.Agents = agents
+	return model, skipped
+}
+
+// agentName is the agent's frontmatter name, else its file name.
+func agentName(agent source.Agent) string {
+	if agent.Name != "" {
+		return agent.Name
+	}
+	return strings.TrimSuffix(filepath.Base(agent.Path), ".md")
 }

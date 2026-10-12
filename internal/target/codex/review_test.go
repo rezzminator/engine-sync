@@ -151,7 +151,8 @@ func TestCompiledCommandFrontmatterStaysParseableAroundTheReview(t *testing.T) {
 		t.Run(command.name, func(t *testing.T) {
 			path := filepath.Join(root, ".codex", "skills", command.name, "SKILL.md")
 			got := string(readCodexFixture(t, path))
-			fields, _, err := claudesource.Fields(got)
+			front, _, err := claudesource.Parse(got)
+			fields := front.Fields
 			if err != nil {
 				t.Fatalf("%s no longer parses as frontmatter: %v\n%s", path, err, got)
 			}
@@ -182,8 +183,8 @@ func TestReviewNeutralAndConfiguredPolicy(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.Codex.Review = config.Review{ModelAlias: "review-tier", DefaultEffort: "low", Prompt: "Review own changed files.", SlotPrompt: "Review the selected set."}
-	cfg.Machine.ModelMap["review-tier"] = "sample-model"
-	_, text, err := renderGlobalAgentTOML("reader.md", "---\nname: reader\ndescription: Reads.\n---\n/code-review\n", "agents", cfg)
+	cfg.Codex.ModelMap["review-tier"] = "sample-model"
+	_, text, _, err := renderGlobalAgentTOML("reader.md", "---\nname: reader\ndescription: Reads.\n---\n/code-review\n", "agents", cfg)
 	if err != nil || !strings.Contains(text, "sample-model") || !strings.Contains(text, "Review own changed files.") {
 		t.Errorf("policy not restored: %s %v", text, err)
 	}

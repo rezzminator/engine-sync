@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/rezzminator/engine-sync/internal/config"
@@ -34,6 +33,10 @@ const (
 	AgentsInstalled  AgentsState = "installed"
 	AgentsSymlink    AgentsState = "SYMLINK"
 	AgentsMismatch   AgentsState = "MISMATCH"
+	AgentsBroken     AgentsState = "BROKEN"
+	// AgentsOrphan: a rendered agent in the generated directory whose
+	// declaration source is gone.
+	AgentsOrphan AgentsState = AgentsState(reconciler.Orphan)
 )
 
 // The row levels.
@@ -102,18 +105,25 @@ func (status AgentsStatus) Describe() string {
 			` hint="run engine-sync global"`
 	case AgentsNoClaude:
 		return line + ` note="no Claude Code binary installed — the installer never wires the store's agents"`
+	case AgentsBroken:
+		return line + ` note="engine-sync global skips each named agent and keeps its installed copies"` +
+			` hint="fix the named sources"`
+	case AgentsOrphan:
+		return line + ` note="each named file was rendered from a declaration that no longer exists"` +
+			` hint="restore its declaration, or delete it (engine-sync global retires it)"`
 	default:
 		return line + ` hint="run engine-sync global"`
 	}
 }
 
 // Level is a status's row level: a registry missing, unreadable, symlinked or
-// mismatched fails; source and conflict states warn.
+// mismatched fails, as does a broken source agent; source and conflict
+// states warn.
 func (status AgentsStatus) Level() string {
 	switch status.State {
 	case AgentsLinked, AgentsInstalled, AgentsNoClaude:
 		return LevelOK
-	case AgentsMissing, AgentsUnreadable, AgentsSymlink, AgentsMismatch:
+	case AgentsMissing, AgentsUnreadable, AgentsSymlink, AgentsMismatch, AgentsBroken, AgentsOrphan:
 		return LevelFail
 	default:
 		return LevelWarn
@@ -129,15 +139,7 @@ func Doctor(options DoctorOptions) []Row {
 		rows = append(rows, Row{Level: status.Level(), Message: "global-agents " + status.Describe()})
 	}
 	if !options.ClaudeAbsent {
-		plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, Plan: true})
-		for _, event := range plan.Events {
-			if event.Verb == VerbChange || event.Verb == VerbRetire || event.Verb == VerbConflict {
-				rows = append(rows, Row{Level: LevelFail, Message: event.Message})
-			}
-		}
-		if plan.Err != nil {
-			rows = append(rows, Row{Level: LevelFail, Message: plan.Err.Error()})
-		}
+		rows = append(rows, agentRows(options)...)
 	}
 
 	failed := false
@@ -145,15 +147,72 @@ func Doctor(options DoctorOptions) []Row {
 		failed = failed || row.Level == LevelFail
 	}
 	if failed {
+		// A failing doctor hides its passing rows, never a SKIPPED one: an
+		// agent left out by its requires is news on a failing host too.
 		filtered := rows[:0]
 		for _, row := range rows {
-			if row.Level != LevelOK {
+			if row.Level != LevelOK || strings.HasPrefix(row.Message, "agent "+StateSkipped+" ") {
 				filtered = append(filtered, row)
 			}
 		}
 		rows = filtered
 	}
 	return rows
+}
+
+// agentRows are the per-agent rows: each agent's state, then each plan event
+// no state row already names — a STALE agent is one row, never also its
+// planned retirement. A config that fails to load is reported, and no
+// directory is scanned from it: the scan is a NOT SCANNED row, never clean.
+func agentRows(options DoctorOptions) []Row {
+	cfg := options.Config
+	if cfg == nil {
+		resolved, err := config.LoadConfigLayers("", options.Home)
+		if err != nil {
+			return []Row{
+				{Level: LevelFail, Message: "global-agents states: " + err.Error()},
+				{Level: LevelFail, Message: "global-agents states NOT SCANNED — the config did not load, so no agent or generated directory is known"},
+			}
+		}
+		cfg = &resolved
+	}
+	var rows []Row
+	states, err := AgentStates(options.Home, options.SourceRepo, cfg, options.ClaudeConfigDirs, options.CodexHomes)
+	if err != nil {
+		rows = append(rows, Row{Level: LevelFail, Message: "global-agents states: " + err.Error()})
+	}
+	stale := map[string]bool{}
+	for _, state := range states {
+		rows = append(rows, Row{Level: state.Level(), Message: state.Describe()})
+		if state.State == StateStale {
+			stale[state.Path] = true
+		}
+	}
+	plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, Plan: true})
+	for _, event := range plan.Events {
+		if (event.Verb == VerbChange || event.Verb == VerbRetire || event.Verb == VerbConflict) && !namesStale(event.Message, stale) {
+			rows = append(rows, Row{Level: LevelFail, Message: event.Message})
+		}
+	}
+	if plan.Err != nil {
+		rows = append(rows, Row{Level: LevelFail, Message: plan.Err.Error()})
+	}
+	return rows
+}
+
+// namesStale reports whether a plan event's message ("{action} {path} …")
+// acts on a path a STALE row already names.
+func namesStale(message string, stale map[string]bool) bool {
+	_, rest, ok := strings.Cut(message, " ")
+	if !ok {
+		return false
+	}
+	for path := range stale {
+		if rest == path || strings.HasPrefix(rest, path+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // Inspect classifies every registry against the source clone.
@@ -177,37 +236,45 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	if configErr != nil {
 		return []AgentsStatus{{Dir: config.MachinePath(home, paths.Getenv), State: AgentsUnreadable, Error: configErr.Error()}}
 	}
-	agentsDir := source.AgentsDirectory(home, repo, *cfg)
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
-	}
-	var sources []string
-	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".md") && !strings.EqualFold(entry.Name(), "README.md") {
-			sources = append(sources, filepath.Join(agentsDir, entry.Name()))
-		}
-	}
-	if len(sources) == 0 {
-		return []AgentsStatus{{Dir: agentsDir, State: AgentsNoSources}}
-	}
-	sort.Strings(sources)
-	variants, err := source.LoadGlobalAgentVariants(agentsDir, filepath.Join(home, cfg.Machine.GeneratedAgentsDir), cfg.Machine.Variants, cfg.Machine.AgentMarkerDir)
-	if err != nil {
-		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
-	}
-	for _, variant := range variants {
-		sources = append(sources, variant.Path)
-	}
 	dirs := options.ClaudeConfigDirs
 	if len(dirs) == 0 {
 		dirs = []string{store}
 	}
-	statuses := []AgentsStatus{}
+	agentsDir := source.AgentsDirectory(home, repo, *cfg)
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, repo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: dirs})
+	if err != nil {
+		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
+	}
+	if len(model.Warnings) != 0 {
+		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: strings.Join(model.Warnings, "; ")}}
+	}
+	orphans, err := generatedOrphans(model)
+	if err != nil {
+		return []AgentsStatus{{Dir: model.GeneratedDir, State: AgentsUnreadable, Error: err.Error()}}
+	}
+	// A broken agent is global's to skip, never the directory's to fail: it
+	// is one BROKEN row naming it, and every healthy agent is still inspected.
+	model, _ = filterMachineAgents(model, cfg.Capabilities)
+	model = skipBrokenAgents(model, cfg)
+	var broken []AgentsStatus
+	if len(model.Problems) != 0 || len(model.Failed) != 0 {
+		broken = []AgentsStatus{{Dir: agentsDir, State: AgentsBroken, Names: model.Failed, Error: strings.Join(model.Problems, "; ")}}
+	}
+	if len(orphans) != 0 {
+		broken = append(broken, AgentsStatus{Dir: model.GeneratedDir, State: AgentsOrphan, Names: orphans})
+	}
+	var sources []string
+	for _, agent := range model.Agents {
+		sources = append(sources, agent.Path)
+	}
+	if len(sources) == 0 {
+		return append(broken, AgentsStatus{Dir: agentsDir, State: AgentsNoSources})
+	}
+	statuses := broken
 	for _, dir := range dirs {
 		statuses = append(statuses, inspectStore(dir, paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), sources))
 	}
-	roles, err := CompileGlobalRoles(home, repo, cfg)
+	roles, err := CompileGlobalRoles(home, repo, dirs, cfg)
 	if err != nil {
 		return append(statuses, AgentsStatus{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()})
 	}
@@ -311,4 +378,35 @@ func inspectStore(store, repo string, sources []string) AgentsStatus {
 func isSymlink(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode()&os.ModeSymlink != 0
+}
+
+// generatedOrphans names each rendered file in the model's generated
+// directory that no declaration renders any more, a capability-skipped or
+// failed declaration still counting as declared. A directory that is absent
+// has none; one that cannot be read is an error, never an empty list.
+func generatedOrphans(model source.Project) ([]string, error) {
+	entries, err := os.ReadDir(model.GeneratedDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read generated agents %s: %w", model.GeneratedDir, err)
+	}
+	declared := map[string]bool{}
+	for _, agent := range model.Agents {
+		if agent.Generated {
+			declared[agent.Name] = true
+		}
+	}
+	for _, name := range model.Failed {
+		declared[name] = true
+	}
+	var orphans []string
+	for _, entry := range entries {
+		name, ok := strings.CutSuffix(entry.Name(), ".md")
+		if ok && !entry.IsDir() && !declared[name] {
+			orphans = append(orphans, filepath.Join(model.GeneratedDir, entry.Name()))
+		}
+	}
+	return orphans, nil
 }

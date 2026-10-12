@@ -6,8 +6,64 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
+
+// TestMoveAcrossFilesystemsCopiesSyncsAndRemoves: a move never replaces its
+// destination; a link refused with EXDEV falls back to a copy with the source's mode, then removes the source.
+func TestMoveAcrossFilesystemsCopiesSyncsAndRemoves(t *testing.T) {
+	directory := testjail.Scratch(t)
+	from, to := filepath.Join(directory, "from.md"), filepath.Join(directory, "away", "to.md")
+	if err := os.WriteFile(from, []byte("mine\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// On one filesystem a move never replaces a file at its destination.
+	if err := os.WriteFile(to, []byte("adopted before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Move(from, to); err == nil {
+		t.Fatal("Move replaced an existing file on the same filesystem")
+	}
+	if raw, _ := os.ReadFile(to); string(raw) != "adopted before\n" {
+		t.Fatalf("existing file = %q, want it untouched", raw)
+	}
+	if _, err := os.Lstat(from); err != nil {
+		t.Fatalf("refused move lost its source: %v", err)
+	}
+	if err := os.Remove(to); err != nil {
+		t.Fatal(err)
+	}
+	link = func(oldpath, newpath string) error {
+		return &os.LinkError{Op: "link", Old: oldpath, New: newpath, Err: syscall.EXDEV}
+	}
+	t.Cleanup(func() { link = os.Link })
+	if err := Move(from, to); err != nil {
+		t.Fatalf("Move across filesystems = %v", err)
+	}
+	info, err := os.Stat(to)
+	if err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatalf("moved file = %v (%v), want mode 0640", info, err)
+	}
+	if raw, err := os.ReadFile(to); err != nil || string(raw) != "mine\n" {
+		t.Fatalf("moved content = %q (%v)", raw, err)
+	}
+	if _, err := os.Lstat(from); err == nil {
+		t.Fatalf("%s still present after the move", from)
+	}
+	if err := os.WriteFile(from, []byte("again\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Move(from, to); err == nil {
+		t.Fatal("Move across filesystems replaced an existing file")
+	}
+	if raw, _ := os.ReadFile(to); string(raw) != "mine\n" {
+		t.Fatalf("existing file = %q, want it untouched", raw)
+	}
+}
 
 // TestWriteReplacesWholeWithTheModeAndLeavesNoScratch pins the writer's
 // contract: the new content lands whole with exactly the asked permission bits

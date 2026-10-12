@@ -12,7 +12,7 @@ func TestProjectAgentCodexRoleSettings(t *testing.T) {
 		name, file, frontmatter string
 		refused                 bool
 	}{
-		{name: "project tier honours the keys", file: "lab.md", frontmatter: "model: opus\ncodex-model: gpt-fixture-lab\ncodex-effort: low\ncodex-sandbox: workspace-write\ntools: Read, Grep\n"},
+		{name: "project tier honours the keys", file: "lab.md", frontmatter: "model: opus\nengines:\n  codex:\n    model: gpt-fixture-lab\n    effort: low\n    sandbox: workspace-write\ntools: Read, Grep\n"},
 		{name: "project tier refusal", file: "orch.md", frontmatter: "model: claude-sonnet-5-5\n", refused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -29,7 +29,10 @@ func readAgentFixture(t *testing.T, path string) []byte {
 	return b
 }
 
-var parseFrontmatter = source.Fields
+func parseFrontmatter(text string) (map[string]string, string, error) {
+	front, body, err := source.Parse(text)
+	return front.Fields, body, err
+}
 
 var rewriteCodeReview = codex.RewriteReview
 
@@ -45,7 +48,6 @@ func assertAgentContains(t *testing.T, path string, texts ...string) {
 func fixtureMachinePolicy() config.Config {
 	c := config.Default()
 	c.Codex.ModelMap = map[string]string{"opus": "gpt-6.1-sol", "sonnet": "gpt-6-luna", "haiku": "gpt-6-luna", "fable": "gpt-6.1-sol"}
-	c.Machine.ModelMap = c.Codex.ModelMap
 	c.Codex.Review = config.Review{ModelAlias: "opus", DefaultEffort: "low", Prompt: "Review the current task files.", SlotPrompt: "Review the selected flight files."}
 	return c
 }
@@ -56,8 +58,8 @@ func runFixtureMachineAgents(o GlobalAgentsOptions) (GlobalAgentsResult, error) 
 		if e != nil {
 			return GlobalAgentsResult{}, e
 		}
-		if len(c.Machine.ModelMap) == 0 {
-			c.Machine.ModelMap = fixtureMachinePolicy().Machine.ModelMap
+		if len(c.Codex.ModelMap) == 0 {
+			c.Codex.ModelMap = fixtureMachinePolicy().Codex.ModelMap
 		}
 		c.Codex.Review = fixtureMachinePolicy().Codex.Review
 		o.Config = &c

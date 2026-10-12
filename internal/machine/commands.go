@@ -1,11 +1,14 @@
 package machine
 
 import (
+	"errors"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/engine"
 	reconciler "github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/target/codex"
 	"github.com/rezzminator/engine-sync/internal/target/opencode"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -94,6 +97,26 @@ func (r *run) openCodeCommands() error {
 	blockers := planBlockers(result.Problems)
 	if (!ok && !r.options.Plan) || len(blockers) > 0 {
 		return fmt.Errorf("OpenCode commands: %s", strings.Join(result.Problems, "; "))
+	}
+	return nil
+}
+
+func (r *run) removeDir(dir, label string) error {
+	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect %s %s: %w", label, dir, err)
+	}
+	mode := reconciler.Build
+	if r.options.Plan {
+		mode = reconciler.Plan
+	}
+	result := reconciler.RetireOwned(dir, mode, r.retirementBoundary(dir))
+	for _, a := range result.Actions {
+		r.add(VerbRetire, "retire "+a.Path+" ("+label+")", a.Path)
+	}
+	if len(planBlockers(result.Problems)) > 0 {
+		return fmt.Errorf("retire %s: %s", dir, strings.Join(result.Problems, "; "))
 	}
 	return nil
 }

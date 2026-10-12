@@ -223,6 +223,12 @@ func TestAuditRosterAndTargets(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if form == "bad targets explicit" || form == "bad targets disabled" {
+				// The capability set reads targets.json: a broken one fails
+				// the run, never an empty capability set.
+				auditBad(t, e, "targets.json", args...)
+				return
+			}
 			auditOK(t, e, args...)
 			if form == "empty homes" {
 				auditOK(t, e, "doctor", "--machine", "--source-repo", repo)
@@ -405,7 +411,9 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 	for _, form := range []string{"tampered variant", "tampered role", "orphan role", "stale prompt", "deleted skill", "unreadable prompts", "fifo skill", "corrupt writer", "bad targets", "second registry"} {
 		t.Run(form, func(t *testing.T) {
 			home, _, e := auditEnv(t)
-			putProjectFile(t, home, ".claude/agents/reader.md", auditAgent)
+			if form != "tampered variant" {
+				putProjectFile(t, home, ".claude/agents/reader.md", auditAgent)
+			}
 			putProjectFile(t, home, ".claude/commands/hello.md", "---\ndescription: Hello.\n---\nHello\n")
 			putProjectFile(t, home, ".claude/commands/family/SKILL.md", "---\nname: family\ndescription: Family.\n---\nFamily\n")
 			if form == "second registry" {
@@ -413,7 +421,13 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 				putProjectFile(t, home, ".config/engine-sync/targets.json", string(raw))
 			}
 			if form == "tampered variant" {
-				putProjectFile(t, home, ".claude/agents/variants.json", `{"reader-pro":{"from":"reader","description":"Deep read."}}`)
+				putProjectFile(t, home, "agent-sources/reader.md", auditAgent)
+				putProjectFile(t, home, "agent-sources/reader-pro.md", "---\nname: reader-pro\nfrom: reader\ndescription: Deep read.\n---\n")
+				raw, err := json.Marshal(map[string]any{"version": 1, "machine": map[string]any{"claudeAgentsDir": filepath.Join(home, "agent-sources")}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				putProjectFile(t, home, ".config/engine-sync/config.json", string(raw))
 			}
 			auditOK(t, e, "global")
 			switch form {
@@ -476,8 +490,9 @@ func TestAuditProjectCollisionsAndNames(t *testing.T) {
 			root := testjail.Scratch(t)
 			putProjectFile(t, root, "CLAUDE.md", "Root\n")
 			putProjectFile(t, root, "api/CLAUDE.md", "Child\n")
-			putProjectFile(t, root, ".claude/agents/"+names[0]+".md", auditAgent)
-			putProjectFile(t, root, "api/.claude/agents/"+names[1]+".md", strings.ReplaceAll(auditAgent, "tools: Read", "tools: Write"))
+			// The role name is the frontmatter name: each file declares its own base.
+			putProjectFile(t, root, ".claude/agents/"+names[0]+".md", strings.ReplaceAll(auditAgent, "name: reader", "name: "+names[0]))
+			putProjectFile(t, root, "api/.claude/agents/"+names[1]+".md", strings.NewReplacer("tools: Read", "tools: Write", "name: reader", "name: "+names[1]).Replace(auditAgent))
 			out := auditBad(t, e, "CONFLICT", "codex", "build", root)
 			for _, name := range names {
 				if !strings.Contains(out, name+".md") {
@@ -499,7 +514,7 @@ func TestAuditProjectCollisionsAndNames(t *testing.T) {
 }
 
 func TestAuditSourceAndJSONCFailures(t *testing.T) {
-	for _, form := range []string{"device source", "unparseable jsonc", "compiled forms", "empty description"} {
+	for _, form := range []string{"device source", "unparseable jsonc", "compiled forms", "empty description", "invalid yaml"} {
 		t.Run(form, func(t *testing.T) {
 			_, _, e := auditEnv(t)
 			root := testjail.Scratch(t)
@@ -516,6 +531,21 @@ func TestAuditSourceAndJSONCFailures(t *testing.T) {
 				putProjectFile(t, root, ".claude/agents/reader.md", "\ufeff"+strings.ReplaceAll(strings.ReplaceAll(auditAgent, "---\n", "--- \n"), "\n", "\r\n"))
 			case "empty description":
 				putProjectFile(t, root, ".claude/agents/reader.md", strings.ReplaceAll(auditAgent, "description: Reads.", "description:"))
+			}
+			if form == "invalid yaml" {
+				// One YAML parser serves agents and commands, and both engines
+				// name its error the same way, line included.
+				broken := "---\nname: broken\n\tdescription: Reads.\n---\nBody.\n"
+				putProjectFile(t, root, ".claude/agents/broken.md", broken)
+				putProjectFile(t, root, ".claude/commands/broken.md", broken)
+				rc, out := auditRun(e, "check", root)
+				for _, file := range []string{".claude/agents/broken.md", ".claude/commands/broken.md"} {
+					named := "FRONTMATTER-INVALID " + filepath.Join(root, filepath.FromSlash(file)) + ":3 — "
+					if rc == 0 || strings.Count(out, named) != 2 {
+						t.Fatalf("check rc=%d, want %q once per engine:\n%s", rc, named, out)
+					}
+				}
+				return
 			}
 			if form == "compiled forms" {
 				auditOK(t, e, "codex", "build", root)

@@ -11,7 +11,8 @@ import (
 
 func TestFrontmatterAndRosterTransform(t *testing.T) {
 	raw := "---\ndescription: >-\n  A quoted \\\"description\\\"\n  over two lines.\nmodel: opus\nhooks:\n  PostToolUse:\n    - matcher: Edit\n---\nUse /tools:go, not /tools or /scripts/x. Read CLAUDE.md.\n"
-	fm, body, err := claudesource.Fields(raw)
+	front, body, err := claudesource.Parse(raw)
+	fm := front.Fields
 	if err != nil {
 		t.Fatal(err)
 	}

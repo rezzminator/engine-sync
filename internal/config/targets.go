@@ -16,11 +16,49 @@ type Targets struct {
 	CodexHomes       *[]string `json:"codexHomes"`
 	ClaudeConfigDirs []string  `json:"claudeConfigDirs,omitempty"`
 	SourceRepo       string    `json:"sourceRepo,omitempty"`
+	// Capabilities are host capability names an agent's `requires` tests.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
-// readTargets returns the targets file, found false when there is none. A
-// file that is present but unreadable, unparseable or without codexHomes is
-// an error, never an empty roster.
+// Capabilities is the host's capability set: every flag value plus the
+// targets.json "capabilities" list, deduplicated, in first-seen order. A
+// broken targets file is an error, never an empty set.
+func Capabilities(get paths.Env, home string, flags []string) ([]string, error) {
+	targets, _, err := LoadTargets(get, home)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range append(append([]string{}, flags...), targets.Capabilities...) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, fmt.Errorf("capability: empty name")
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
+// WithCapabilities is a copy of cfg carrying the host's capability set (see
+// Capabilities); the cached policy itself is never mutated.
+func WithCapabilities(get paths.Env, home string, cfg *Config, flags []string) (*Config, error) {
+	capabilities, err := Capabilities(get, home, flags)
+	if err != nil {
+		return nil, fmt.Errorf("resolve capabilities: %w", err)
+	}
+	value := *cfg
+	value.Capabilities = capabilities
+	return &value, nil
+}
+
+// LoadTargets returns the targets file, found false when there is none. A
+// file that is present but unreadable or unparseable is an error, never an
+// empty roster; one without codexHomes leaves CodexHomes nil, the same Codex
+// homes as no targets file.
 func LoadTargets(get paths.Env, home string) (Targets, bool, error) {
 	path := filepath.Join(paths.EngineSyncConfig(get, home), "targets.json")
 	raw, err := paths.ReadRegular(path)
@@ -39,10 +77,11 @@ func LoadTargets(get paths.Env, home string) (Targets, bool, error) {
 	if err := dec.Decode(&targets); err != nil {
 		return Targets{}, false, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if targets.CodexHomes == nil {
-		return Targets{}, false, fmt.Errorf("%s: no \"codexHomes\" list", path)
+	var homes []string
+	if targets.CodexHomes != nil {
+		homes = *targets.CodexHomes
 	}
-	for _, dir := range append(append([]string(nil), *targets.CodexHomes...), targets.ClaudeConfigDirs...) {
+	for _, dir := range append(append([]string(nil), homes...), targets.ClaudeConfigDirs...) {
 		if !filepath.IsAbs(dir) {
 			return Targets{}, false, fmt.Errorf("%s: %q is not an absolute path", path, dir)
 		}
@@ -79,7 +118,7 @@ func ResolveTargets(get paths.Env, home string, cfg Config, override Targets) (T
 			}
 			v := []string{envHome}
 			result.CodexHomes = &v
-		case found:
+		case found && t.CodexHomes != nil:
 			result.CodexHomes = t.CodexHomes
 		case cfg.Sources["machine.codexHomes"] != "" && cfg.Sources["machine.codexHomes"] != "default":
 			v := append([]string{}, cfg.Machine.CodexHomes...)

@@ -210,7 +210,10 @@ func TestReviewSharedRoleNaming(t *testing.T) {
 	for _, rel := range []string{"CLAUDE.md", "unit-api/CLAUDE.md"} {
 		putProjectFile(t, root, rel, "# Sample\n")
 	}
-	putProjectFile(t, root, "unit-api/.claude/agents/reader.md", "---\nname: reader\ndescription: Reads.\n---\nRead.\n")
+	// Each file base differs from its frontmatter name: the role is named by
+	// the frontmatter, the suffix mode applied on top.
+	putProjectFile(t, root, "unit-api/.claude/agents/reader-file.md", "---\nname: reader\ndescription: Reads.\n---\nRead.\n")
+	putProjectFile(t, root, ".claude/agents/lead-file.md", "---\nname: lead\ndescription: Leads.\n---\nLead.\n")
 	putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"codex":{"projects":["unit-api"],"suffixMode":"strip-prefix","suffixPrefix":"unit-"}}`)
 	e := env{get: func(k string) string {
 		if k == "HOME" {
@@ -222,9 +225,17 @@ func TestReviewSharedRoleNaming(t *testing.T) {
 	if rc := dispatch([]string{"build", root}, &out, &errOut, e); rc != 0 {
 		t.Fatalf("build %d %s%s", rc, &out, &errOut)
 	}
-	for _, rel := range []string{".codex/agents/reader-api.toml", ".opencode/agent/reader-api.md"} {
-		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
-			t.Errorf("shared naming differs: %s %v", rel, err)
+	for rel, want := range map[string]string{
+		".codex/agents/reader-api.toml": `name = "reader-api"`, ".opencode/agent/reader-api.md": "Read.",
+		".codex/agents/lead.toml": `name = "lead"`, ".opencode/agent/lead.md": "Lead.",
+	} {
+		if raw, err := os.ReadFile(filepath.Join(root, rel)); err != nil || !strings.Contains(string(raw), want) {
+			t.Errorf("shared naming differs: %s lacks %q (%v)", rel, want, err)
+		}
+	}
+	for _, rel := range []string{".codex/agents/lead-file.toml", ".opencode/agent/reader-file-api.md"} {
+		if _, err := os.Lstat(filepath.Join(root, rel)); err == nil {
+			t.Errorf("%s named by its file base", rel)
 		}
 	}
 }

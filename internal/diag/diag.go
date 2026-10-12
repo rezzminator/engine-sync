@@ -32,6 +32,29 @@ func Text(w io.Writer, diagnostics []Diagnostic) {
 }
 func JSON(w io.Writer, value any) error { return json.NewEncoder(w).Encode(value) }
 
+// Merge folds one engine's result into a combined report: OK only while every
+// engine passed, every list and count accumulated.
+func (result *Report) Merge(r reconcile.Result, pass bool) {
+	result.OK = result.OK && pass
+	result.Problems = append(result.Problems, r.Problems...)
+	result.Warnings = append(result.Warnings, r.Warnings...)
+	result.Rebuildable = append(result.Rebuildable, r.Rebuildable...)
+	result.Wrote += r.Wrote
+	result.Unchanged += r.Unchanged
+	result.Deleted += r.Deleted
+	result.Actions = append(result.Actions, r.Actions...)
+}
+
+// PrintLines writes problems as they are, then warnings prefixed "warning:".
+func PrintLines(w io.Writer, problems, warnings []string) {
+	for _, s := range problems {
+		fmt.Fprintln(w, s)
+	}
+	for _, s := range warnings {
+		fmt.Fprintln(w, "warning:", s)
+	}
+}
+
 type Report struct {
 	OK                                        bool
 	Warnings, Problems, Rebuildable, Dangling []string

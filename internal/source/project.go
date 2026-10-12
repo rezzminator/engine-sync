@@ -1,6 +1,7 @@
 package source
 
 import (
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"os"
@@ -46,10 +47,12 @@ type directory struct {
 	Unresolved         []Unresolved
 }
 type Project struct {
-	SourceHome                   string
-	SourceCommandDir             string
-	MachineCommands              bool
-	AgentSourceDir               string
+	SourceHome       string
+	SourceCommandDir string
+	MachineCommands  bool
+	AgentSourceDir   string
+	// GeneratedDir is where a machine project's declarations render.
+	GeneratedDir                 string
 	CodexHomes, ClaudeConfigDirs []string
 	Home                         string
 	Workbench                    bool
@@ -68,8 +71,18 @@ type Project struct {
 	Unresolved                   []Unresolved
 	Projects                     []string
 	Problems, Warnings           []string
-	documents                    map[string]document
-	directories                  map[string]directory
+	// Failed names each machine agent skipped for an error: its installed
+	// copies are kept, never retired, until it builds again.
+	Failed []string
+	// Excluded holds each rendered declaration skipped for an unmet
+	// requires: no link, no role, but its rendered file is still the
+	// declaration's output.
+	Excluded []Agent
+	// Declares reports a machine source directory holding at least one
+	// from: source, parsed or not.
+	Declares    bool
+	documents   map[string]document
+	directories map[string]directory
 }
 
 // Load discovers source roots once. Targets select their output policy from this model.
@@ -96,8 +109,11 @@ func LoadProject(root, home string, cfg config.Config) Project {
 			if e.SkillDir {
 				continue
 			}
-			front, body, err := p.Frontmatter(e.Path)
-			if err == nil {
+			if front, body, ok := p.parsed(e.Path, report); ok {
+				if machineControls(front.Node) {
+					p.Problems = append(p.Problems, fmt.Sprintf("%s: declarations are machine scope only", e.Path))
+					continue
+				}
 				p.Agents = append(p.Agents, Agent{Name: strings.TrimSuffix(filepath.Base(e.Path), ".md"), Path: e.Path, Front: front, Body: body})
 			}
 		}
@@ -123,8 +139,7 @@ func LoadProject(root, home string, cfg config.Config) Project {
 			if e.SkillDir {
 				path = filepath.Join(path, "SKILL.md")
 			}
-			front, body, err := p.Frontmatter(path)
-			if err == nil {
+			if front, body, ok := p.parsed(path, report); ok {
 				p.Commands = append(p.Commands, Command{Name: strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(e.Rel), ".md"), "/", ":"), Path: path, Front: front, Body: body, Directory: e.SkillDir})
 			}
 		}
@@ -161,6 +176,17 @@ func (p *Project) Read(path string) ([]byte, error) {
 	}
 	p.documents[path] = document{Raw: raw, Front: front, Body: body, Err: err, ParseErr: parseErr}
 	return raw, err
+}
+
+// parsed is one source file's header for the loader: a header that does not
+// parse is reported FRONTMATTER-INVALID, never dropped silently; a read
+// failure is the reading target's to name.
+func (p *Project) parsed(path string, report Reporter) (Frontmatter, string, bool) {
+	front, body, err := p.Frontmatter(path)
+	if doc, read := p.documents[path]; err != nil && read && doc.Err == nil {
+		report.Problem(DescribeParseError(path, err))
+	}
+	return front, body, err == nil
 }
 func (p *Project) Frontmatter(path string) (Frontmatter, string, error) {
 	if p == nil {

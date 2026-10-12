@@ -295,16 +295,15 @@ func TestFrontmatterUnquotesYAMLScalars(t *testing.T) {
 	raw := "---\n" +
 		"single: 'a: b, \"c\" and it''s fine'\n" +
 		"double: \"line one\\n\\\"line two\\\" \\\\ end\"\n" +
-		"plain: unchanged: value\n" +
 		"---\nbody\n"
-	fields, _, err := claudesource.Fields(raw)
+	front, _, err := claudesource.Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	fields := front.Fields
 	want := map[string]string{
 		"single": `a: b, "c" and it's fine`,
 		"double": "line one\n\"line two\" \\ end",
-		"plain":  "unchanged: value",
 	}
 	for key, expected := range want {
 		if got := fields[key]; got != expected {
@@ -315,19 +314,25 @@ func TestFrontmatterUnquotesYAMLScalars(t *testing.T) {
 
 func TestFrontmatterStripsPlainScalarCommentAndPreservesQuotedHash(t *testing.T) {
 	raw := "---\nmodel: opus # pinned\nquoted: 'keep # this'\n---\nbody\n"
-	fields, _, err := claudesource.Fields(raw)
+	front, _, err := claudesource.Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	fields := front.Fields
 	if got := fields["model"]; got != "opus" {
 		t.Fatalf("model = %q, want %q", got, "opus")
 	}
 	if got := fields["quoted"]; got != "keep # this" {
 		t.Fatalf("quoted = %q, want %q", got, "keep # this")
 	}
-	if _, _, err := claudesource.Fields("---\nbad: \"invalid\\x\"\n---\nbody\n"); err == nil ||
-		!strings.Contains(err.Error(), "frontmatter field bad") {
-		t.Fatalf("malformed quoted scalar error = %v", err)
+	// A top-level line strict YAML refuses is read as its literal text (the
+	// compatibility retry); a nested one still fails, naming its line.
+	if front, _, err := claudesource.Parse("---\nbad: \"invalid\\x\"\n---\nbody\n"); err != nil || front.Fields["bad"] != `"invalid\x"` {
+		t.Fatalf("top-level malformed quoted scalar = %q, %v", front.Fields["bad"], err)
+	}
+	if _, _, err := claudesource.Parse("---\nok: 1\nnested:\n  bad: \"invalid\\x\"\n---\nbody\n"); err == nil ||
+		!strings.Contains(err.Error(), "line 4") {
+		t.Fatalf("nested malformed quoted scalar error = %v", err)
 	}
 }
 
@@ -397,12 +402,12 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeCodexFixture(
 		t,
 		filepath.Join(root, ".claude", "agents", "unmapped.md"),
-		"---\ndescription: unmapped model\ncodex-model: something-else\n---\nunmapped\n",
+		"---\ndescription: unmapped model\nengines:\n  codex:\n    model: something-else\n---\nunmapped\n",
 	)
 	writeCodexFixture(
 		t,
 		filepath.Join(root, ".claude", "agents", "escaped.md"),
-		"---\ndescription: escaped values\ncodex-model: 'model\\path\"quoted'\neffort: high\n---\nescaped\n",
+		"---\ndescription: escaped values\nengines:\n  codex:\n    model: 'model\\path\"quoted'\neffort: high\n---\nescaped\n",
 	)
 	writeCodexFixture(t, filepath.Join(root, ".claude", "agents", "private.md"), "---\ndescription: private\n---\nno\n")
 	writeCodexFixture(
@@ -413,12 +418,12 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeCodexFixture(
 		t,
 		filepath.Join(root, ".claude", "agents", "gitter.md"),
-		"---\ndescription: git writer\ntools: Read, Bash, Glob, Grep\ncodex-sandbox: inherit\n---\ngitter\n",
+		"---\ndescription: git writer\ntools: Read, Bash, Glob, Grep\nengines:\n  codex:\n    sandbox: inherit\n---\ngitter\n",
 	)
 	writeCodexFixture(
 		t,
 		filepath.Join(root, "sample-api", ".claude", "agents", "gitter.md"),
-		"---\ndescription: nested git writer\ntools: Read, Bash, Glob, Grep\ncodex-sandbox: inherit\n---\ngitter\n",
+		"---\ndescription: nested git writer\ntools: Read, Bash, Glob, Grep\nengines:\n  codex:\n    sandbox: inherit\n---\ngitter\n",
 	)
 	writeCodexFixture(
 		t,
@@ -493,7 +498,7 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 		`model_reasoning_effort = "high"`,
 	)
 	worker := string(readCodexFixture(t, filepath.Join(root, ".codex", "agents", "worker-api.toml")))
-	if !strings.Contains(worker, `name = "worker_api"`) || strings.Contains(worker, "\nmodel =") ||
+	if !strings.Contains(worker, `name = "worker-api"`) || strings.Contains(worker, "\nmodel =") ||
 		strings.Contains(worker, "\nmodel_reasoning_effort =") {
 		t.Fatalf("worker-api.toml must omit absent model and effort keys:\n%s", worker)
 	}

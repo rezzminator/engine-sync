@@ -93,7 +93,7 @@ func compileOpenCodeCommands(
 		front, body, parseErr := model.Frontmatter(file)
 		fields := front.Fields
 		if parseErr != nil {
-			problem("parse %s: %v", file, parseErr)
+			problem("%s", claudesource.DescribeParseError(file, parseErr))
 			continue
 		}
 		policy := config.Default()

@@ -50,8 +50,7 @@ func compileOpenCodeAgents(
 	knownServers := knownMCPServers(model, root, policy.MCP)
 	for _, project := range projects {
 		for _, entry := range discoverOpenCodeAgents(filepath.Join(root, project, ".claude", "agents"), problem, dangling, model) {
-			base := strings.TrimSuffix(filepath.Base(entry.Path), ".md")
-			name, register, err := claudesource.RoleName(base, project, policy.Codex)
+			name, register, err := claudesource.RoleName(claudesource.DeclaredName(model, entry.Path), project, policy.Codex)
 			if err != nil {
 				problem("%s: %v", entry.Path, err)
 				continue
@@ -106,41 +105,95 @@ func compileOpenCodeAgent(
 		return
 	}
 	front, body, parseErr := model.Frontmatter(path)
-	fields := front.Fields
 	if parseErr != nil {
-		skip("parse %s: %v", path, parseErr)
+		skip("%s", claudesource.DescribeParseError(path, parseErr))
 		return
 	}
-	ctx := rewrite.Context{Engine: "opencode", Kind: "agent", Source: path, Roster: roster}
-	chain := append(rewrite.Builtins(), rewrite.Configured(policy.Rewrites)...)
+	preamble, err := config.RenderTemplate(policy.OpenCode.AgentPreamble, config.TemplateData{Name: name, Engine: "OpenCode", Source: filepath.ToSlash(rel), Root: "AGENTS.md", Models: modelMap})
+	if err != nil {
+		skip("render opencode.agentPreamble for %s: %v", path, err)
+		return
+	}
+	renderOpenCodeAgent(openCodeAgentSpec{
+		Name: name, Path: path, Marker: filepath.ToSlash(rel), Preamble: preamble,
+		Output: filepath.Join(root, ".opencode", "agent", name+".md"),
+	}, front, body, roster, modelMap, knownServers, policy.Rewrites, add, skip, warn, policy)
+}
+
+// openCodeAgentSpec is what differs between a project agent and a
+// machine-global one: its name, source, marker credit, preamble and output.
+type openCodeAgentSpec struct {
+	Name, Path, Marker, Preamble, Output string
+	Generated                            bool
+	// Global marks a machine agent, which engine-sync global writes.
+	Global bool
+}
+
+// renderOpenCodeAgent is the one OpenCode agent renderer. An agent whose
+// requires the host does not meet is SKIPPED; `engines.opencode: false` is not
+// emitted.
+func renderOpenCodeAgent(
+	spec openCodeAgentSpec,
+	front claudesource.Frontmatter,
+	body string,
+	roster, modelMap map[string]string,
+	knownServers []string,
+	rewrites []config.Rewrite,
+	add func(artifact.Artifact),
+	skip, warn func(string, ...any),
+	policy config.Config,
+) {
+	problems, warnings := claudesource.ValidateAgent(spec.Path, front, policy.Agents.PassthroughKeys, spec.Generated)
+	for _, w := range warnings {
+		warn("%s", w)
+	}
+	if len(problems) > 0 {
+		for _, p := range problems {
+			skip("%s", p)
+		}
+		return
+	}
+	if missing := claudesource.Unmet(front.Requires, policy.Capabilities); missing != "" {
+		warn("%s", claudesource.Skipped(spec.Name, missing))
+		return
+	}
+	if front.Engines.OpenCodeOff() {
+		return
+	}
+	settings := claudesource.OpenCodeEngine{}
+	if front.Engines.OpenCode != nil {
+		settings = *front.Engines.OpenCode
+	}
+	ctx := rewrite.Context{Engine: "opencode", Kind: "agent", Source: spec.Path, Roster: roster}
+	chain := append(rewrite.Builtins(), rewrite.Configured(rewrites)...)
 	mode := openCodeAgentMode
-	if value := front.Engine["opencode"]["mode"]; value != "" {
-		mode = value
+	if settings.Mode != "" {
+		mode = settings.Mode
 	}
-	description := chain.Apply(strings.TrimSpace(fields["description"]), ctx)
-	content := "---\n" + artifact.Marker(artifact.YAMLFront,
-		filepath.ToSlash(rel),
-	) + "\ndescription: " + quoteOpenCodeYAML(
-		description,
-	) + "\nmode: " + mode + "\n"
-	alias := strings.TrimSpace(fields["model"])
-	if comment := strings.Index(alias, " #"); comment >= 0 {
-		alias = strings.TrimSpace(alias[:comment])
+	description := chain.Apply(strings.TrimSpace(front.Fields["description"]), ctx)
+	marker := artifact.Marker(artifact.YAMLFront, spec.Marker)
+	if spec.Global {
+		marker = artifact.GlobalMarker(artifact.YAMLFront, spec.Marker)
 	}
-	if pin := strings.TrimSpace(front.Engine["opencode"]["model"]); pin != "" {
+	content := "---\n" + marker + "\ndescription: " + quoteOpenCodeYAML(description) + "\nmode: " + mode + "\n"
+	alias := strings.TrimSpace(front.Model)
+	if pin := strings.TrimSpace(settings.Model); pin != "" {
+		if mapped := strings.TrimSpace(modelMap[pin]); mapped != "" {
+			pin = mapped
+		}
 		content += "model: " + quoteOpenCodeYAML(pin) + "\n"
 	} else if alias != "" && alias != "inherit" {
-		model, ok := modelMap[alias]
-		if !ok || strings.TrimSpace(model) == "" {
-			warn("unmapped OpenCode model alias %q in %s — model omitted", alias, path)
+		mapped, ok := modelMap[alias]
+		if !ok || strings.TrimSpace(mapped) == "" {
+			warn("unmapped OpenCode model alias %q in %s — model omitted", alias, spec.Path)
 		} else {
-			content += "model: " + quoteOpenCodeYAML(strings.TrimSpace(model)) + "\n"
+			content += "model: " + quoteOpenCodeYAML(strings.TrimSpace(mapped)) + "\n"
 		}
 	}
-	if tools, ok := fields["tools"]; ok {
-		toolsBlock, toolsWarnings, toolsErr := renderOpenCodeToolsBlock(path, tools, knownServers, policy.MCP)
+	if tools, ok := front.Fields["tools"]; ok {
+		toolsBlock, toolsWarnings, toolsErr := renderOpenCodeToolsBlock(spec.Path, tools, knownServers, policy.MCP)
 		if toolsErr != nil {
-			skip("tools %s: %v", path, toolsErr)
+			skip("tools %s: %v", spec.Path, toolsErr)
 			return
 		}
 		for _, toolsWarning := range toolsWarnings {
@@ -148,16 +201,11 @@ func compileOpenCodeAgent(
 		}
 		content += toolsBlock
 	}
-	if agent, ok := policy.OpenCode.Agent[name]; ok {
-		content += renderAgentPermission(agent.Permission)
+	if settings.Permission != nil {
+		content += renderAgentPermission(*settings.Permission)
 	}
-	preamble, err := config.RenderTemplate(policy.OpenCode.AgentPreamble, config.TemplateData{Name: name, Engine: "OpenCode", Source: filepath.ToSlash(rel), Root: "AGENTS.md"})
-	if err != nil {
-		skip("render opencode.agentPreamble for %s: %v", path, err)
-		return
-	}
-	content += "---\n" + preamble + chain.Apply(strings.TrimSpace(body), ctx) + "\n"
-	add(artifact.Artifact{Path: filepath.Join(root, ".opencode", "agent", name+".md"), Content: []byte(content), NativeMode: mode, Source: path, Syntax: artifact.YAMLFront})
+	content += "---\n" + spec.Preamble + chain.Apply(strings.TrimSpace(body), ctx) + "\n"
+	add(artifact.Artifact{Path: spec.Output, Content: []byte(content), NativeMode: mode, Source: spec.Path, Syntax: artifact.YAMLFront})
 }
 
 func selectedPolicy(policies []config.OpenCode) config.OpenCode {
