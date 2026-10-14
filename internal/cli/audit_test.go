@@ -117,6 +117,10 @@ func TestAuditCWDDiscovery(t *testing.T) {
 func TestAuditMachineFailures(t *testing.T) {
 	for _, form := range []string{"unwritable global", "unwritable agents", "foreign role", "foreign plan", "bare old copy", "dangling source", "locked foreign"} {
 		t.Run(form, func(t *testing.T) {
+			// An unwritable agents directory is a permission bit, which root ignores.
+			if strings.HasPrefix(form, "unwritable") && testjail.RanUnprivileged(t) {
+				return
+			}
 			home, _, e := auditEnv(t)
 			repo := filepath.Join(home, "source")
 			putProjectFile(t, repo, "agents/reader.md", auditAgent)
@@ -125,6 +129,7 @@ func TestAuditMachineFailures(t *testing.T) {
 				args = []string{"codex", "agents", "--source-repo", repo}
 			}
 			if strings.HasPrefix(form, "unwritable") {
+				// The role plans as missing, then its write fails: the failure under test is the write's.
 				dir := filepath.Join(home, ".codex", "agents")
 				if err := os.MkdirAll(dir, 0755); err != nil {
 					t.Fatal(err)
@@ -133,6 +138,9 @@ func TestAuditMachineFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+				if err := os.WriteFile(filepath.Join(dir, "probe"), nil, 0600); err == nil {
+					t.Fatal("fixture does not deny the write")
+				}
 			}
 			if form == "foreign role" || form == "foreign plan" {
 				putProjectFile(t, home, ".codex/agents/reader.toml", "user role\n")
@@ -152,12 +160,17 @@ func TestAuditMachineFailures(t *testing.T) {
 				args = []string{"global"}
 			}
 			if form == "locked foreign" {
+				// A symlink loop where a role file belongs: reading it fails with ELOOP for every uid.
 				p := filepath.Join(home, ".codex", "agents", "locked.toml")
-				putProjectFile(t, home, ".codex/agents/locked.toml", "foreign\n")
-				if err := os.Chmod(p, 0); err != nil {
+				if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = os.Chmod(p, 0755) })
+				if err := os.Symlink(p, p); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.ReadFile(p); err == nil {
+					t.Fatal("fixture does not deny the read")
+				}
 			}
 			rc, out := auditRun(e, args...)
 			if form == "dangling source" || form == "locked foreign" {
@@ -170,6 +183,9 @@ func TestAuditMachineFailures(t *testing.T) {
 				}
 			} else if rc != 1 || strings.Contains(out, "CODEX AGENTS PASS") {
 				t.Errorf("false success: rc=%d %s", rc, out)
+			}
+			if strings.HasPrefix(form, "unwritable") && !strings.Contains(out, "write "+filepath.Join(home, ".codex", "agents", "reader.toml")+": ") {
+				t.Errorf("the failed write is not named: %s", out)
 			}
 			if form == "foreign role" && !strings.Contains(out, "compiled") {
 				t.Errorf("unlabelled compiled size: %s", out)
@@ -335,12 +351,12 @@ func TestAuditUnusedAndForeignCommands(t *testing.T) {
 				putProjectFile(t, root, "bench.json", `{}`)
 			}
 			if form == "global disabled" || form == "workbench" {
+				// A regular file where the commands directory belongs: listing it fails with ENOTDIR for every uid.
 				p := filepath.Join(home, ".claude", "commands")
-				putProjectFile(t, home, ".claude/commands/unreadable.md", "secret\n")
-				if err := os.Chmod(p, 0); err != nil {
-					t.Fatal(err)
+				putProjectFile(t, home, ".claude/commands", "secret\n")
+				if _, err := os.ReadDir(p); err == nil {
+					t.Fatal("fixture does not deny the listing")
 				}
-				t.Cleanup(func() { _ = os.Chmod(p, 0755) })
 			}
 			if form == "extra directory" {
 				putProjectFile(t, root, filepath.Join("templates", "global", "commands", "unused.md"), "---\ndescription: Not a live command.\n---\nUnused\n")
@@ -410,6 +426,10 @@ func TestAuditHomeCommandOlderWriter(t *testing.T) {
 func TestAuditDoctorBrokenState(t *testing.T) {
 	for _, form := range []string{"tampered variant", "tampered role", "orphan role", "stale prompt", "deleted skill", "unreadable prompts", "fifo skill", "corrupt writer", "bad targets", "second registry"} {
 		t.Run(form, func(t *testing.T) {
+			// Unreadable prompts are a permission bit, which root ignores.
+			if form == "unreadable prompts" && testjail.RanUnprivileged(t) {
+				return
+			}
 			home, _, e := auditEnv(t)
 			if form != "tampered variant" {
 				putProjectFile(t, home, ".claude/agents/reader.md", auditAgent)
@@ -449,6 +469,9 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = os.Chmod(p, 0755) })
+				if _, err := os.ReadDir(p); err == nil {
+					t.Fatal("fixture does not deny the listing")
+				}
 			case "fifo skill":
 				p := filepath.Join(home, ".codex", "skills", "extra", "SKILL.md")
 				if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
@@ -475,6 +498,9 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 			rc, out := auditRun(e, "doctor", "--machine")
 			if rc != 1 {
 				t.Fatalf("doctor false ok rc=%d %s", rc, out)
+			}
+			if form == "unreadable prompts" && !strings.Contains(out, "inspect "+filepath.Join(home, ".codex", "prompts")+":") {
+				t.Errorf("the unlistable prompts directory is not named: %s", out)
 			}
 			if strings.Contains(out, "ok global-agents") {
 				t.Errorf("contradictory registry ok: %s", out)

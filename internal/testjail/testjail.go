@@ -11,8 +11,12 @@ import (
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -127,3 +131,52 @@ func Scratch(t testing.TB) string {
 	return dir
 }
 func MkdirTemp(dir, pattern string) (string, error) { return os.MkdirTemp(dir, pattern) }
+
+// unprivilegedEnv carries the parent's pid into the re-run, so a value left in
+// a shell never reads as a re-run.
+const unprivilegedEnv = "ENGINE_SYNC_TEST_UNPRIVILEGED"
+
+// RanUnprivileged serves a test whose fixture is a permission bit, which root
+// ignores. Run as root, it runs the calling test (or subtest), and only it, in
+// a copy of this test binary as uid 65534, and reports true once that run
+// passed; the caller then returns. Otherwise it reports false and the caller
+// runs its body in-process.
+func RanUnprivileged(t *testing.T) bool {
+	t.Helper()
+	if os.Geteuid() != 0 {
+		return false
+	}
+	if os.Getenv(unprivilegedEnv) == strconv.Itoa(os.Getppid()) {
+		t.Fatal("the unprivileged re-run is still root")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The build directory of the test binary is private to root; the copy sits where uid 65534 can run it.
+	dir := Scratch(t)
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, filepath.Base(self))
+	if err := os.WriteFile(bin, raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(t.Name(), "/")
+	for i, part := range parts {
+		parts[i] = "^" + regexp.QuoteMeta(part) + "$"
+	}
+	cmd := exec.Command(bin, "-test.run="+strings.Join(parts, "/"), "-test.v", "-test.count=1")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), unprivilegedEnv+"="+strconv.Itoa(os.Getpid()))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: "+t.Name()+" ") {
+		t.Fatalf("unprivileged run of %s: %v\n%s", t.Name(), err, out)
+	}
+	return true
+}

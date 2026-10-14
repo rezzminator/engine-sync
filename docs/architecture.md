@@ -75,7 +75,7 @@ Canonical public terms are source, target, artifact, mirror, marker, project sco
 
 ## Tree gates
 
-`scripts/check-tree.sh` reports PASS, FAIL or ERROR per check. A missing producer, malformed input, missing baseline, empty source enumeration or empty leak scan is ERROR. Baselines compare against the Git base in ordinary runs as well as measure mode; measure refuses growth and never rewrites a failed input.
+`scripts/check-tree.sh` reports PASS, FAIL, ERROR or GAP per check; GAP (publication, private terms not supplied) is no pass and no red, and the run exits 3 when nothing else failed. A missing producer, malformed input, missing baseline, empty source enumeration or empty leak scan is ERROR. Baselines compare against the Git base in ordinary runs as well as measure mode; measure refuses growth and never rewrites a failed input.
 
 | Check | Enforced surface |
 | --- | --- |

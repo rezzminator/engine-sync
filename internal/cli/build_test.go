@@ -84,13 +84,15 @@ func TestCommandsIgnoreUnrelatedEngineHomeEntries(t *testing.T) {
 				}
 				t.Cleanup(func() { listener.Close() })
 			} else {
-				putProjectFile(t, home, ".codex/sessions/x.jsonl", "private session\n")
-				if err := os.Chmod(path, 0000); err != nil {
+				// A symlink loop is an entry no uid (root included) can read: ELOOP.
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { os.Chmod(path, 0600) })
+				if err := os.Symlink(path, path); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := os.ReadFile(path); err == nil {
-					t.Skip("permission proof requires a non-root user")
+					t.Fatal("fixture does not deny the read")
 				}
 			}
 			before, err := os.Lstat(path)

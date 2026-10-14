@@ -17,13 +17,15 @@ func TestMachineInspectionValidatesOnlyCodexRoles(t *testing.T) {
 	p := source.Project{Scope: source.MachineScope, Home: home, AgentSourceDir: filepath.Join(home, "source"), CodexHomes: []string{filepath.Join(home, ".codex")}, ClaudeConfigDirs: []string{filepath.Join(home, ".claude")}}
 	for _, dir := range []string{filepath.Join(home, ".claude", "agents"), filepath.Join(home, cfg.Machine.GeneratedAgentsDir)} {
 		path := filepath.Join(dir, "unrelated.txt")
-		writeCodexFixture(t, path, "private data\n")
-		if err := os.Chmod(path, 0000); err != nil {
+		// A symlink loop is an entry no uid (root included) can read: ELOOP.
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { os.Chmod(path, 0600) })
+		if err := os.Symlink(path, path); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := os.ReadFile(path); err == nil {
-			t.Skip("permission proof requires a non-root user")
+			t.Fatal("fixture does not deny the read")
 		}
 	}
 	role := filepath.Join(home, ".codex", "agents", "keeper.toml")

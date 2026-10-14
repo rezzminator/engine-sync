@@ -20,8 +20,10 @@
 #                                     a known-public string a term matches inside
 #                                     stops failing while a real leak on the same
 #                                     line still does.
-# A MISSING OR EMPTY TERMS FILE IS A FAILURE, never a pass, and so is a scan of
-# zero files: "no denylist" and "found no leak" must not print the same word.
+# A TERMS FILE THAT IS NAMED BUT MISSING OR EMPTY IS A FAILURE (exit 1), never a
+# pass, and so is a scan of zero files. NO TERMS FILE SUPPLIED AT ALL (no LEAK_TERMS,
+# no scripts/leak-terms.txt) IS A GAP (exit 3): the scan could not run, which is
+# neither a pass nor a red. "No denylist" and "found no leak" must not print the same word.
 #
 # The structural patterns below are bracket-classed so they cannot match their
 # own source text; this script passes the scan it runs.
@@ -55,10 +57,15 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 terms_file="${LEAK_TERMS:-$script_dir/leak-terms.txt}"
 
 if [[ ! -f "$terms_file" ]]; then
+  if [[ -z "${LEAK_TERMS:-}" ]]; then
+    # Nothing was supplied: the scan could not run, which is neither clean nor a leak.
+    echo "leak-check: GAP — no terms file supplied; nothing was scanned, which is not a pass" >&2
+    echo "leak-check: the private denylist is untracked by design (see .gitignore): trusted runs supply it," >&2
+    echo "leak-check: as scripts/leak-terms.txt or the file LEAK_TERMS names (one lowercase regex per line, '#' comments)." >&2
+    exit 3
+  fi
   echo "leak-check: FAILED — terms file not found: $terms_file" >&2
-  echo "leak-check: the private denylist is untracked by design (see .gitignore)." >&2
-  echo "leak-check: create it as one lowercase regex per line ('#' comments)," >&2
-  echo "leak-check: or point LEAK_TERMS at one. Refusing to report clean with no denylist." >&2
+  echo "leak-check: LEAK_TERMS names a file that does not exist. Refusing to report clean with no denylist." >&2
   exit 1
 fi
 

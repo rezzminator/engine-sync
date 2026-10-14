@@ -1,7 +1,9 @@
 package codex
 
 import (
+	"errors"
 	"github.com/rezzminator/engine-sync/internal/testjail"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,21 +163,20 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 
 // TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing pins the rule this
 // package exists to enforce: a probe that could not run must never render as
-// "nothing there". A parent directory this process cannot traverse makes
-// Lstat fail with something other than ErrNotExist, and that must surface as
+// "nothing there". A parent that is a regular file makes Lstat fail with
+// ENOTDIR, which no uid can bypass and which is not ErrNotExist, and that must surface as
 // a genuine error, not GlobalLinkMissing.
 func TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory permission bits — this probe cannot be denied as root")
-	}
 	root := testjail.Scratch(t)
 	blocked := filepath.Join(root, "blocked")
-	if err := os.MkdirAll(blocked, 0o000); err != nil {
+	if err := os.WriteFile(blocked, []byte("not a directory\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
 
 	target := filepath.Join(blocked, "alpha.md")
+	if _, err := os.Lstat(target); err == nil || errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("fixture does not make the probe fail with something other than absence: %v", err)
+	}
 	source := filepath.Join(root, "repo", "templates", "global", "agents", "alpha.md")
 	_, _, err := ClassifyGlobalLink(target, source, filepath.Join(root, "repo"), GlobalLinkFile)
 	if err == nil {
