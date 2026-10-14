@@ -39,6 +39,10 @@ Exit codes: 0 pass, 1 a finding or failure, 2 a usage error. The complete flag a
 - `${ENGINE_SYNC_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/engine-sync}`: writer records, locks and dirty flags.
 - `${XDG_CONFIG_HOME:-$HOME/.config}/engine-sync/targets.json`: the Codex homes and Claude config dirs `global` writes; `config.json` beside it holds machine policy.
 
+## Logs
+
+Errors, warnings and meaningful info are JSON rows in `errors.jsonl`, `warnings.jsonl` and `info.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise they use `~/.local/state/engine-sync/logs`. Session start writes a versioned `logger-ready` heartbeat. Capped files move to `.1`; a failed logging streak reports once on stderr without changing command results.
+
 ## Standalone use
 
 A project needs only its Claude sources. Build the mirrors once, then use the plugin hooks to keep them current:

@@ -31,6 +31,7 @@ func runHook(args []string, stdout, stderr io.Writer, e env) int {
 		return 2
 	}
 	payload := readHookPayload(e.stdin)
+	e.sessionID = payload.SessionID
 	if args[1] == "mark" && payload.ToolInput.FilePath == "" {
 		return 0
 	}
@@ -57,7 +58,7 @@ func hookContext(e env) hook.Context {
 	for _, t := range target.Registry {
 		names = append(names, t.Name())
 	}
-	return hook.Context{Get: e.get, Home: e.home, State: e.state, Policy: e.policy, Engines: names, Targets: func(home string) (bool, error) {
+	return hook.Context{Version: Version, SessionID: e.sessionID, Get: e.get, Home: e.home, State: e.state, Policy: e.policy, Engines: names, Targets: func(home string) (bool, error) {
 		cfg, err := e.policy("", home, io.Discard)
 		if err != nil {
 			return false, err

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/diag"
+	"github.com/rezzminator/engine-sync/internal/pluginlog"
 	"github.com/rezzminator/engine-sync/internal/target/codex"
 	"github.com/rezzminator/engine-sync/internal/target/opencode"
 	"io"
@@ -86,6 +87,7 @@ func ParseProjectOptions(action string, args []string, stdout, stderr io.Writer,
 }
 
 func ReportFailure(prefix string, asJSON bool, err error, stdout, stderr io.Writer) int {
+	pluginlog.Record(nil, stderr, pluginlog.Row{Level: "error", Event: "run-failed", Msg: prefix + ": " + err.Error(), Where: "internal/cliargs/project.go#ReportFailure", Detail: map[string]any{"error": err.Error()}})
 	if asJSON {
 		return diag.WriteJSON(stdout, stderr, opencode.Result{}, err)
 	}

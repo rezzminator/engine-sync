@@ -6,6 +6,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/pluginlog"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/target"
 	"io"
@@ -23,12 +24,13 @@ var Version = "0.4.0-alpha"
 
 // env is the process environment one run reads.
 type env struct {
-	lockWait time.Duration
-	get      paths.Env
-	stdin    io.Reader
-	notices  map[string]bool
-	policies map[string]policyResult
-	sources  map[string]*source.Project
+	lockWait  time.Duration
+	get       paths.Env
+	stdin     io.Reader
+	sessionID string
+	notices   map[string]bool
+	policies  map[string]policyResult
+	sources   map[string]*source.Project
 }
 
 type policyResult = config.CachedResult
@@ -56,6 +58,7 @@ func dispatch(args []string, stdout, stderr io.Writer, e env) int {
 		args[0] = "help"
 	}
 	if len(args) == 0 {
+		pluginlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: "a command is required", Where: "internal/cli/main.go#dispatch"})
 		printUsage(stderr)
 		return 2
 	}
@@ -65,6 +68,7 @@ func dispatch(args []string, stdout, stderr io.Writer, e env) int {
 		}
 	}
 
+	pluginlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: fmt.Sprintf("unknown command %q", args[0]), Where: "internal/cli/main.go#dispatch"})
 	fmt.Fprintf(stderr, "engine-sync: unknown command %q\n", args[0])
 	printUsage(stderr)
 	return 2

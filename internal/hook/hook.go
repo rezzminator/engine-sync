@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/guard"
 	"github.com/rezzminator/engine-sync/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/pluginlog"
 	"io"
 	"io/fs"
 	"os"
@@ -22,19 +23,22 @@ import (
 
 type StageRunner func([]string) (int, string)
 type Payload struct {
+	SessionID string `json:"session_id"`
 	ToolInput struct {
 		FilePath string `json:"file_path"`
 	} `json:"tool_input"`
 	StopHookActive bool `json:"stop_hook_active"`
 }
 type Context struct {
-	Get     paths.Env
-	Home    func() (string, error)
-	State   func(string) string
-	Policy  func(string, string, io.Writer) (*config.Config, error)
-	Targets func(string) (bool, error)
-	Writer  func() string
-	Engines []string
+	Version   string
+	SessionID string `json:"session_id"`
+	Get       paths.Env
+	Home      func() (string, error)
+	State     func(string) string
+	Policy    func(string, string, io.Writer) (*config.Config, error)
+	Targets   func(string) (bool, error)
+	Writer    func() string
+	Engines   []string
 }
 
 const detailLimit = 4000
@@ -154,16 +158,23 @@ func DirtyFlag(e Context, root string) (string, error) {
 }
 
 func Mark(payload Payload, stderr io.Writer, e Context) int {
+	if payload.SessionID != "" {
+		e.SessionID = payload.SessionID
+	}
 	path := payload.ToolInput.FilePath
 	if path == "" {
 		return 0
 	}
-	home, _ := e.Home()
+	home, homeErr := e.Home()
+	if homeErr != nil {
+		recordHook(e, stderr, "hook-step-failed", "Mark", homeErr.Error(), nil)
+	}
 	if !IsClaudeSource(path, home) {
 		return 0
 	}
 	root, rootErr := resolveProjectRoot(e, filepath.Dir(path), false)
 	if rootErr != nil {
+		recordHook(e, stderr, "hook-step-failed", "Mark", rootErr.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude mark: %v\n", rootErr)
 		return 0
 	}
@@ -172,6 +183,7 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 	}
 	if scoped, err := InScope(root); err != nil || !scoped {
 		if err != nil {
+			recordHook(e, stderr, "hook-step-failed", "Mark", err.Error(), nil)
 			fmt.Fprintf(stderr, "engine-sync hook claude mark: %v\n", err)
 		}
 		return 0
@@ -184,6 +196,7 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 	if release != nil {
 		defer func() {
 			if err := release(); err != nil {
+				recordHook(e, stderr, "hook-lock-failed", "Mark", "release dirty lock: "+err.Error(), nil)
 				fmt.Fprintln(stderr, "engine-sync hook claude mark: release dirty lock:", err)
 			}
 		}()
@@ -195,6 +208,7 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 		err = atomicfile.Write(flag, []byte(root+"\n"), 0o600)
 	}
 	if err != nil {
+		recordHook(e, stderr, "hook-lock-failed", "Mark", "set dirty flag: "+err.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude mark: set the dirty flag: %v\n", err)
 	}
 	return 0
@@ -211,14 +225,21 @@ func stopStages(root string, engines []string) [][]string {
 }
 
 func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunner) int {
+	if payload.SessionID != "" {
+		e.SessionID = payload.SessionID
+	}
+	notice := func(event, message string) {
+		recordHook(e, stderr, event, "Stop", message, nil)
+		hookNotice(stdout, stderr, message)
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		hookNotice(stdout, stderr, "engine-sync hook claude stop: getwd: "+err.Error())
+		notice("hook-step-failed", "engine-sync hook claude stop: getwd: "+err.Error())
 		return 0
 	}
 	root, rootErr := resolveProjectRoot(e, cwd, true)
 	if rootErr != nil {
-		hookNotice(stdout, stderr, "engine-sync hook claude stop: "+rootErr.Error())
+		notice("hook-step-failed", "engine-sync hook claude stop: "+rootErr.Error())
 		return 0
 	}
 	if root == "" {
@@ -226,7 +247,7 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 	}
 	flag, err := DirtyFlag(e, root)
 	if err != nil {
-		hookNotice(stdout, stderr, "engine-sync hook claude stop: "+err.Error())
+		notice("hook-lock-failed", "engine-sync hook claude stop: "+err.Error())
 		return 0
 	}
 	info, err := os.Lstat(flag)
@@ -236,6 +257,7 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			message := fmt.Sprintf("engine-sync: cannot inspect dirty flag: %v", err)
+			recordHook(e, stderr, "hook-lock-failed", "Stop", message, nil)
 			fmt.Fprintln(stderr, message)
 			if err := json.NewEncoder(stdout).Encode(map[string]string{"systemMessage": message}); err != nil {
 				fmt.Fprintln(stderr, err)
@@ -252,18 +274,19 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 			continue
 		}
 		name := stage[0] + " " + stage[1]
+		recordHook(e, stderr, "hook-step-failed", "Stop", name+" failed", map[string]any{"stage": name, "code": code})
 		failed = append(failed, name)
 		detail.WriteString(name + ":\n" + output + "\n")
 	}
 	if len(failed) == 0 {
 		home, err := e.Home()
 		if err != nil {
-			hookNotice(stdout, stderr, "engine-sync: "+err.Error())
+			notice("hook-step-failed", "engine-sync: "+err.Error())
 			return 0
 		}
 		release, err := guard.Lock(e.State(home), "dirty:"+root, 250*time.Millisecond)
 		if err != nil {
-			hookNotice(stdout, stderr, "engine-sync: "+err.Error())
+			notice("hook-lock-failed", "engine-sync: "+err.Error())
 			return 0
 		}
 		current, err := os.Lstat(flag)
@@ -271,10 +294,10 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 			err = os.Remove(flag)
 		}
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			hookNotice(stdout, stderr, "engine-sync: clear dirty flag: "+err.Error())
+			notice("hook-lock-failed", "engine-sync: clear dirty flag: "+err.Error())
 		}
 		if err := release(); err != nil {
-			hookNotice(stdout, stderr, "engine-sync: release dirty lock: "+err.Error())
+			notice("hook-lock-failed", "engine-sync: release dirty lock: "+err.Error())
 		}
 		return 0
 	}
@@ -294,6 +317,7 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 			"then " + shellPath(e.Writer()) + " check . must pass. Output of the failing stage(s):\n" + text}
 	}
 	if err := json.NewEncoder(stdout).Encode(answer); err != nil {
+		recordHook(e, stderr, "hook-step-failed", "Stop", "write answer: "+err.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude stop: write the answer: %v\n", err)
 	}
 	return 0
@@ -303,26 +327,41 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 // the machine targets when targets.json names them. A build that fails sets
 // the dirty flag, so the session's first Stop reports it.
 func Start(stderr io.Writer, e Context, runner StageRunner) int {
+	source := "fallback"
+	if e.Get != nil && e.Get("PLUGIN_LOG_DIR") != "" {
+		source = "PLUGIN_LOG_DIR"
+	}
+	pluginlog.Record(hookLogEnv(e), stderr, pluginlog.Row{Level: "info", Event: "logger-ready", Msg: "plugin logger ready", Where: "internal/hook/hook.go#Start", Session: e.SessionID, Detail: map[string]any{"version": e.Version, "dir_source": source}})
 	cwd, err := os.Getwd()
 	if err != nil {
+		recordHook(e, stderr, "hook-step-failed", "Start", "getwd: "+err.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude start: getwd: %v\n", err)
 		return 0
 	}
 	root, rootErr := resolveProjectRoot(e, cwd, true)
 	if rootErr != nil {
+		recordHook(e, stderr, "hook-step-failed", "Start", rootErr.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude start: %v\n", rootErr)
 	}
 	if root != "" {
 		if scoped, err := InScope(root); err != nil {
+			recordHook(e, stderr, "hook-step-failed", "Start", err.Error(), nil)
 			fmt.Fprintf(stderr, "engine-sync hook claude start: %v\n", err)
 		} else if scoped {
 			if code, _ := runner([]string{"check", root}); code != 0 {
 				if code, output := runner([]string{"build", root}); code != 0 {
+					recordHook(e, stderr, "hook-step-failed", "Start", "build failed", nil)
 					fmt.Fprintf(stderr, "engine-sync hook claude start: build %s failed:\n%s", root, output)
-					if flag, err := DirtyFlag(e, root); err == nil && os.MkdirAll(filepath.Dir(flag), 0o700) == nil {
-						if err := atomicfile.Write(flag, []byte(root+"\n"), 0o600); err != nil {
-							fmt.Fprintf(stderr, "engine-sync hook claude start: set the dirty flag: %v\n", err)
-						}
+					flag, flagErr := DirtyFlag(e, root)
+					if flagErr == nil {
+						flagErr = os.MkdirAll(filepath.Dir(flag), 0700)
+					}
+					if flagErr == nil {
+						flagErr = atomicfile.Write(flag, []byte(root+"\n"), 0600)
+					}
+					if flagErr != nil {
+						recordHook(e, stderr, "hook-lock-failed", "Start", "set dirty flag: "+flagErr.Error(), nil)
+						fmt.Fprintf(stderr, "engine-sync hook claude start: set the dirty flag: %v\n", flagErr)
 					}
 				}
 			}
@@ -330,12 +369,15 @@ func Start(stderr io.Writer, e Context, runner StageRunner) int {
 	}
 	home, err := e.Home()
 	if err != nil {
+		recordHook(e, stderr, "hook-step-failed", "Start", err.Error(), nil)
 		return 0
 	}
 	if found, err := e.Targets(home); err != nil {
+		recordHook(e, stderr, "hook-step-failed", "Start", err.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude start: %v\n", err)
 	} else if found {
 		if code, output := runner([]string{"global"}); code != 0 {
+			recordHook(e, stderr, "hook-step-failed", "Start", "global failed", nil)
 			fmt.Fprintf(stderr, "engine-sync hook claude start: global failed:\n%s", output)
 		}
 	}
@@ -343,3 +385,24 @@ func Start(stderr io.Writer, e Context, runner StageRunner) int {
 }
 
 func shellPath(path string) string { return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'" }
+
+// hookLogEnv uses the hook's resolved home even for an injected minimal environment.
+func hookLogEnv(e Context) paths.Env {
+	return func(key string) string {
+		value := ""
+		if e.Get != nil {
+			value = e.Get(key)
+		}
+		if key == "HOME" && value == "" && e.Home != nil {
+			home, err := e.Home()
+			if err == nil {
+				return home
+			}
+		}
+		return value
+	}
+}
+
+func recordHook(e Context, stderr io.Writer, event, step, msg string, detail any) {
+	pluginlog.Record(hookLogEnv(e), stderr, pluginlog.Row{Level: "error", Event: event, Msg: msg, Where: "internal/hook/hook.go#" + step, Session: e.SessionID, Detail: detail})
+}

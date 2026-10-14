@@ -174,5 +174,13 @@ func EngineSyncConfig(env Env, home string) string {
 	return filepath.Join(absoluteOr(env, "XDG_CONFIG_HOME", home, ".config"), "engine-sync")
 }
 
+// PluginLogDir is PLUGIN_LOG_DIR/engine-sync, else HOME/.local/state/engine-sync/logs.
+func PluginLogDir(env Env, home string) string {
+	if value := env("PLUGIN_LOG_DIR"); value != "" {
+		return filepath.Join(value, "engine-sync")
+	}
+	return filepath.Join(home, ".local", "state", "engine-sync", "logs")
+}
+
 const ClaudeVariantStore = ".local/state/engine-sync/generated/claude-agents"
 const CodexLegacyStore = ".local/state/engine-sync/generated/codex-agents"

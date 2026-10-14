@@ -24,7 +24,7 @@ import (
 // a test toward a real binary, account or project.
 var clearedEnv = []string{
 	"ENGINE_SYNC_BIN", "ENGINE_SYNC_WORKBENCH_MARKER", "ENGINE_SYNC_HOME", "ENGINE_SYNC_STATE", "CODEX_HOME",
-	"CLAUDE_CONFIG_DIR", "CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA",
+	"PLUGIN_LOG_DIR", "CLAUDE_CONFIG_DIR", "CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA",
 }
 
 // Run jails the process, runs the tests and returns their exit code; a jail
