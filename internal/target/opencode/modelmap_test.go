@@ -117,32 +117,37 @@ func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		allowList string
+		servers   string // the MCP deny lines: an unmapped server is denied outright
 		warning   string
 	}{
 		{
 			name:      "retired server prefixes a bare tool",
 			allowList: "Read, mcp__archive__read",
+			servers:   "  archive_*: false\n  hub_*: false\n",
 			warning:   "retired MCP tool mcp__archive__read in worker.md — the hub server serves it as mcp__hub__archive_read",
 		},
 		{
 			name:      "retired server keeps a prefixed tool",
 			allowList: "Read, mcp__legacy__legacy_ship",
+			servers:   "  hub_*: false\n  legacy_*: false\n",
 			warning:   "retired MCP tool mcp__legacy__legacy_ship in worker.md — the hub server serves it as mcp__hub__legacy_ship",
 		},
 		{
 			name:      "unknown server",
 			allowList: "Read, mcp__nosuch__x",
+			servers:   "  hub_*: false\n  nosuch_*: false\n",
 			warning:   "unknown MCP server in tool mcp__nosuch__x in worker.md — no configured or project .mcp.json server serves it; it stays denied",
 		},
 		{
 			name:      "unmapped Claude tool",
 			allowList: "Read, NotebookEdit",
+			servers:   "  hub_*: false\n",
 			warning:   "unmapped Claude tool NotebookEdit in worker.md — no OpenCode equivalent; it stays denied",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"hub"}, config.MCP{Renamed: map[string]string{"legacy": "hub", "archive": "hub"}})
-			want := openCodeBuiltinDenialsForReadOnly + "  hub_*: false\n"
+			want := openCodeBuiltinDenialsForReadOnly + tc.servers
 			if err != nil || got != want {
 				t.Fatalf("tools block = %q, %v; want %q", got, err, want)
 			}

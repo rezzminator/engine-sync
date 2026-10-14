@@ -22,7 +22,7 @@ func TestMachineCommandDestination(t *testing.T) {
 
 // A machine-global agent has no project .mcp.json beside it, so the servers
 // the machine config names in mcp.globalServers are the ones it may grant; a
-// server named nowhere stays denied and is named in a warning.
+// server named nowhere is named in a warning (its deny: modelmap_test.go).
 func TestMachineAgentGrantsConfiguredGlobalServersAndWarnsOnUnknownOnes(t *testing.T) {
 	home := testjail.Scratch(t)
 	agents := filepath.Join(home, "source", "agents")
@@ -42,9 +42,6 @@ func TestMachineAgentGrantsConfiguredGlobalServersAndWarnsOnUnknownOnes(t *testi
 	if !strings.Contains(raw, "  tools-hub_*: false\n  tools-hub_lookup: true\n") {
 		t.Errorf("agent %q does not grant mcp__tools-hub__lookup after its server's deny", raw)
 	}
-	if strings.Contains(raw, "nosuch") {
-		t.Errorf("agent %q grants or names the unknown server", raw)
-	}
 	var warnings []string
 	for _, d := range ds {
 		warnings = append(warnings, d.Message)
@@ -55,5 +52,40 @@ func TestMachineAgentGrantsConfiguredGlobalServersAndWarnsOnUnknownOnes(t *testi
 	}
 	if !strings.Contains(joined, "unknown MCP server in tool mcp__nosuch__x") {
 		t.Errorf("warnings %q do not name the unknown server's tool", joined)
+	}
+}
+
+// A configured server name is a key in the agent's frontmatter: it renders in
+// OpenCode's tool-part charset, as a project server does, so a name with a dot
+// still grants and a name carrying YAML syntax or a newline injects nothing.
+func TestMachineAgentRendersConfiguredServerNamesSanitized(t *testing.T) {
+	home := testjail.Scratch(t)
+	agents := filepath.Join(home, "source", "agents")
+	writeOpenCodeFixture(t, filepath.Join(agents, "worker.md"),
+		"---\ndescription: Work.\ntools: Read, mcp__chat.hub__lookup\n---\nWork.\n")
+	cfg := config.Default()
+	cfg.MCP.GlobalServers = []string{"chat.hub", "evil\npermission: {}\nx"}
+	p, err := source.LoadMachine(home, agents, filepath.Join(home, "generated"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs, ds := renderOpenCodeMachineAgents(p, cfg)
+	if len(outputs) != 1 {
+		t.Fatalf("outputs=%#v diagnostics=%#v, want the one agent", outputs, ds)
+	}
+	raw := string(outputs[0].Content)
+	if !strings.Contains(raw, "  chat_hub_*: false\n  chat_hub_lookup: true\n") {
+		t.Errorf("agent %q does not grant the dotted server's tool under its sanitized name", raw)
+	}
+	if strings.Contains(raw, "chat.hub") || strings.Contains(raw, "\npermission:") {
+		t.Errorf("agent %q carries a raw configured server name", raw)
+	}
+	if !strings.Contains(raw, "  evil_permission_____x_*: false\n") {
+		t.Errorf("agent %q does not deny the sanitized multi-line server", raw)
+	}
+	for _, d := range ds {
+		if strings.Contains(d.Message, "unknown MCP server") {
+			t.Errorf("a configured server reads as unknown: %s", d.Message)
+		}
 	}
 }
