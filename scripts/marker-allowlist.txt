@@ -76,22 +76,12 @@ internal/target/codex/target_test.go			`{"mcpServers":{"fixture":{"command":"pfm
 internal/target/codex/target_test.go		for _, writable := range []string{"changelogger", "gitter", "gitter-api", "unmapped"} {
 internal/target/codex/target_test.go		writeCodexFixture(t, filepath.Join(root, ".example", "workbench.json"), `{}`)
 internal/target/codex/target_test.go		writeCodexFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"codex":{"globalCommands":true},"workbenchMarker":".example/workbench.json"}`)
-internal/target/opencode/mcp_test.go		writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"mcp":{"globalServers":["professor"]}}`)
-internal/target/opencode/mcp_test.go			`{"mcpServers":{"local":{"command":"pfm","args":["mcp","serve"]},"my.remote":{"url":"http://127.0.0.1:9/mcp"}}}`,
-internal/target/opencode/modelmap_test.go		got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "professor"})
-internal/target/opencode/modelmap_test.go		known := []string{"alpha", "my_server", "professor"}
-internal/target/opencode/modelmap_test.go				warning:   "retired MCP tool mcp__harvester__read in worker.md — the professor server serves it as mcp__professor__harvester_read",
-internal/target/opencode/modelmap_test.go				warning:   "retired MCP tool mcp__chat__chat_inject in worker.md — the professor server serves it as mcp__professor__chat_inject",
-internal/target/opencode/modelmap_test.go				got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"professor"}, config.MCP{Renamed: map[string]string{"chat": "professor", "harvester": "professor"}})
-internal/target/opencode/modelmap_test.go			[]string{"harvester", "professor"},
 internal/target/opencode/target_test.go			`{"mcpServers":{"local":{"command":"pfm","args":["mcp","serve"],"env":{"X":"1"}},"remote":{"url":"http://127.0.0.1:9/mcp"}}}`,
 internal/target/opencode/target_test.go		writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".example/workbench.json"}`)
 internal/target/opencode/target_test.go		writeOpenCodeFixture(t, filepath.Join(root, "scribe", ".example", "workbench.json"), `{}`)
 internal/target/opencode/target_test.go		writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"workbenchMarker":".example/workbench.json"}`)
 internal/target/opencode/target_test.go		writeOpenCodeFixture(t, filepath.Join(root, ".example", "workbench.json"), `{}`)
 internal/target/opencode/target_test.go		t.Setenv("ENGINE_SYNC_WORKBENCH_MARKER", ".example/workbench.json")
-internal/target/opencode/transform_test.go		listedBlock, _, _ := renderOpenCodeToolsBlock("worker.md", listed["tools"], []string{"professor"})
-internal/target/opencode/transform_test.go		inlineBlock, _, _ := renderOpenCodeToolsBlock("worker.md", inline["tools"], []string{"professor"})
 plugins/engine-sync/.claude-plugin/plugin.json	    "name": "Reza · Professor",
 plugins/engine-sync/.claude-plugin/plugin.json	    "url": "https://github.com/rezzminator/professor"
 plugins/engine-sync/.claude-plugin/plugin.json	  "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"]
@@ -110,3 +100,25 @@ scripts/check-tree_test.py	  elif check=='spelling-professor':put('internal/unit
 scripts/golden-projects.py	parser.add_argument('--fixture', choices=['plain', 'professor'], required=True)
 scripts/golden-projects.py	        (home / '.professor').symlink_to(root)
 scripts/golden-projects.py	    if args.fixture == 'professor':
+internal/target/opencode/modelmap_test.go		got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "chat-professor", "harvester-professor"})
+internal/target/opencode/modelmap_test.go		want := openCodeBuiltinDenialsForReadBashAgent + "  chat-professor_*: false\n  harvester-professor_*: false\n  local_*: false\n"
+internal/target/opencode/modelmap_test.go		known := []string{"alpha", "chat-professor", "harvester-professor", "my_server"}
+internal/target/opencode/modelmap_test.go				allowList: "Read, mcp__harvester-professor__read, mcp__harvester-professor__search_web",
+internal/target/opencode/modelmap_test.go				mcpLines: "  alpha_*: false\n  chat-professor_*: false\n" +
+internal/target/opencode/modelmap_test.go					"  harvester-professor_*: false\n" +
+internal/target/opencode/modelmap_test.go					"  harvester-professor_read: true\n" +
+internal/target/opencode/modelmap_test.go					"  harvester-professor_search_web: true\n" +
+internal/target/opencode/modelmap_test.go				allowList: "Read, mcp__harvester-professor__search_web, mcp__alpha__zeta, mcp__chat-professor__call, mcp__harvester-professor__read, mcp__alpha__beta, mcp__alpha__zeta",
+internal/target/opencode/modelmap_test.go					"  chat-professor_*: false\n" +
+internal/target/opencode/modelmap_test.go					"  chat-professor_call: true\n" +
+internal/target/opencode/modelmap_test.go					"  harvester-professor_*: false\n" +
+internal/target/opencode/modelmap_test.go					"  harvester-professor_read: true\n" +
+internal/target/opencode/modelmap_test.go					"  harvester-professor_search_web: true\n" +
+internal/target/opencode/modelmap_test.go				mcpLines:  "  alpha_*: false\n  chat-professor_*: false\n  harvester-professor_*: false\n  my_server_*: false\n  my_server_do-it: true\n",
+internal/target/opencode/modelmap_test.go				allowList: "Read, mcp__harvester-professor__*, mcp__harvester-professor__read",
+internal/target/opencode/modelmap_test.go				mcpLines:  "  alpha_*: false\n  chat-professor_*: false\n  harvester-professor_*: true\n  my_server_*: false\n",
+internal/target/opencode/mcp_test.go		writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"mcp":{"globalServers":["chat-professor","harvester-professor"]}}`)
+internal/target/opencode/mcp_test.go			`{"mcpServers":{"local":{"command":"pfm","args":["mcp","serve"]},"my.remote":{"url":"http://127.0.0.1:9/mcp"}}}`,
+internal/target/opencode/mcp_test.go			"  write: false\n  chat-professor_*: false\n  harvester-professor_*: false\n  local_*: false\n  my_remote_*: false\n---\n",
+internal/target/opencode/transform_test.go		listedBlock, _, _ := renderOpenCodeToolsBlock("worker.md", listed["tools"], []string{"chat-professor", "harvester-professor"})
+internal/target/opencode/transform_test.go		inlineBlock, _, _ := renderOpenCodeToolsBlock("worker.md", inline["tools"], []string{"chat-professor", "harvester-professor"})

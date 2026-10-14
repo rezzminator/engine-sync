@@ -10,7 +10,7 @@ import (
 
 func TestOpenCodeAgentWithoutMCPToolsDeniesEveryKnownServer(t *testing.T) {
 	root := testjail.Scratch(t)
-	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"mcp":{"globalServers":["professor"]}}`)
+	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"mcp":{"globalServers":["chat-professor","harvester-professor"]}}`)
 	home := filepath.Join(root, "home")
 	agent := filepath.Join(root, ".claude", "agents", "reader.md")
 	writeOpenCodeFixture(
@@ -31,7 +31,7 @@ func TestOpenCodeAgentWithoutMCPToolsDeniesEveryKnownServer(t *testing.T) {
 	compiled, _ := os.ReadFile(filepath.Join(root, ".opencode", "agent", "reader.md"))
 	if !strings.Contains(
 		string(compiled),
-		"  write: false\n  local_*: false\n  my_remote_*: false\n  professor_*: false\n---\n",
+		"  write: false\n  chat-professor_*: false\n  harvester-professor_*: false\n  local_*: false\n  my_remote_*: false\n---\n",
 	) ||
 		strings.Contains(string(compiled), "  read: false\n") ||
 		strings.Contains(string(compiled), "  grep: false\n") {

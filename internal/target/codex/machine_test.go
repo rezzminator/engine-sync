@@ -15,13 +15,13 @@ func TestFullCheckAgreesWithInstallerGlobalReconciliation(t *testing.T) {
 	writeCodexFixture(t, filepath.Join(root, ".claude", "commands", "dev.md"), "---\ndescription: dev\n---\nRun /dev.\n")
 	writeCodexFixture(
 		t,
-		filepath.Join(home, ".claude", "commands", "chat", "inject.md"),
-		"---\ndescription: inject\n---\nInject.\n",
+		filepath.Join(home, ".claude", "commands", "chat", "call.md"),
+		"---\ndescription: Delivers a message.\n---\nCall.\n",
 	)
 	writeCodexFixture(
 		t,
 		filepath.Join(home, ".claude", "commands", "chat", "new.md"),
-		"---\ndescription: new\n---\nContinue with /chat:inject.\n",
+		"---\ndescription: new\n---\nContinue with /chat:call.\n",
 	)
 
 	initial, err := Build(Options{Root: root, Home: home})

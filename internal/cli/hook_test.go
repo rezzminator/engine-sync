@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/rezzminator/engine-sync/internal/atomicfile"
 	"github.com/rezzminator/engine-sync/internal/guard"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
@@ -36,7 +37,7 @@ func setFlag(t *testing.T, e env, root string) string {
 	if err := os.MkdirAll(filepath.Dir(flag), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(flag, []byte(root+"\n"), 0o600); err != nil {
+	if err := atomicfile.Write(flag, []byte(root+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return flag
