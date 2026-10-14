@@ -57,6 +57,7 @@ func renderOpenCodeMachineAgents(p source.Project, cfg config.Config) ([]artifac
 		ds = append(ds, diag.Diagnostic{Severity: diag.Warning, Message: fmt.Sprintf(f, args...)})
 	}
 	dir := MachineAgentsDir(p.Home)
+	known := knownMCPServers(nil, "", cfg.MCP)
 	for _, name := range p.Failed {
 		// An agent skipped for an error keeps its installed copy.
 		add(artifact.Artifact{Path: filepath.Join(dir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
@@ -70,7 +71,7 @@ func renderOpenCodeMachineAgents(p source.Project, cfg config.Config) ([]artifac
 			Name: name, Path: a.Path, Generated: a.Generated, Global: true,
 			Marker: source.MachineMarkerSource(a.Path, p.AgentSourceDir, cfg.Machine.AgentMarkerDir),
 			Output: filepath.Join(dir, name+".md"),
-		}, a.Front, a.Body, map[string]string{}, cfg.OpenCode.ModelMap, nil, cfg.Rewrites, add, problem, warn, cfg)
+		}, a.Front, a.Body, map[string]string{}, cfg.OpenCode.ModelMap, known, cfg.Rewrites, add, problem, warn, cfg)
 	}
 	return outputs, ds
 }

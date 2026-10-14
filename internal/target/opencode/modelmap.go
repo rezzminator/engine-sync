@@ -58,14 +58,19 @@ var openCodeToolIDs = []string{
 	"write",
 }
 
-// openCodeKnownMCPServers combines configured machine servers and project servers.
-
+// knownMCPServers combines configured machine servers and project servers. A
+// nil model is the machine-global path: no project .mcp.json sits beside a
+// machine-global agent, so only the configured servers are known.
 func knownMCPServers(model *claudesource.Project, root string, policies ...config.MCP) []string {
 	known := map[string]bool{}
 	for _, server := range selectedMCP(policies).GlobalServers {
 		known[server] = true
 	}
-	servers, _, err := model.Servers(filepath.Join(root, ".mcp.json"))
+	var servers []claudesource.MCPServer
+	var err error
+	if model != nil {
+		servers, _, err = model.Servers(filepath.Join(root, ".mcp.json"))
+	}
 	if err == nil {
 		for _, server := range servers {
 			if name, _, err := engine.OpenCodeMCPToolParts("mcp__" + server.Name + "__tool"); err == nil {
