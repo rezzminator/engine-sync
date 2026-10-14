@@ -2,14 +2,19 @@
 # release-check.sh [--release] [BASE_VERSION]
 #
 # Passes only when every place that carries engine-sync's version says the same
-# one and the committed SHA256SUMS is what a fresh build produces:
+# one:
 #   - plugins/engine-sync/.claude-plugin/plugin.json  "version"   (the reference)
 #   - .claude-plugin/marketplace.json               the plugin entry's "version"
 #   - README.md                                     the badge/version-{X}- badge
 #   - CHANGELOG.md                                  a `## [{X}]` heading
-#   - plugins/engine-sync/libexec/SHA256SUMS          equal to build-release.sh's
 # --release also requires the CHANGELOG heading to carry a date,
-# `## [{X}] - YYYY-MM-DD`. BASE_VERSION requires the version to sort after it.
+# `## [{X}] - YYYY-MM-DD`, and the committed SHA256SUMS to equal what a fresh
+# build (build-release.sh) produces:
+#   - plugins/engine-sync/libexec/SHA256SUMS          equal to build-release.sh's
+# Only a release commit refreshes SHA256SUMS (build-release.sh --write-sums),
+# since the sums bake in the sources; on develop between releases they differ
+# from a fresh build, so a plain check leaves them uncompared and says so.
+# BASE_VERSION requires the version to sort after it.
 #
 # Exit 0 passed; 1 a stale file or a disagreeing place, named; 2 a file that
 # cannot be read, or a usage error.
@@ -87,6 +92,11 @@ if [[ "$bad" -ne 0 ]]; then
   exit 1
 fi
 
+if [[ -z "$release" ]]; then
+  echo "release-check: ok: $version (places agree; $sums not compared, only --release compares it with a fresh build)"
+  exit 0
+fi
+
 # The sums bake in the version, so they are compared only once the places agree.
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -101,4 +111,4 @@ if ! diff -u --label "committed $sums" --label "fresh build" "$root/$sums" "$tmp
   exit 1
 fi
 
-echo "release-check: ok: $version${release:+ (release)}"
+echo "release-check: ok: $version (release)"
