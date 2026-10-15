@@ -167,33 +167,61 @@ func TestDescribeOmitsUnsetTargets(t *testing.T) {
 }
 
 func TestOldGlobalPathsAreRefusedLoudly(t *testing.T) {
-	for _, tc := range []struct{ name, old, want string }{
-		{"config.json", "config.json", `%s is no longer read; move its keys into %s`},
-		{"targets.json", "targets.json", `%s is no longer read; move its keys under "targets" in %s`},
+	for _, tc := range []struct {
+		name, old, want string
+		xdg             bool
+	}{
+		{"config.json", "config.json", `%s is no longer read; move its keys into %s`, false},
+		{"targets.json", "targets.json", `%s is no longer read; move its keys under "targets" in %s`, false},
+		{"XDG config.json", "config.json", `%s is no longer read; move its keys into %s`, true},
+		{"XDG targets.json", "targets.json", `%s is no longer read; move its keys under "targets" in %s`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := testjail.Scratch(t)
-			old := filepath.Join(home, ".config", "engine-sync", tc.old)
+			configHome := filepath.Join(home, ".config")
+			env := func(string) string { return "" }
+			if tc.xdg {
+				configHome = testjail.Scratch(t)
+				env = func(key string) string {
+					if key == "XDG_CONFIG_HOME" {
+						return configHome
+					}
+					return ""
+				}
+			}
+			old := filepath.Join(configHome, "engine-sync", tc.old)
 			putConfigFile(t, old, `{"version":1}`)
 			global := filepath.Join(home, ".claude", "engine-sync.json")
 			want := "engine-sync: " + strings.Replace(tc.want, "%s", old, 1)
 			want = strings.Replace(want, "%s", global, 1)
 			for _, root := range []string{"", testjail.Scratch(t)} {
-				_, e := Resolve(root, home, func(string) string { return "" })
+				_, e := Resolve(root, home, env)
 				if e == nil || e.Error() != want || !IsRefusal(e) {
 					t.Fatalf("Resolve(%q) = %v (refusal %v), want %q", root, e, IsRefusal(e), want)
 				}
-				if _, _, e := LoadTargets(func(string) string { return "" }, home); e == nil || e.Error() != want {
+				if _, _, e := LoadTargets(env, home); e == nil || e.Error() != want {
 					t.Fatalf("LoadTargets = %v, want %q", e, want)
 				}
 			}
 			putConfigFile(t, global, `{"version":1}`)
-			cfg, e := Resolve("", home, func(string) string { return "" })
+			cfg, e := Resolve("", home, env)
 			if e != nil || len(cfg.Deprecations) != 0 {
 				t.Fatalf("with both files: %v %v, want the new file read and nothing said of the old", e, cfg.Deprecations)
 			}
 		})
 	}
+	// A regular file where an old directory would be holds no old policy:
+	// the defaults load, as with no old path at all.
+	t.Run("config dir is a file", func(t *testing.T) {
+		home := testjail.Scratch(t)
+		putConfigFile(t, filepath.Join(home, ".config"), "not a directory\n")
+		if _, e := Resolve("", home, func(string) string { return "" }); e != nil {
+			t.Fatalf("Resolve = %v, want the defaults", e)
+		}
+		if _, found, e := LoadTargets(func(string) string { return "" }, home); e != nil || found {
+			t.Fatalf("LoadTargets = %v %v, want no targets and no error", found, e)
+		}
+	})
 }
 
 func TestProjectFileRefusesGlobalOnlyKeys(t *testing.T) {

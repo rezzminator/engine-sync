@@ -362,10 +362,22 @@ func TestDeclarationWithoutAGeneratedDirIsSkippedByName(t *testing.T) {
 	repo := filepath.Join(home, "clone")
 	putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
 	putProjectFile(t, repo, "agents/astra.md", "---\nname: astra\ndescription: Astra.\ntools: Read\n---\nAstra.\n")
-	putProjectFile(t, repo, "agents/astra-pro.md", "---\nname: astra-pro\nfrom: astra\neffort: high\n---\n")
+	putProjectFile(t, repo, "agents/astra-pro.md", "---\nname: astra-pro\nfrom: astra\nextends: [shared/lane.md]\neffort: high\n---\n")
+	putProjectFile(t, repo, "agents/shared/lane.md", "---\nmodel: haiku\n---\n")
+	// No generated directory means no kept copy: a same-named file in the
+	// working directory is never taken for one.
+	cwd := filepath.Join(home, "cwd")
+	putProjectFile(t, cwd, "astra-pro.md", "---\nname: astra-pro\n---\n")
+	t.Chdir(cwd)
 	rc, out := auditRun(e, "global", "--source-repo", repo)
 	if rc != 1 || !strings.Contains(out, "VARIANT-INVALID astra-pro") || !strings.Contains(out, "machine.sourceGeneratedAgentsDir") {
 		t.Fatalf("global rc=%d, want 1 naming VARIANT-INVALID astra-pro and machine.sourceGeneratedAgentsDir: %s", rc, out)
+	}
+	if strings.Contains(out, "SHARED-UNUSED") {
+		t.Fatalf("global calls the shared file the skipped declaration extends unused: %s", out)
+	}
+	if strings.Contains(out, "output kept") {
+		t.Fatalf("global keeps a working-directory file as the skipped declaration's output: %s", out)
 	}
 	for _, path := range []string{filepath.Join(home, ".claude", "agents", "astra.md"), filepath.Join(home, ".codex", "agents", "astra.toml")} {
 		if _, err := os.Lstat(path); err != nil {

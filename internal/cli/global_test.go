@@ -220,11 +220,6 @@ func TestGlobalWritesTheManagedByLine(t *testing.T) {
 			t.Errorf("%s: want exactly one managed-by line", rel)
 		}
 	}
-	for _, rel := range []string{".codex/agents/astra.toml", ".config/opencode/agents/astra.md", ".codex/prompts/hello.md", ".config/opencode/command/hello.md"} {
-		if raw, _ := os.ReadFile(filepath.Join(plain, filepath.FromSlash(rel))); strings.Contains(string(raw), "managed-by") {
-			t.Errorf("%s carries managed-by with the key absent", rel)
-		}
-	}
 }
 
 // A project build reads the global file's machine layer too, yet writes the

@@ -44,7 +44,7 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		cfg.Targets = machine.Targets
 		cfg.CommandDirs = machine.CommandDirs
 		markSources(&cfg, object, "", machinePath)
-	} else if err := refuseOldPaths(home); err != nil {
+	} else if err := refuseOldPaths(home, env); err != nil {
 		return Config{}, err
 	}
 	// Cross-key rules run once, on the merged layers: a project may complete

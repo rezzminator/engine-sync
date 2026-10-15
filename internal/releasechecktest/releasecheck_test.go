@@ -121,8 +121,10 @@ func TestReleaseCheckComparesSumsOnlyForARelease(t *testing.T) {
 		{name: "fixture ignores inherited python home", committed: staleSums, heading: undated, env: []string{"PYTHONHOME={ROOT}/absent-python"}, wantOut: plain},
 	}
 	for _, tc := range tests {
+		// Serial: a parallel case's fork can inherit the write descriptor of
+		// another case's fixture script, and exec of that script then fails
+		// with ETXTBSY ("text file busy").
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			root := releaseCheckTree(t, tc.committed, tc.heading)
 			for rel, body := range tc.files {
 				releaseCheckWriteFixture(t, root, rel, body)

@@ -118,7 +118,10 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 		for _, home := range p.CodexHomes {
 			outputs = append(outputs, artifact.Artifact{Path: filepath.Join(home, "agents", name+".toml"), Kept: &artifact.SourceLink{Path: name}})
 		}
-		outputs = append(outputs, artifact.Artifact{Path: filepath.Join(p.GeneratedDir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
+		// With no generated directory there is no generated copy to keep.
+		if p.GeneratedDir != "" {
+			outputs = append(outputs, artifact.Artifact{Path: filepath.Join(p.GeneratedDir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
+		}
 	}
 	// A generated directory inside the source repository holds every
 	// declaration's render, capability or not: only links and roles are

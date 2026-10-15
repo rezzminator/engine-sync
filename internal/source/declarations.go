@@ -134,14 +134,6 @@ func readDeclarations(agentsDir, outputDir string, marker []string) (*declaratio
 		}
 		d.declarations[name] = layer
 	}
-	// Declarations render into the source repository's directory; with none
-	// named each one fails, named, instead of writing anywhere.
-	if outputDir == "" {
-		for name := range d.declarations {
-			d.failures[name] = fmt.Errorf("VARIANT-INVALID %s: set machine.sourceGeneratedAgentsDir, the source-repository directory the rendered agents are written into", name)
-			delete(d.declarations, name)
-		}
-	}
 	if err := d.readShared(); err != nil {
 		return nil, err
 	}
@@ -395,6 +387,13 @@ func (d *declarationSet) renderEach() (out []GeneratedAgent, failed map[string]e
 	failed = maps.Clone(d.failures)
 	for _, name := range slices.Sorted(maps.Keys(d.declarations)) {
 		r, err := d.render(name, nil)
+		// Declarations render into the source repository's directory; with
+		// none named each one fails, named, instead of writing anywhere. The
+		// render above still runs, so the shared files it extends count as used.
+		if d.outputDir == "" {
+			failed[name] = fmt.Errorf("VARIANT-INVALID %s: set machine.sourceGeneratedAgentsDir, the source-repository directory the rendered agents are written into", name)
+			continue
+		}
 		if err != nil {
 			failed[name] = err
 			continue

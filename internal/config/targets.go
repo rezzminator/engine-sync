@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 )
 
 // Targets is the global file's `targets` object: the machine's Codex homes,
@@ -88,7 +89,7 @@ func LoadTargets(get paths.Env, home string) (Targets, bool, error) {
 		return Targets{}, false, err
 	}
 	if !found {
-		return Targets{}, false, refuseOldPaths(home)
+		return Targets{}, false, refuseOldPaths(home, get)
 	}
 	raw, ok := object["targets"]
 	if !ok {
@@ -107,25 +108,41 @@ func LoadTargets(get paths.Env, home string) (Targets, bool, error) {
 	return targets, true, nil
 }
 
-// oldGlobalPaths are the files a former release read the machine policy and
-// the targets from, relative to the home.
-var oldGlobalPaths = []string{".config/engine-sync/config.json", ".config/engine-sync/targets.json"}
+// oldGlobalNames are the files a former release read the machine policy and
+// the targets from, in its config directory.
+var oldGlobalNames = []string{"config.json", "targets.json"}
+
+// oldGlobalDirs are the config directories a former release read:
+// {home}/.config/engine-sync, and $XDG_CONFIG_HOME/engine-sync when that is
+// absolute.
+func oldGlobalDirs(home string, env paths.Env) []string {
+	dirs := []string{filepath.Join(home, ".config", "engine-sync")}
+	if configHome := env("XDG_CONFIG_HOME"); filepath.IsAbs(configHome) {
+		if dir := filepath.Join(configHome, "engine-sync"); dir != dirs[0] {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
 
 // refuseOldPaths is the loud end of the move to {home}/.claude/engine-sync.json:
 // with no global file, an old path that exists is refused naming both paths.
-func refuseOldPaths(home string) error {
-	for _, rel := range oldGlobalPaths {
-		old := filepath.Join(home, filepath.FromSlash(rel))
-		if _, err := os.Lstat(old); errors.Is(err, fs.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return fmt.Errorf("inspect %s: %w", old, err)
+// A missing path, or a non-directory where its parent should be, holds none.
+func refuseOldPaths(home string, env paths.Env) error {
+	for _, dir := range oldGlobalDirs(home, env) {
+		for _, name := range oldGlobalNames {
+			old := filepath.Join(dir, name)
+			if _, err := os.Lstat(old); errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+				continue
+			} else if err != nil {
+				return fmt.Errorf("inspect %s: %w", old, err)
+			}
+			where := "into " + MachinePath(home)
+			if name == "targets.json" {
+				where = `under "targets" in ` + MachinePath(home)
+			}
+			return &Refusal{Msg: fmt.Sprintf("engine-sync: %s is no longer read; move its keys %s", old, where)}
 		}
-		where := "into " + MachinePath(home)
-		if strings.HasSuffix(rel, "targets.json") {
-			where = `under "targets" in ` + MachinePath(home)
-		}
-		return &Refusal{Msg: fmt.Sprintf("engine-sync: %s is no longer read; move its keys %s", old, where)}
 	}
 	return nil
 }

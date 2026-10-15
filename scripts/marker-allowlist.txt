@@ -40,9 +40,6 @@ internal/machine/review_test.go				"Run `/code-review "+codeReviewSlot+"` over t
 internal/machine/review_test.go			t.Fatalf("%s carries no flight-scoped review at the effort slot:\n%s", path, got)
 internal/machine/testdata/global-agents/gitter.md	name: gitter
 internal/source/names_test.go			"pfm.md":            "pfm",
-internal/target/codex/globallink_test.go			"/repo/templates/global/agents/alpha.md",
-internal/target/codex/globallink_test.go			"/home/x/.local/state/pfm/generated/codex-agents/alpha.toml",
-internal/target/codex/globallink_test.go			"/home/x/.local/state/pfm/generated/codex-agents/alpha.toml",
 internal/target/codex/globalrole_test.go		want := []byte(globalRoleHeader("templates/global/agents/alpha.md") + "name = \"alpha\"\n")
 internal/target/codex/globalrole_test.go					writeCodexFixture(t, target, globalRoleHeader("templates/global/agents/alpha.md")+"name = \"old\"\n")
 internal/target/codex/globalrole_test.go	// where pfm writes it. A body that merely quotes the marker phrase is not a
