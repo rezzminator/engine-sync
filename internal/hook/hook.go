@@ -30,7 +30,6 @@ type Payload struct {
 	StopHookActive bool `json:"stop_hook_active"`
 }
 type Context struct {
-	Version   string
 	SessionID string `json:"session_id"`
 	Get       paths.Env
 	Home      func() (string, error)
@@ -327,11 +326,6 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 // the machine targets when targets.json names them. A build that fails sets
 // the dirty flag, so the session's first Stop reports it.
 func Start(stderr io.Writer, e Context, runner StageRunner) int {
-	source := "fallback"
-	if e.Get != nil && e.Get("PLUGIN_LOG_DIR") != "" {
-		source = "PLUGIN_LOG_DIR"
-	}
-	pluginlog.Record(hookLogEnv(e), stderr, pluginlog.Row{Level: "info", Event: "logger-ready", Msg: "plugin logger ready", Where: "internal/hook/hook.go#Start", Session: e.SessionID, Detail: map[string]any{"version": e.Version, "dir_source": source}})
 	cwd, err := os.Getwd()
 	if err != nil {
 		recordHook(e, stderr, "hook-step-failed", "Start", "getwd: "+err.Error(), nil)

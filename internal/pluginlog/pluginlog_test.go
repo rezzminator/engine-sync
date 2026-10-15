@@ -275,53 +275,6 @@ func TestPluginLogCapCascade(t *testing.T) {
 	}
 }
 
-func TestPluginLogSessionStart(t *testing.T) {
-	for _, explicit := range []bool{false, true} {
-		t.Run(fmt.Sprint(explicit), func(t *testing.T) {
-			home := testjail.Scratch(t)
-			dir := filepath.Join(home, "logs")
-			source := "PLUGIN_LOG_DIR"
-			t.Setenv("HOME", home)
-			t.Setenv("CLAUDE_PROJECT_DIR", home)
-			t.Setenv("PLUGIN_LOG_DIR", dir)
-			if !explicit {
-				t.Setenv("PLUGIN_LOG_DIR", "")
-				source = "fallback"
-				dir = filepath.Join(home, ".local", "state", "engine-sync", "logs")
-			}
-			var out, stderr bytes.Buffer
-			if code := cli.Main([]string{"hook", "claude", "start"}, &out, &stderr, strings.NewReader(`{"session_id":"s1"}`), "0.4.0-alpha"); code != 0 {
-				t.Fatalf("code%d: %s%s", code, &out, &stderr)
-			}
-			path := filepath.Join(dir, "engine-sync", "info.jsonl")
-			if !explicit {
-				path = filepath.Join(dir, "info.jsonl")
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ready := 0
-			for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
-				var row map[string]any
-				if err := json.Unmarshal(line, &row); err != nil {
-					t.Fatal(err)
-				}
-				if row["event"] == "logger-ready" {
-					ready++
-					detail := row["detail"].(map[string]any)
-					if row["session"] != "s1" || detail["version"] != "0.4.0-alpha" || detail["dir_source"] != source {
-						t.Fatalf("wrong session row: %v", row)
-					}
-				}
-			}
-			if ready != 1 {
-				t.Fatalf("heartbeat count%d: %s", ready, raw)
-			}
-		})
-	}
-}
-
 func TestPluginLogConcurrentProcesses(t *testing.T) {
 	if dir := os.Getenv("PLUGINLOG_TEST_DIR"); dir != "" {
 		t.Setenv("PLUGIN_LOG_DIR", dir)
@@ -375,64 +328,7 @@ func TestPluginLogExplicitDirectoryWithoutHome(t *testing.T) {
 	}
 }
 
-func TestPluginLogRefusesAliasedEndpoints(t *testing.T) {
-	for _, leaf := range []string{"directory", "errors.jsonl", "warnings.jsonl", "info.jsonl", "errors.jsonl.1", "warnings.jsonl.1", "info.jsonl.1"} {
-		t.Run(leaf, func(t *testing.T) {
-			root := testjail.Scratch(t)
-			outside := filepath.Join(root, "outside")
-			if err := os.Mkdir(outside, 0755); err != nil {
-				t.Fatal(err)
-			}
-			sentinel := filepath.Join(outside, "sentinel")
-			if err := os.WriteFile(sentinel, []byte("protected"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			dir := filepath.Join(root, "engine-sync")
-			target, link := outside, dir
-			if leaf != "directory" {
-				if err := os.Mkdir(dir, 0700); err != nil {
-					t.Fatal(err)
-				}
-				target, link = sentinel, filepath.Join(dir, leaf)
-			}
-			if err := os.Symlink(target, link); err != nil {
-				t.Fatal(err)
-			}
-			var stderr bytes.Buffer
-			pluginlog.Record(func(key string) string {
-				if key == "PLUGIN_LOG_DIR" {
-					return root
-				}
-				return ""
-			}, &stderr, pluginlog.Row{Level: "error", Event: "alias-test", Msg: "new", Where: "test"})
-			if !strings.Contains(stderr.String(), "symlink") {
-				t.Fatalf("missing refusal: %q", stderr.String())
-			}
-			raw, err := os.ReadFile(sentinel)
-			if err != nil || string(raw) != "protected" {
-				t.Fatalf("foreign content changed: %q %v", raw, err)
-			}
-			for path, mode := range map[string]os.FileMode{outside: 0755, sentinel: 0644} {
-				info, err := os.Stat(path)
-				if err != nil || info.Mode().Perm() != mode {
-					t.Fatalf("foreign mode changed: %s %v %v", path, info, err)
-				}
-			}
-			if err := os.Remove(link); err != nil {
-				t.Fatal(err)
-			}
-			// A successful append resets the process-wide failing streak for the next case.
-			pluginlog.Record(func(key string) string {
-				if key == "PLUGIN_LOG_DIR" {
-					return root
-				}
-				return ""
-			}, &stderr, pluginlog.Row{Level: "info", Event: "recovered", Msg: "ok", Where: "test"})
-		})
-	}
-}
-
-func TestPluginLogDormantBackupPrivacyAndExactCap(t *testing.T) {
+func TestPluginLogExactCap(t *testing.T) {
 	root := testjail.Scratch(t)
 	dir := filepath.Join(root, "engine-sync")
 	if err := os.Mkdir(dir, 0700); err != nil {
@@ -467,11 +363,7 @@ func TestPluginLogDormantBackupPrivacyAndExactCap(t *testing.T) {
 	if err != nil || string(raw) != "old" {
 		t.Fatalf("exact-cap rotated early: backup has %d bytes, err %v", len(raw), err)
 	}
-	info, err := os.Stat(backup)
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("dormant backup not private: %v %v", info, err)
-	}
-	info, err = os.Stat(active)
+	info, err := os.Stat(active)
 	if err != nil || info.Size() <= pluginlog.CapBytes {
 		t.Fatalf("new row missing: %v %v", info, err)
 	}

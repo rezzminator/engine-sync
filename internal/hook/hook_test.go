@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -62,52 +61,6 @@ func TestReviewStopRetainsFlagDuringStages(t *testing.T) {
 	})
 	if _, err := os.Lstat(flag); err != nil {
 		t.Fatalf("concurrent mark was erased: %v output=%s error=%s", err, &out, &stderr)
-	}
-}
-
-func TestHookStartWritesLoggerReady(t *testing.T) {
-	home := testjail.Scratch(t)
-	logs := filepath.Join(home, "logs")
-	e := Context{Get: func(key string) string {
-		if key == "PLUGIN_LOG_DIR" {
-			return logs
-		}
-		if key == "HOME" {
-			return home
-		}
-		return ""
-	}, Home: func() (string, error) { return home, nil }, State: func(string) string { return filepath.Join(home, "state") }, Policy: func(string, string, io.Writer) (*config.Config, error) { c := config.Default(); return &c, nil }, Targets: func(string) (bool, error) { return false, nil }}
-	payload := ReadPayload(strings.NewReader(`{"session_id":"s1"}`))
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Decode the producer's payload into the session context, including on the unfixed tree.
-	if err := json.Unmarshal(raw, &e); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(`{"Version":"0.4.0-alpha"}`), &e); err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	if code := Start(&stderr, e, func([]string) (int, string) { return 0, "" }); code != 0 {
-		t.Fatal(code)
-	}
-	raw, err = os.ReadFile(filepath.Join(logs, "engine-sync", "info.jsonl"))
-	if err != nil {
-		t.Fatalf("heartbeat row missing: %v", err)
-	}
-	lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
-	if len(lines) != 1 {
-		t.Fatalf("heartbeat count: %s", raw)
-	}
-	var row map[string]any
-	if err := json.Unmarshal(lines[0], &row); err != nil {
-		t.Fatal(err)
-	}
-	detail, ok := row["detail"].(map[string]any)
-	if !ok || row["event"] != "logger-ready" || row["level"] != "info" || row["session"] != "s1" || detail["version"] != "0.4.0-alpha" || detail["dir_source"] != "PLUGIN_LOG_DIR" {
-		t.Fatalf("wrong heartbeat: %s", raw)
 	}
 }
 

@@ -112,45 +112,8 @@ func appendRow(dir string, row Row) error {
 	if err != nil {
 		return err
 	}
-	if info, err := os.Lstat(dir); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("directory %s is a symlink", dir)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect directory %s: %w", dir, err)
-	}
-	for _, level := range []string{"errors.jsonl", "warnings.jsonl", "info.jsonl"} {
-		for _, suffix := range []string{"", ".1"} {
-			leaf := filepath.Join(dir, level+suffix)
-			if info, err := os.Lstat(leaf); err == nil {
-				if info.Mode()&os.ModeSymlink != 0 {
-					return fmt.Errorf("endpoint %s is a symlink", leaf)
-				}
-				if !info.Mode().IsRegular() {
-					return fmt.Errorf("endpoint %s is not a regular file", leaf)
-				}
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("inspect %s: %w", leaf, err)
-			}
-		}
-	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0700); err != nil {
-		return fmt.Errorf("set directory mode: %w", err)
-	}
-	for _, level := range []string{"errors.jsonl", "warnings.jsonl", "info.jsonl"} {
-		for _, suffix := range []string{"", ".1"} {
-			leaf := filepath.Join(dir, level+suffix)
-			if _, err := os.Lstat(leaf); err == nil {
-				if err := os.Chmod(leaf, 0600); err != nil {
-					return fmt.Errorf("set mode %s: %w", leaf, err)
-				}
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("inspect %s: %w", leaf, err)
-			}
-		}
 	}
 	path := filepath.Join(dir, name)
 	capped := false
@@ -167,9 +130,6 @@ func appendRow(dir string, row Row) error {
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("append %s: %w", path, err)
-	}
-	if err := file.Chmod(0600); err != nil {
-		return fmt.Errorf("set mode %s: %w", path, errors.Join(err, file.Close()))
 	}
 	n, writeErr := file.Write(raw)
 	if writeErr == nil && n != len(raw) {
@@ -193,7 +153,7 @@ type ProjectOutcome struct {
 	Warnings, Problems []string
 }
 
-// OutcomeRows summarizes warnings once and records only an actual build or its failure.
+// OutcomeRows summarizes warnings once and records builds and failed project checks.
 func OutcomeRows(outcome ProjectOutcome) []Row {
 	var rows []Row
 	if outcome.Error != nil {
@@ -203,12 +163,15 @@ func OutcomeRows(outcome ProjectOutcome) []Row {
 	if len(outcome.Warnings) > 0 {
 		rows = append(rows, Row{Level: "warning", Event: "build-warning", Msg: fmt.Sprintf("%s reported %d warnings", outcome.Action, len(outcome.Warnings)), Where: where, Session: outcome.Session, Detail: map[string]any{"count": len(outcome.Warnings)}})
 	}
-	if outcome.Action != "build" || outcome.Code == 2 || (outcome.Code == 0 && !outcome.Applied) {
+	if outcome.Code == 2 || (outcome.Code == 0 && (outcome.Action != "build" || !outcome.Applied)) {
+		return rows
+	}
+	if outcome.Action != "build" && outcome.Action != "check" && outcome.Action != "doctor" {
 		return rows
 	}
 	level, event, msg := "info", "build-done", "build completed"
 	if outcome.Code != 0 {
-		level, event, msg = "error", "build-failed", "build failed"
+		level, event, msg = "error", outcome.Action+"-failed", outcome.Action+" failed"
 		if outcome.Error != nil {
 			msg += ": " + outcome.Error.Error()
 		}

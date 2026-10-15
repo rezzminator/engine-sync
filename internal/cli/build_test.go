@@ -246,16 +246,21 @@ func TestReviewSharedRoleNaming(t *testing.T) {
 
 func TestProjectPluginLogOutcomes(t *testing.T) {
 	for _, tc := range []struct {
-		name             string
+		name, action     string
 		conflict, asJSON bool
-	}{{"success", false, false}, {"json-success", false, true}, {"failure", true, false}, {"json-failure", true, true}} {
+	}{
+		{"success", "build", false, false}, {"json-success", "build", false, true},
+		{"failure", "build", true, false}, {"json-failure", "build", true, true},
+		{"check-failure", "check", true, false}, {"json-check-failure", "check", true, true},
+		{"doctor-failure", "doctor", true, false}, {"json-doctor-failure", "doctor", true, true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, home, logs := testjail.Scratch(t), testjail.Scratch(t), testjail.Scratch(t)
 			putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
 			if tc.conflict {
 				putProjectFile(t, root, "AGENTS.md", "foreign")
 			}
-			e := env{get: func(k string) string {
+			e := env{sessionID: "s1", get: func(k string) string {
 				if k == "HOME" {
 					return home
 				}
@@ -264,7 +269,7 @@ func TestProjectPluginLogOutcomes(t *testing.T) {
 				}
 				return ""
 			}}
-			args := []string{"build", root}
+			args := []string{tc.action, root}
 			if tc.asJSON {
 				args = append(args, "--json")
 			}
@@ -272,14 +277,14 @@ func TestProjectPluginLogOutcomes(t *testing.T) {
 			code := dispatch(args, &out, &stderr, e)
 			level, event, want := "info", "build-done", 0
 			if tc.conflict {
-				level, event, want = "errors", "build-failed", 1
+				level, event, want = "errors", tc.action+"-failed", 1
 			}
 			if code != want {
 				t.Fatalf("code%d: %s%s", code, &out, &stderr)
 			}
 			raw, err := os.ReadFile(filepath.Join(logs, "engine-sync", level+".jsonl"))
 			if err != nil {
-				t.Fatalf("build outcome row missing: %v", err)
+				t.Fatalf("%s outcome row missing: %v", tc.action, err)
 			}
 			lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
 			if len(lines) != 1 {
@@ -289,8 +294,19 @@ func TestProjectPluginLogOutcomes(t *testing.T) {
 			if err := json.Unmarshal(lines[0], &row); err != nil {
 				t.Fatal(err)
 			}
-			if row["event"] != event || row["where"] != "internal/cli/build.go#runProjectTargets" {
+			rowLevel := "info"
+			if tc.conflict {
+				rowLevel = "error"
+			}
+			if row["event"] != event || row["level"] != rowLevel || row["session"] != "s1" || row["where"] != "internal/cli/build.go#runProjectTargets" {
 				t.Fatalf("wrong outcome: %s", raw)
+			}
+			detail, ok := row["detail"].(map[string]any)
+			if !ok || detail["code"] != float64(want) {
+				t.Fatalf("wrong outcome detail: %s", raw)
+			}
+			if tc.conflict && (detail["problems"].(float64) < 1 || !strings.Contains(row["msg"].(string), tc.action+" failed") || !strings.Contains(row["msg"].(string), "CONFLICT")) {
+				t.Fatalf("failure cause missing: %s", raw)
 			}
 		})
 	}

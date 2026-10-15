@@ -41,7 +41,7 @@ Exit codes: 0 pass, 1 a finding or failure, 2 a usage error. The complete flag a
 
 ## Logs
 
-Errors, warnings and meaningful info are JSON rows in `errors.jsonl`, `warnings.jsonl` and `info.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise they use `~/.local/state/engine-sync/logs`. Session start writes a versioned `logger-ready` heartbeat. Capped files move to `.1`; a failed logging streak reports once on stderr without changing command results.
+Errors, warnings and meaningful info are JSON rows in `errors.jsonl`, `warnings.jsonl` and `info.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise they use `~/.local/state/engine-sync/logs`. Capped files move to `.1`; a failed logging streak reports once on stderr without changing command results.
 
 ## Standalone use
 
