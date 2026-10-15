@@ -121,7 +121,7 @@ func TestMachineDoctorStaleOnceAndNoScanWithoutConfig(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("rows naming %s = %d, want 1: %+v", stale, count, rows)
 	}
-	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"bogus":true}}`)
+	writeMachineFixture(t, filepath.Join(home, ".claude", "engine-sync.json"), `{"version":1,"machine":{"bogus":true}}`)
 	var text []string
 	for _, row := range Doctor(DoctorOptions{Home: home, SourceRepo: repo}) {
 		text = append(text, row.Level+" "+row.Message)

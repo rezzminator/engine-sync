@@ -21,21 +21,21 @@ const GeneralPurpose = "general-purpose"
 // IntroSection names text before the first heading.
 const IntroSection = "(intro)"
 
-var globalAgentVariantName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+var declarationName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // DeclarationKeys are machine source controls, never rendered agent settings.
 var DeclarationKeys = []string{"from", "extends", "abstract", "add", "unset", "rename", "prepend", "append", "pins", "retitle"}
 
-// GlobalAgentVariant is a rendered machine declaration, not written by loading.
-type GlobalAgentVariant struct {
+// GeneratedAgent is a rendered machine declaration, not written by loading.
+type GeneratedAgent struct {
 	Name, From, Root, Path string
 	Content                []byte
 }
 
 // PinChange is one source section pin changed by variants pin.
-type PinChange struct{ Variant, Heading, Pin string }
+type PinChange struct{ Declaration, Heading, Pin string }
 
-type variantLayer struct {
+type layer struct {
 	from              string
 	hasFrom           bool
 	extends           []string
@@ -54,29 +54,29 @@ type sectionOverride struct {
 	owner                   string
 }
 type renamePair struct{ from, to string }
-type variantsDecl struct {
+type declarationSet struct {
 	path, agentsDir, markerDir, outputDir string
-	declarations                          map[string]variantLayer
-	shared                                map[string]variantLayer
+	declarations                          map[string]layer
+	shared                                map[string]layer
 	used                                  map[string]bool
 	failures                              map[string]error
-	rendered                              map[string]*renderedVariant
+	rendered                              map[string]*renderedAgent
 	repin                                 func(string) bool
 	pins, uses                            []pinFound
 }
-type renderedVariant struct {
+type renderedAgent struct {
 	front      *yaml.Node
 	body, root string
 }
 type pinFound struct {
-	variant string
-	section sectionOverride
-	now     string
+	declaration string
+	section     sectionOverride
+	now         string
 }
 
-// LoadGlobalAgentVariants renders all source-file declarations in name order.
-func LoadGlobalAgentVariants(agentsDir, outputDir string, markerDir ...string) ([]GlobalAgentVariant, error) {
-	d, err := readVariantsDecl(agentsDir, outputDir, markerDir)
+// LoadDeclarations renders all source-file declarations in name order.
+func LoadDeclarations(agentsDir, outputDir string, markerDir ...string) ([]GeneratedAgent, error) {
+	d, err := readDeclarations(agentsDir, outputDir, markerDir)
 	if err != nil {
 		return nil, err
 	}
@@ -88,9 +88,9 @@ func LoadGlobalAgentVariants(agentsDir, outputDir string, markerDir ...string) (
 	return out, errors.Join(errs...)
 }
 
-func readVariantsDecl(agentsDir, outputDir string, marker []string) (*variantsDecl, error) {
-	d := &variantsDecl{path: agentsDir, agentsDir: agentsDir, markerDir: filepath.Base(agentsDir), outputDir: outputDir,
-		declarations: map[string]variantLayer{}, shared: map[string]variantLayer{}, used: map[string]bool{}, failures: map[string]error{}, rendered: map[string]*renderedVariant{}}
+func readDeclarations(agentsDir, outputDir string, marker []string) (*declarationSet, error) {
+	d := &declarationSet{path: agentsDir, agentsDir: agentsDir, markerDir: filepath.Base(agentsDir), outputDir: outputDir,
+		declarations: map[string]layer{}, shared: map[string]layer{}, used: map[string]bool{}, failures: map[string]error{}, rendered: map[string]*renderedAgent{}}
 	if len(marker) > 0 && marker[0] != "" {
 		d.markerDir = marker[0]
 	}
@@ -134,6 +134,14 @@ func readVariantsDecl(agentsDir, outputDir string, marker []string) (*variantsDe
 		}
 		d.declarations[name] = layer
 	}
+	// Declarations render into the source repository's directory; with none
+	// named each one fails, named, instead of writing anywhere.
+	if outputDir == "" {
+		for name := range d.declarations {
+			d.failures[name] = fmt.Errorf("VARIANT-INVALID %s: set machine.sourceGeneratedAgentsDir, the source-repository directory the rendered agents are written into", name)
+			delete(d.declarations, name)
+		}
+	}
 	if err := d.readShared(); err != nil {
 		return nil, err
 	}
@@ -143,7 +151,7 @@ func readVariantsDecl(agentsDir, outputDir string, marker []string) (*variantsDe
 // readShared loads every .md below a subdirectory of the agents directory:
 // a shared file, never an agent, reached only through a declaration's
 // extends path. Its key is its slash path relative to the agents directory.
-func (d *variantsDecl) readShared() error {
+func (d *declarationSet) readShared() error {
 	root := filepath.Clean(d.agentsDir)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -183,7 +191,7 @@ func (d *variantsDecl) readShared() error {
 
 // ownerName names a source in pins and failures: an agent declaration by its
 // file base, a shared file by its slash path relative to the agents directory.
-func (d *variantsDecl) ownerName(path string) string {
+func (d *declarationSet) ownerName(path string) string {
 	rel, err := filepath.Rel(filepath.Clean(d.agentsDir), path)
 	if err != nil || !strings.Contains(filepath.ToSlash(rel), "/") {
 		return strings.TrimSuffix(filepath.Base(path), ".md")
@@ -193,14 +201,14 @@ func (d *variantsDecl) ownerName(path string) string {
 
 // parseDeclaration reads one agent declaration, or with shared one shared
 // file: the same layer keys, without name or from.
-func parseDeclaration(path string, raw []byte, front *yaml.Node, body string, shared bool) (variantLayer, error) {
-	l := variantLayer{path: path, raw: raw, set: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}}
+func parseDeclaration(path string, raw []byte, front *yaml.Node, body string, shared bool) (layer, error) {
+	l := layer{path: path, raw: raw, set: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}}
 	resolved, err := resolveDeclaration(front)
 	if err != nil {
 		return l, fmt.Errorf("DECLARATION-INVALID %s: %w", path, err)
 	}
 	front = resolved
-	fail := func(field string) (variantLayer, error) {
+	fail := func(field string) (layer, error) {
 		return l, fmt.Errorf("DECLARATION-INVALID %s: %s", path, field)
 	}
 	if MapValue(front, "abstract") != nil {
@@ -212,14 +220,14 @@ func parseDeclaration(path string, raw []byte, front *yaml.Node, body string, sh
 			return fail("a shared file is not an agent: it carries no name and no from")
 		}
 	} else {
-		if name == nil || name.Kind != yaml.ScalarNode || name.Tag != "!!str" || name.Value != strings.TrimSuffix(filepath.Base(path), ".md") || !globalAgentVariantName.MatchString(name.Value) {
+		if name == nil || name.Kind != yaml.ScalarNode || name.Tag != "!!str" || name.Value != strings.TrimSuffix(filepath.Base(path), ".md") || !declarationName.MatchString(name.Value) {
 			return fail("name must equal the kebab-case file base")
 		}
 		n := MapValue(front, "from")
 		if n == nil {
 			return fail("from is required")
 		}
-		if n.Kind != yaml.ScalarNode || n.Tag != "!!str" || !globalAgentVariantName.MatchString(n.Value) {
+		if n.Kind != yaml.ScalarNode || n.Tag != "!!str" || !declarationName.MatchString(n.Value) {
 			return fail("from must name an agent")
 		}
 		l.from, l.hasFrom = n.Value, true
@@ -383,7 +391,7 @@ func canonicalNode(n *yaml.Node) *yaml.Node {
 	return out
 }
 
-func (d *variantsDecl) renderEach() (out []GlobalAgentVariant, failed map[string]error) {
+func (d *declarationSet) renderEach() (out []GeneratedAgent, failed map[string]error) {
 	failed = maps.Clone(d.failures)
 	for _, name := range slices.Sorted(maps.Keys(d.declarations)) {
 		r, err := d.render(name, nil)
@@ -396,7 +404,7 @@ func (d *variantsDecl) renderEach() (out []GlobalAgentVariant, failed map[string
 			failed[name] = fmt.Errorf("%s: declaration %q: %w", d.path, name, err)
 			continue
 		}
-		out = append(out, GlobalAgentVariant{Name: name, From: d.declarations[name].from, Root: r.root, Path: filepath.Join(d.outputDir, name+".md"), Content: content})
+		out = append(out, GeneratedAgent{Name: name, From: d.declarations[name].from, Root: r.root, Path: filepath.Join(d.outputDir, name+".md"), Content: content})
 	}
 	// Shared-file failures are validation problems, never agent rows: a
 	// broken extends chain, or a shared file no declaration extends.

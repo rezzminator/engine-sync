@@ -40,6 +40,7 @@ func TestReviewLayeredPolicy(t *testing.T) {
 		{"machine modelMap removed", `{"version":1,"machine":{"modelMap":{"opus":"model-a"}}}`, "", "machine.modelMap is removed; use codex.modelMap", true},
 		{"opencode agent removed", "", `{"version":1,"opencode":{"agent":{"reader":{"permission":"deny"}}}}`, "opencode.agent is removed; use engines.opencode.permission", true},
 		{"missing model alias", `{"version":1,"codex":{"modelMap":{"opus":"model-a"}}}`, `{"version":1,"codex":{"rootAdapter":"Use {{index .Models \"opus\"}} or {{index .Models \"haiku\"}}."}}`, `model alias "haiku" is not in the engine's modelMap`, true},
+		{"managedBy refused", `{"version":1,"machine":{"managedBy":"Pro fessor"}}`, "", "machine.managedBy", true},
 		{"duplicate", `{"version":1,"version":1}`, "", "duplicate", true},
 		{"nested duplicate", `{"version":1,"codex":{"suffixMode":"none","suffixMode":"project"}}`, "", "duplicate", true},
 		{"relative env", "", "", "CLAUDE_CONFIG_DIR", true},
@@ -61,7 +62,7 @@ func TestReviewLayeredPolicy(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			put(filepath.Join(home, ".config", "engine-sync", "config.json"), tc.machine)
+			put(filepath.Join(home, ".claude", "engine-sync.json"), tc.machine)
 			rel := RelPath
 			if strings.HasPrefix(tc.name, "legacy") {
 				rel = LegacyRelPath

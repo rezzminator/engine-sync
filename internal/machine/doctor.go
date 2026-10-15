@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/paths"
-	"github.com/rezzminator/engine-sync/internal/target/codex"
 )
 
 // AgentsState is what one agents registry holds, measured against the agent
@@ -184,13 +184,17 @@ func agentRows(options DoctorOptions) []Row {
 	stale := map[string]bool{}
 	for _, state := range states {
 		rows = append(rows, Row{Level: state.Level(), Message: state.Describe()})
-		if state.State == StateStale {
+		if state.State == StateStale || state.State == StateOrphan {
 			stale[state.Path] = true
 		}
 	}
 	plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, Plan: true})
 	for _, event := range plan.Events {
 		if (event.Verb == VerbChange || event.Verb == VerbRetire || event.Verb == VerbConflict) && !namesStale(event.Message, stale) {
+			if orphan, ok := markedPromptOrphan(event); ok {
+				rows = append(rows, Row{Level: orphan.Level(), Message: orphan.Describe()})
+				continue
+			}
 			rows = append(rows, Row{Level: LevelFail, Message: event.Message})
 		}
 	}
@@ -198,6 +202,30 @@ func agentRows(options DoctorOptions) []Row {
 		rows = append(rows, Row{Level: LevelFail, Message: plan.Err.Error()})
 	}
 	return rows
+}
+
+// markedPromptOrphan reads a planned deletion of a Codex prompt or an OpenCode
+// command: one carrying engine-sync's header and a managed-by line is an
+// ORPHAN state naming the installer; any other file keeps its plan row. The
+// file is read here, never trusted from the event.
+func markedPromptOrphan(event Event) (AgentState, bool) {
+	path, ok := strings.CutPrefix(event.Message, "delete ")
+	if !ok || !strings.HasSuffix(path, ".md") {
+		return AgentState{}, false
+	}
+	engine := EngineOpenCode
+	if filepath.Base(filepath.Dir(path)) == "prompts" {
+		engine = EngineCodex
+	}
+	header, err := paths.ReadHeader(path)
+	if err != nil {
+		return AgentState{}, false
+	}
+	value, ok := artifact.ManagedBy(string(header))
+	if !ok {
+		return AgentState{}, false
+	}
+	return AgentState{Engine: engine, Name: strings.TrimSuffix(filepath.Base(path), ".md"), Path: path, State: StateOrphan, Detail: "managed-by " + value}, true
 }
 
 // namesStale reports whether a plan event's message ("{action} {path} …")
@@ -234,7 +262,7 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 		cfg = &resolved
 	}
 	if configErr != nil {
-		return []AgentsStatus{{Dir: config.MachinePath(home, paths.Getenv), State: AgentsUnreadable, Error: configErr.Error()}}
+		return []AgentsStatus{{Dir: config.MachinePath(home), State: AgentsUnreadable, Error: configErr.Error()}}
 	}
 	dirs := options.ClaudeConfigDirs
 	if len(dirs) == 0 {
@@ -293,11 +321,11 @@ func inspectCodexRegistry(registry string, roles []GlobalRole) AgentsStatus {
 	var symlinked, mismatched, missing, unreadable []string
 	for _, role := range roles {
 		target := filepath.Join(registry, role.Name+".toml")
-		found, err := codex.ReadGlobalRoleFile(target)
+		found, err := reconciler.ReadGlobalRoleFile(target)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			missing = append(missing, role.Name)
-		case errors.Is(err, codex.ErrGlobalRoleNotRegular) && isSymlink(target):
+		case errors.Is(err, reconciler.ErrGlobalRoleNotRegular) && isSymlink(target):
 			symlinked = append(symlinked, role.Name)
 		case err != nil:
 			unreadable = append(unreadable, role.Name)
@@ -345,8 +373,8 @@ func inspectStore(store, repo string, sources []string) AgentsStatus {
 			continue
 		}
 		name := strings.TrimSuffix(filepath.Base(source), ".md")
-		state, _, err := codex.ClassifyGlobalLink(
-			filepath.Join(registry, filepath.Base(source)), source, repo, codex.GlobalLinkFile,
+		state, _, err := reconciler.ClassifyGlobalLink(
+			filepath.Join(registry, filepath.Base(source)), source, repo, reconciler.GlobalLinkFile,
 		)
 		if err != nil {
 			status.State = AgentsUnreadable
@@ -354,8 +382,8 @@ func inspectStore(store, repo string, sources []string) AgentsStatus {
 			return status
 		}
 		switch state {
-		case codex.GlobalLinkCorrect:
-		case codex.GlobalLinkConflict:
+		case reconciler.GlobalLinkCorrect:
+		case reconciler.GlobalLinkConflict:
 			conflicting = append(conflicting, name)
 		default:
 			// Missing, a copy where a link belongs, and a stale in-repo link
@@ -385,6 +413,9 @@ func isSymlink(path string) bool {
 // failed declaration still counting as declared. A directory that is absent
 // has none; one that cannot be read is an error, never an empty list.
 func generatedOrphans(model source.Project) ([]string, error) {
+	if model.GeneratedDir == "" {
+		return nil, nil
+	}
 	entries, err := os.ReadDir(model.GeneratedDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil

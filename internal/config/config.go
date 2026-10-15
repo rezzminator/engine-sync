@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"io"
 	"os"
@@ -26,9 +27,10 @@ type Config struct {
 	WorkbenchMarker string   `json:"workbenchMarker"`
 	MCP             MCP      `json:"mcp"`
 	Machine         Machine  `json:"-"`
+	Targets         *Targets `json:"-"`
 	Agents          Agents   `json:"agents"`
 	// Capabilities is the host's capability set for this run: every
-	// --capability flag plus targets.json "capabilities". It is never read
+	// --capability flag plus the global file's targets.capabilities. It is never read
 	// from a config file and carries no meaning beyond set membership.
 	Capabilities []string          `json:"-"`
 	Source       string            `json:"-"`
@@ -80,18 +82,20 @@ type MCP struct {
 }
 
 type Machine struct {
-	SourceAgentsDir      string    `json:"sourceAgentsDir"`
-	AgentMarkerDir       string    `json:"agentMarkerDir"`
-	ClaudeAgentsDir      string    `json:"claudeAgentsDir"`
-	LegacyCodexAgentsDir string    `json:"legacyCodexAgentsDir"`
-	RetiredAgents        []string  `json:"retiredAgents"`
-	RetiredFiles         []string  `json:"retiredFiles"`
-	Rewrites             []Rewrite `json:"rewrites"`
-	CodexHomes           []string  `json:"codexHomes"`
-	GeneratedAgentsDir   string    `json:"generatedAgentsDir"`
-	// SourceGeneratedAgentsDir, when set, renders declarations into this
-	// directory of the source repository instead of the home store.
+	SourceAgentsDir string    `json:"sourceAgentsDir"`
+	AgentMarkerDir  string    `json:"agentMarkerDir"`
+	ClaudeAgentsDir string    `json:"claudeAgentsDir"`
+	RetiredAgents   []string  `json:"retiredAgents"`
+	RetiredFiles    []string  `json:"retiredFiles"`
+	Rewrites        []Rewrite `json:"rewrites"`
+	CodexHomes      []string  `json:"codexHomes"`
+	// SourceGeneratedAgentsDir is the directory of the source repository the
+	// declarations that carry `from:` render into.
 	SourceGeneratedAgentsDir string `json:"sourceGeneratedAgentsDir"`
+	// ManagedBy names the installer that owns the registry files `global`
+	// writes: it follows the generated header of each, so a later doctor
+	// names a file whose source is gone.
+	ManagedBy string `json:"managedBy,omitempty" pattern:"^[a-z][a-z0-9-]{0,31}$"`
 }
 
 type MachineFile struct {
@@ -103,6 +107,7 @@ type MachineFile struct {
 	Rewrites        []Rewrite `json:"rewrites"`
 	CommandDirs     []string  `json:"commandDirs"`
 	Machine         Machine   `json:"machine"`
+	Targets         *Targets  `json:"targets,omitempty"`
 	Agents          Agents    `json:"agents"`
 }
 
@@ -147,14 +152,12 @@ func Default() Config {
 		Agents:      Agents{PassthroughKeys: []string{}},
 		MCP:         MCP{GlobalServers: []string{}, Renamed: map[string]string{}},
 		Machine: Machine{
-			SourceAgentsDir:      "agents",
-			ClaudeAgentsDir:      "",
-			GeneratedAgentsDir:   paths.ClaudeVariantStore,
-			LegacyCodexAgentsDir: paths.CodexLegacyStore,
-			RetiredAgents:        []string{},
-			RetiredFiles:         []string{},
-			Rewrites:             []Rewrite{},
-			CodexHomes:           []string{},
+			SourceAgentsDir: "agents",
+			ClaudeAgentsDir: "",
+			RetiredAgents:   []string{},
+			RetiredFiles:    []string{},
+			Rewrites:        []Rewrite{},
+			CodexHomes:      []string{},
 		},
 		Sources: map[string]string{},
 	}
@@ -164,13 +167,7 @@ func Default() Config {
 	return cfg
 }
 
-func MachinePath(home string, env func(string) string) string {
-	configHome := env("XDG_CONFIG_HOME")
-	if !filepath.IsAbs(configHome) {
-		configHome = filepath.Join(home, ".config")
-	}
-	return filepath.Join(configHome, "engine-sync", "config.json")
-}
+func MachinePath(home string) string { return paths.EngineSyncConfig(home) }
 
 func LoadConfigLayers(root string, homes ...string) (Config, error) {
 	home := ""
@@ -255,7 +252,7 @@ func validateObject(object map[string]json.RawMessage, shape reflect.Type, prefi
 	fields := map[string]reflect.Type{}
 	for i := 0; i < shape.NumField(); i++ {
 		f := shape.Field(i)
-		key := f.Tag.Get("json")
+		key, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		if key != "-" {
 			fields[key] = f.Type
 		}
@@ -294,6 +291,8 @@ func validateValue(raw json.RawMessage, shape reflect.Type, key string) error {
 		return nil
 	}
 	switch shape.Kind() {
+	case reflect.Pointer:
+		return validateValue(raw, shape.Elem(), key)
 	case reflect.Struct:
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &object); err != nil {
@@ -365,8 +364,11 @@ func Validate(cfg Config) error {
 			}
 		}
 	}
-	for key, value := range map[string]string{"machine.generatedAgentsDir": cfg.Machine.GeneratedAgentsDir, "machine.legacyCodexAgentsDir": cfg.Machine.LegacyCodexAgentsDir} {
-		if err := RelativePath(value, key); err != nil {
+	if cfg.Machine.ManagedBy != "" && !managedByValue.MatchString(cfg.Machine.ManagedBy) {
+		return &Refusal{Msg: fmt.Sprintf("machine.managedBy: %q must match %s", cfg.Machine.ManagedBy, artifact.ManagedByPattern)}
+	}
+	if cfg.Targets != nil {
+		if err := cfg.Targets.validate(); err != nil {
 			return err
 		}
 	}
@@ -446,7 +448,7 @@ type SourceRow struct {
 }
 
 func Describe(cfg Config) []SourceRow {
-	raw, _ := json.Marshal(MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine, Agents: cfg.Agents})
+	raw, _ := json.Marshal(MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine, Targets: cfg.Targets, Agents: cfg.Agents})
 	var object map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &object)
 	var rows []SourceRow
@@ -469,34 +471,6 @@ func Describe(cfg Config) []SourceRow {
 	visit(object, "")
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Key < rows[j].Key })
 	return rows
-}
-
-// removedKeys are configuration keys a former release read and this one
-// refuses, each naming where its value lives now, so an old file fails loudly
-// instead of being silently ignored or rejected as a bare unknown key.
-var removedKeys = []struct{ section, key, replacement string }{
-	{"machine", "modelMap", "codex.modelMap"},
-	{"machine", "variants", "{machine.sourceAgentsDir}/{name}.md declarations"},
-	{"opencode", "agent", "engines.opencode.permission in each agent's frontmatter"},
-}
-
-// refuseRemoved names a removed key before shape validation reports it as
-// unknown.
-func refuseRemoved(object map[string]json.RawMessage) error {
-	for _, removed := range removedKeys {
-		raw, ok := object[removed.section]
-		if !ok {
-			continue
-		}
-		var section map[string]json.RawMessage
-		if json.Unmarshal(raw, &section) != nil {
-			continue
-		}
-		if _, ok := section[removed.key]; ok {
-			return fmt.Errorf("%s.%s is removed; use %s", removed.section, removed.key, removed.replacement)
-		}
-	}
-	return nil
 }
 
 var RelativePath = paths.RelativePath

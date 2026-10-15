@@ -49,7 +49,7 @@
     },
     "role": {
       "type": "string",
-      "description": "Stamped by the variant renderer only; a source carrying it is a problem."
+      "description": "Stamped by the declaration renderer only; a source carrying it is a problem."
     },
     "engines": {
       "type": "object",

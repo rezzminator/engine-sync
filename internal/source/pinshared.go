@@ -17,10 +17,10 @@ import (
 // writePins is atomicfile.Write; a variable so a test can refuse a write.
 var writePins = atomicfile.Write
 
-// PinGlobalAgentVariants rewrites only source pins blocks, through symlinks.
+// PinDeclarations rewrites only source pins blocks, through symlinks.
 // On a failed write it returns the pins already written with the error.
-func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, error) {
-	d, err := readVariantsDecl(agentsDir, agentsDir, nil)
+func PinDeclarations(agentsDir string, names []string) ([]PinChange, error) {
+	d, err := readDeclarations(agentsDir, agentsDir, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 		}
 	}
 	type rewrite struct {
-		layer   variantLayer
+		layer   layer
 		pins    map[string]string
 		changes []PinChange
 	}
@@ -71,12 +71,12 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 			continue
 		}
 		w.pins[found.section.key] = found.now
-		variant := found.variant
+		declaration := found.declaration
 		owner := d.ownerName(found.section.owner)
 		if slices.Contains(names, owner) {
-			variant = owner
+			declaration = owner
 		}
-		w.changes = append(w.changes, PinChange{Variant: variant, Heading: found.section.key, Pin: found.now})
+		w.changes = append(w.changes, PinChange{Declaration: declaration, Heading: found.section.key, Pin: found.now})
 	}
 	if err := d.refuseSharedDrift(newPins); err != nil {
 		return nil, err
@@ -133,16 +133,16 @@ func PinGlobalAgentVariants(agentsDir string, names []string) ([]PinChange, erro
 	return changes, nil
 }
 
-func (d *variantsDecl) refuseSharedDrift(pins map[string]string) error {
+func (d *declarationSet) refuseSharedDrift(pins map[string]string) error {
 	var drifted []string
 	var heading string
 	for _, use := range d.uses {
 		pin, rewritten := pins[use.section.owner+"\x00"+use.section.key]
-		if !rewritten || d.repin(use.variant) || d.repin(d.ownerName(use.section.owner)) || !use.section.pinned || use.section.pin != use.now || pin == use.now {
+		if !rewritten || d.repin(use.declaration) || d.repin(d.ownerName(use.section.owner)) || !use.section.pinned || use.section.pin != use.now || pin == use.now {
 			continue
 		}
-		if !slices.Contains(drifted, fmt.Sprintf("%q", use.variant)) {
-			drifted = append(drifted, fmt.Sprintf("%q", use.variant))
+		if !slices.Contains(drifted, fmt.Sprintf("%q", use.declaration)) {
+			drifted = append(drifted, fmt.Sprintf("%q", use.declaration))
 		}
 		heading = use.section.key
 	}

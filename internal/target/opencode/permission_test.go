@@ -30,9 +30,8 @@ func TestNativePermissionForms(t *testing.T) {
 
 func TestReviewNativeDeniedDoors(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	writeOpenCodeFixture(t, filepath.Join(root, "CLAUDE.md"), "Sample.\n")
-	writeOpenCodeFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"opencode":{"permission":"deny"}}`)
+	writeOpenCodeFixture(t, filepath.Join(home, ".claude", "engine-sync.json"), `{"version":1,"opencode":{"permission":"deny"}}`)
 	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"opencode":{"permission":{"edit":{"notes.md":"allow"},"bash":{"git status":"allow"}}}}`)
 	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !result.OK {
@@ -74,12 +73,11 @@ func TestReviewNativeDeniedDoors(t *testing.T) {
 
 func TestAuditMachinePermissionWithProjectBash(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "machine-permission.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeOpenCodeFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), string(raw))
+	writeOpenCodeFixture(t, filepath.Join(home, ".claude", "engine-sync.json"), string(raw))
 	writeOpenCodeFixture(t, filepath.Join(root, "CLAUDE.md"), "Sample.\n")
 	writeOpenCodeFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"opencode":{"permission":{"bash":{"git status":"allow","git push":"allow"}}}}`)
 	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})

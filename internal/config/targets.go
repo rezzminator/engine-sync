@@ -6,22 +6,43 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 )
 
-// Targets is {engine-sync config}/targets.json: the machine's Codex homes,
-// and optionally the Claude config dirs and the source clone.
+// Targets is the global file's `targets` object: the machine's Codex homes,
+// and optionally the Claude config dirs, the source clone and the host
+// capabilities.
 type Targets struct {
-	CodexHomes       *[]string `json:"codexHomes"`
+	CodexHomes       *[]string `json:"codexHomes,omitempty"`
 	ClaudeConfigDirs []string  `json:"claudeConfigDirs,omitempty"`
 	SourceRepo       string    `json:"sourceRepo,omitempty"`
 	// Capabilities are host capability names an agent's `requires` tests.
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
+func (t Targets) validate() error {
+	var homes []string
+	if t.CodexHomes != nil {
+		homes = *t.CodexHomes
+	}
+	for key, dirs := range map[string][]string{"targets.codexHomes": homes, "targets.claudeConfigDirs": t.ClaudeConfigDirs} {
+		for _, dir := range dirs {
+			if !filepath.IsAbs(dir) {
+				return fmt.Errorf("%s: %q is not an absolute path", key, dir)
+			}
+		}
+	}
+	if t.SourceRepo != "" && !filepath.IsAbs(t.SourceRepo) {
+		return fmt.Errorf("targets.sourceRepo: %q must be absolute", t.SourceRepo)
+	}
+	return nil
+}
+
 // Capabilities is the host's capability set: every flag value plus the
-// targets.json "capabilities" list, deduplicated, in first-seen order. A
+// global file's targets.capabilities list, deduplicated, in first-seen order. A
 // broken targets file is an error, never an empty set.
 func Capabilities(get paths.Env, home string, flags []string) ([]string, error) {
 	targets, _, err := LoadTargets(get, home)
@@ -55,41 +76,58 @@ func WithCapabilities(get paths.Env, home string, cfg *Config, flags []string) (
 	return &value, nil
 }
 
-// LoadTargets returns the targets file, found false when there is none. A
-// file that is present but unreadable or unparseable is an error, never an
-// empty roster; one without codexHomes leaves CodexHomes nil, the same Codex
-// homes as no targets file.
+// LoadTargets returns the global file's `targets`, found false when the file
+// has none. A file that is present but unreadable or unparseable is an error,
+// never an empty roster; a `targets` without codexHomes leaves CodexHomes
+// nil, the same Codex homes as no targets at all. With no global file, an old
+// config path is refused (see refuseOldPaths).
 func LoadTargets(get paths.Env, home string) (Targets, bool, error) {
-	path := filepath.Join(paths.EngineSyncConfig(get, home), "targets.json")
-	raw, err := paths.ReadRegular(path)
-	if errors.Is(err, fs.ErrNotExist) {
+	path := MachinePath(home)
+	object, found, err := readObject(path)
+	if err != nil {
+		return Targets{}, false, err
+	}
+	if !found {
+		return Targets{}, false, refuseOldPaths(home)
+	}
+	raw, ok := object["targets"]
+	if !ok {
 		return Targets{}, false, nil
 	}
-	if err != nil {
-		return Targets{}, false, fmt.Errorf("read %s: %w", path, err)
+	if err := validateValue(raw, reflect.TypeFor[*Targets](), "targets"); err != nil {
+		return Targets{}, false, fmt.Errorf("config %s: %w", path, err)
 	}
 	var targets Targets
-	if err := uniqueJSON(raw); err != nil {
-		return Targets{}, false, fmt.Errorf("parse %s: %w", path, err)
+	if err := json.Unmarshal(raw, &targets); err != nil {
+		return Targets{}, false, fmt.Errorf("config %s: targets: %w", path, err)
 	}
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&targets); err != nil {
-		return Targets{}, false, fmt.Errorf("parse %s: %w", path, err)
-	}
-	var homes []string
-	if targets.CodexHomes != nil {
-		homes = *targets.CodexHomes
-	}
-	for _, dir := range append(append([]string(nil), homes...), targets.ClaudeConfigDirs...) {
-		if !filepath.IsAbs(dir) {
-			return Targets{}, false, fmt.Errorf("%s: %q is not an absolute path", path, dir)
-		}
-	}
-	if targets.SourceRepo != "" && !filepath.IsAbs(targets.SourceRepo) {
-		return Targets{}, false, fmt.Errorf("%s: sourceRepo must be absolute", path)
+	if err := targets.validate(); err != nil {
+		return Targets{}, false, fmt.Errorf("config %s: %w", path, err)
 	}
 	return targets, true, nil
+}
+
+// oldGlobalPaths are the files a former release read the machine policy and
+// the targets from, relative to the home.
+var oldGlobalPaths = []string{".config/engine-sync/config.json", ".config/engine-sync/targets.json"}
+
+// refuseOldPaths is the loud end of the move to {home}/.claude/engine-sync.json:
+// with no global file, an old path that exists is refused naming both paths.
+func refuseOldPaths(home string) error {
+	for _, rel := range oldGlobalPaths {
+		old := filepath.Join(home, filepath.FromSlash(rel))
+		if _, err := os.Lstat(old); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("inspect %s: %w", old, err)
+		}
+		where := "into " + MachinePath(home)
+		if strings.HasSuffix(rel, "targets.json") {
+			where = `under "targets" in ` + MachinePath(home)
+		}
+		return &Refusal{Msg: fmt.Sprintf("engine-sync: %s is no longer read; move its keys %s", old, where)}
+	}
+	return nil
 }
 
 // ResolveTargets is the common roster for every machine command. Nil homes

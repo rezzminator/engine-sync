@@ -172,7 +172,7 @@ func TestGlobalCommandsConfigDefaultsTrue(t *testing.T) {
 // directory carrying its own SKILL.md, e.g. "tokens") into
 // {home}/.codex/skills/<name> as a bare SYMLINK into that source directory —
 // the one output shape this compiler writes that cannot carry the marker
-// generatedBytes looks for. When the installer tears the command down
+// artifact.Claims looks for. When the installer tears the command down
 // (unwireGlobalRegistries in the installer package) and then reconciles the
 // Codex mirror against an intentionally empty source, the old markerClaimable
 // treated every symlink in the managed registry as foreign and left the now

@@ -323,7 +323,7 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 }
 
 // Start rebuilds a stale mirror (a `git pull` lands here) and refreshes
-// the machine targets when targets.json names them. A build that fails sets
+// the machine targets when the global file's `targets` names them. A build that fails sets
 // the dirty flag, so the session's first Stop reports it.
 func Start(stderr io.Writer, e Context, runner StageRunner) int {
 	cwd, err := os.Getwd()

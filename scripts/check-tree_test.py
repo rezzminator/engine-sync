@@ -3,6 +3,7 @@
 import os, pathlib, subprocess, tempfile, shutil
 script=pathlib.Path(__file__).with_name('check-tree.py').resolve()
 ids=['size-src','size-test','size-cmd','negation-dirs','doc-go','test-mirror','testjail','dup-functions','facade-write','facade-env','facade-exec','facade-marker','facade-frontmatter','spelling-professor','spelling-states','registry-parity','orientation-truth','publication']
+ids+=['spelling-variant']
 base=pathlib.Path(os.environ.get('TMPDIR','/tmp'));base.mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory(prefix='tree-tests-',dir=base) as tmp:
  from tree_test_fixture import git_enumerator
@@ -38,11 +39,36 @@ with tempfile.TemporaryDirectory(prefix='tree-tests-',dir=base) as tmp:
   elif check=='spelling-states':put('internal/unit/unit.go','package unit\nconst state = "STALE"\n')
   elif check=='registry-parity':
    put('internal/cli/main.go','// Package cli runs the fixture.\npackage cli\nvar Version = "1.1.0-alpha"\nvar commands = []entry{{"build", run}}\n');put('README.md','## Commands\n\n| `check` | Check |\n');put('docs/interface.md','## Commands\n\n| `build` | Build |\n')
+  elif check=='spelling-variant':put('internal/source/variants.go','package source\n')
   elif check=='orientation-truth':put('CLAUDE.md','Read `internal/absent/file.go`.\n')
   elif check=='publication':put('scripts/leak-check.sh','echo "fixture:1"; echo "leak-check: FAILED — 1 hit(s)"; exit 1\n')
   done=subprocess.run(['python3',str(script),'--root',str(root),'--only',check,'--binary',str(binary)],env=env,text=True,capture_output=True)
   assert done.returncode==1 and f'CHECK {check} FAIL' in done.stdout,(check,done.returncode,done.stdout,done.stderr)
   print(done.stdout.strip())
+  if check=='spelling-variant':
+   def variant():return subprocess.run(['python3',str(script),'--root',str(root),'--only',check],env=env,text=True,capture_output=True)
+   assert 'internal/source/variants.go' in done.stdout,done.stdout
+   (root/'internal/source/variants.go').unlink()
+   put('internal/unit/unit.go','package unit\nfunc (r *T) renderVariant() {}\nvar variantNames = 1\ntype Variant struct{}\nconst variantKey = "a"\n')
+   out=variant();assert out.returncode==1 and all(f'internal/unit/unit.go: {d}' in out.stdout for d in ['func (r *T) renderVariant() {}','var variantNames = 1','type Variant struct{}','const variantKey = "a"']),('declaration lines unseen',out.stdout)
+   put('internal/unit/unit.go','package unit\nconst label = "variant"\n// variant is prose\nfunc variance() {}\n');put('internal/unit/unit_test.go','package unit\n')
+   out=variant();assert out.returncode==0,('literal, comment or near-miss flagged',out.stdout)
+   put('internal/cli/variants.go','package cli\nfunc variantsVerb() {}\n');put('internal/cli/variants_test.go','package cli\nfunc TestVariantsVerb() {}\n')
+   out=variant();assert out.returncode==0,('published verb home not exempt',out.stdout)
+   put('internal/machine/GlobalVariants_test.go','package machine\n');put('testdata/projects/Variant-sample/a.txt','x\n')
+   out=variant();assert out.returncode==1 and 'internal/machine/GlobalVariants_test.go' in out.stdout and 'testdata/projects/Variant-sample' in out.stdout and 'a.txt' not in out.stdout,('path names unseen',out.stdout)
+  if check=='registry-parity':
+   put('README.md','## Commands\n\n| `build` | Build |\n')
+   def parity():return subprocess.run(['python3',str(script),'--root',str(root),'--only',check,'--binary',str(binary)],env=env,text=True,capture_output=True)
+   def architecture(*names):put('docs/architecture.md','# Architecture\n\n## Package responsibilities\n\n| Package | Responsibility |\n| --- | --- |\n'+''.join(f'| {n} | Role |\n' for n in names)+'\n## Tree gates\n\n| ghost | not a package row |\n')
+   out=parity();assert out.returncode==1 and 'docs/architecture.md' in out.stdout,('missing architecture doc certified',out.stdout)
+   put('internal/cliargs/args.go','package cliargs\n');put('internal/target/target.go','package target\n');put('internal/target/codex/codex.go','package codex\n')
+   architecture('cli, fixture','target')
+   out=parity();assert out.returncode==1 and all(f'lacks internal/{n}' in out.stdout for n in ['cliargs','target/codex']) and 'lacks internal/cli;' not in out.stdout and 'internal/fixture' not in out.stdout,('undocumented packages unseen',out.stdout)
+   architecture('cli, cliargs, fixture','target, target/codex','ghost')
+   out=parity();assert out.returncode==1 and 'names absent internal/ghost' in out.stdout and 'lacks' not in out.stdout,('row naming no directory unseen',out.stdout)
+   architecture('cli, cliargs, fixture','target, target/codex')
+   out=parity();assert out.returncode==0,('complete table refused',out.stdout)
   if check=='test-mirror':
    growth=subprocess.run(['python3',str(script),'--root',str(root),'--only',check,'--measure'],capture_output=True,text=True)
    assert growth.returncode==2 and 'refuses growth' in growth.stdout,growth.stdout
@@ -60,4 +86,4 @@ with tempfile.TemporaryDirectory(prefix='tree-tests-',dir=base) as tmp:
    growth=subprocess.run(['python3',str(script),'--root',str(root),'--only',check,'--measure'],capture_output=True,text=True)
    assert growth.returncode==2 and 'refuses growth' in growth.stdout,growth.stdout
   root=r
-print('CHECK TREE TESTS PASS — 18 planted failures, missing baseline, growth refusal and shrink')
+print('CHECK TREE TESTS PASS — 19 planted failures, missing baseline, growth refusal and shrink')

@@ -4,16 +4,20 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 # Vocabulary
 
-- binary: the Go program behind `engine-sync {codex|opencode|build|check|doctor|global|hook|version}` · `cmd/engine-sync/` · contract `docs/interface.md`
-- configuration: validated project `.claude/engine-sync.json` and machine `{XDG_CONFIG_HOME:-~/.config}/engine-sync/config.json`, with provenance and schema · `internal/config/`
+- binary: the Go program behind every command in `docs/interface.md` § Commands · `cmd/engine-sync/` · contract `docs/interface.md`
+- configuration: validated project `.claude/engine-sync.json` and global `~/.claude/engine-sync.json`, with provenance and schema · `internal/config/`
 - source model: one Claude parser and discovery, shared across targets · `internal/source/`
+- declaration: a machine agent source carrying `from:` · `internal/source/declarations.go` · contract `docs/interface.md` § Declarations
+- shared file: an `.md` below a subdirectory of the source agents directory, layered into a declaration through `extends` · `internal/source/declarations.go` · contract `docs/interface.md` § Declarations
+- generated agent: the Claude agent file a declaration renders to; render is the verb · `internal/source/declarations.go` · contract `docs/interface.md` § Declarations
+- variant: spelled only in the published `variants pin` verb and the printed `VARIANT-INVALID`; everywhere else, declaration
 - Codex compiler: `AGENTS.md`, `.codex/**`, the role TOMLs and the global commands · `internal/target/codex/`
 - OpenCode compiler: `.opencode/**` · `internal/target/opencode/`
-- machine scope: the machine-level Codex roles, Claude agent links and both targets' commands, with their retirements and `doctor --machine` rows · `internal/machine/`
+- machine scope: the machine-level Codex roles, Claude agent links and both targets' commands, with their retirements and `doctor --machine` rows, where an owned undeclared file marked by `machine.managedBy` fails `ORPHAN` · `internal/machine/`
 - version guard: the per-root writer record and lock; an older binary refuses a root a newer one wrote (`NEWER-WRITER`) · `internal/guard/`, records under `{engine-sync state}/writers/`
 - `{engine-sync home}`: `$ENGINE_SYNC_HOME`, else `$XDG_DATA_HOME/engine-sync`, else `~/.local/share/engine-sync`; holds `versions/{version}/engine-sync` and the stable link `bin/engine-sync` · `internal/paths/paths.go`
 - `{engine-sync state}`: `$ENGINE_SYNC_STATE`, else `$XDG_STATE_HOME/engine-sync`, else `~/.local/state/engine-sync`; writer records, locks, dirty flags
-- targets.json: the Codex homes and Claude config dirs `global` writes · `{XDG_CONFIG_HOME:-~/.config}/engine-sync/targets.json`
+- `targets`: the Codex homes and Claude config dirs `global` writes, plus the source clone and capabilities · the `targets` object of `~/.claude/engine-sync.json`
 - plugin: what installs into Claude Code · `plugins/engine-sync/`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - manifest: the plugin's version · `plugins/engine-sync/.claude-plugin/plugin.json`
@@ -29,6 +33,7 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 - Affected: `go test ./internal/{pkg}/ -run {Test} -count=1`, or `./cmd/engine-sync/`
 - Full: `go test ./...`; permanent project and machine fixtures live in `testdata/projects/`.
+- Golden: `scripts/golden-projects.py --binary PATH --fixture {plain|professor}` rewrites `testdata/projects/{fixture}/golden/artifacts.json`.
 - Tree: `scripts/check-tree_test.sh`, then `LEAK_TERMS={checkout}/scripts/leak-terms.txt scripts/check-tree.sh` (`LEAK_TERMS` defaults to `{checkout}/scripts/leak-terms.txt`). With no terms supplied, `publication` prints GAP and the run exits 3 when nothing else failed: no pass, no red; a named unusable file is ERROR.
 - Static: install the staticcheck version in `scripts/tool-versions.txt`, then `staticcheck ./...`.
 - Lint: `go vet ./...`, and `"$(go env GOROOT)/bin/gofmt" -l .` printing nothing.

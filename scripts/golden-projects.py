@@ -31,7 +31,7 @@ with tempfile.TemporaryDirectory(prefix='golden-', dir=scratch) as temporary:
         (home / '.professor').symlink_to(root)
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('ENGINE_SYNC_', 'XDG_', 'CLAUDE_', 'CODEX_'))}
-    env.update(HOME=str(home), TMPDIR=str(scratch), XDG_CONFIG_HOME=str(home / '.config'),
+    env.update(HOME=str(home), TMPDIR=str(scratch),
                XDG_STATE_HOME=str(jail / 'state'), XDG_DATA_HOME=str(home / '.local/share'),
                CLAUDE_PROJECT_DIR=str(root), GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1')
     commands = [['build', str(root)], ['check', str(root)], ['global']]

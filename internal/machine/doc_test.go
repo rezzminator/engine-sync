@@ -2,8 +2,7 @@ package machine
 
 import (
 	"errors"
-	"github.com/rezzminator/engine-sync/internal/paths"
-	"github.com/rezzminator/engine-sync/internal/target/codex"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -39,16 +38,16 @@ func TestPlanListsExactlyWhatTheApplyDoes(t *testing.T) {
 	}
 	role := filepath.Join(home, ".codex", "agents", "gamma.toml")
 	raw, err := os.ReadFile(role)
-	if err != nil || !codex.GeneratedGlobalRole(raw) {
+	if err != nil || !reconcile.GeneratedGlobalRole(raw) {
 		t.Fatalf("role %s = %q, %v; want a generated role file", role, raw, err)
 	}
 	link := filepath.Join(home, ".claude", "agents", "gamma.md")
 	if target, err := os.Readlink(link); err != nil || target != filepath.Join(repo, "agents", "gamma.md") {
 		t.Fatalf("claude link %s -> %q, %v", link, target, err)
 	}
-	variant := filepath.Join(paths.GeneratedClaudeAgentsDir(home), "gamma-deep.md")
-	if _, err := os.Stat(variant); err != nil {
-		t.Fatalf("rendered variant %s: %v", variant, err)
+	generated := filepath.Join(repo, "generated", "agents", "gamma-deep.md")
+	if _, err := os.Stat(generated); err != nil {
+		t.Fatalf("generated agent %s: %v", generated, err)
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".codex", "agents", "old.toml")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("orphaned generated role survived: %v", err)

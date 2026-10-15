@@ -1,4 +1,4 @@
-package releasecheck
+package releasechecktest
 
 import (
 	"bytes"
@@ -67,7 +67,7 @@ func runReleaseCheck(t *testing.T, root string, extraEnv []string, args ...strin
 	for _, value := range append(os.Environ(), extraEnv...) {
 		name, _, _ := strings.Cut(value, "=")
 		switch name {
-		case "PATH", "HOME", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME":
+		case "PATH", "HOME", "TMPDIR", "XDG_DATA_HOME", "XDG_STATE_HOME":
 			cmd.Env = append(cmd.Env, value)
 		}
 	}

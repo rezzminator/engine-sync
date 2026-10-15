@@ -114,26 +114,6 @@ func SameEntry(first, second string) (bool, error) {
 	return filepath.Base(first) == filepath.Base(second) && a == b, nil
 }
 
-// GeneratedCodexAgentsDir is where engine-sync compiles the machine-global Codex
-// agent .toml twins (codex.RunGlobalAgents) — engine-sync-owned state, never
-// inside the source clone a template's .md lives in, so a stale compiler on
-// any host can never rewrite a tracked file. A `~/.codex/agents/<name>.toml`
-// link points here; uninstall removes this whole directory along with the
-// links it owns.
-func LegacyGeneratedCodexAgentsDir(home string) string {
-	return filepath.Join(home, CodexLegacyStore)
-}
-
-// GeneratedClaudeAgentsDir is where engine-sync renders the machine-global Claude
-// agent VARIANTS the configured variants registry declares
-// (codex.RunGlobalAgents) — one source agent re-emitted under another name
-// with overridden frontmatter. An original agent is linked straight from the
-// clone and never lands here; only a variant's `{config}/agents/<name>.md`
-// link points into this directory, and uninstall removes it with those links.
-func GeneratedClaudeAgentsDir(home string) string {
-	return filepath.Join(home, ClaudeVariantStore)
-}
-
 // Env reads one environment variable; os.Getenv in production, a map in a
 // test.
 type Env func(string) string
@@ -168,10 +148,11 @@ func EngineSyncState(env Env, home string) string {
 	return filepath.Join(absoluteOr(env, "XDG_STATE_HOME", home, ".local", "state"), "engine-sync")
 }
 
-// EngineSyncConfig is {engine-sync config}: $XDG_CONFIG_HOME/engine-sync when
-// absolute, else {home}/.config/engine-sync. It holds targets.json.
-func EngineSyncConfig(env Env, home string) string {
-	return filepath.Join(absoluteOr(env, "XDG_CONFIG_HOME", home, ".config"), "engine-sync")
+// EngineSyncConfig is the one global policy file, `machine` and `targets`
+// with the rest: {home}/.claude/engine-sync.json. No environment variable
+// moves it.
+func EngineSyncConfig(home string) string {
+	return filepath.Join(home, ".claude", "engine-sync.json")
 }
 
 // PluginLogDir is PLUGIN_LOG_DIR/engine-sync, else HOME/.local/state/engine-sync/logs.
@@ -181,6 +162,3 @@ func PluginLogDir(env Env, home string) string {
 	}
 	return filepath.Join(home, ".local", "state", "engine-sync", "logs")
 }
-
-const ClaudeVariantStore = ".local/state/engine-sync/generated/claude-agents"
-const CodexLegacyStore = ".local/state/engine-sync/generated/codex-agents"

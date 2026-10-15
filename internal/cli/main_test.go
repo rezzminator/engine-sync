@@ -16,6 +16,18 @@ import (
 
 func strconvQuote(value string) string { raw, _ := json.Marshal(value); return string(raw) }
 
+// putTargets stages the global file holding only a `targets` object.
+func putTargets(t *testing.T, home, targets string) {
+	t.Helper()
+	putProjectFile(t, home, ".claude/engine-sync.json", `{"version":1,"targets":`+targets+`}`)
+}
+
+// putGeneratedDir stages the global file naming where declarations render.
+func putGeneratedDir(t *testing.T, home string) {
+	t.Helper()
+	putProjectFile(t, home, ".claude/engine-sync.json", `{"version":1,"machine":{"sourceGeneratedAgentsDir":"generated/agents"}}`)
+}
+
 func putProjectFile(t *testing.T, root, name, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(name))
@@ -249,7 +261,7 @@ func TestProjectRejectsMachinePolicy(t *testing.T) {
 		return ""
 	}}
 	var out, errOut bytes.Buffer
-	if code := dispatch([]string{"build", root}, &out, &errOut, e); code != 1 || !strings.Contains(errOut.String(), "machine") {
+	if code := dispatch([]string{"build", root}, &out, &errOut, e); code != 2 || !strings.Contains(errOut.String(), "machine") {
 		t.Fatalf("project global policy rc=%d: %s%s", code, &out, &errOut)
 	}
 }

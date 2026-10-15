@@ -32,7 +32,7 @@ func renderOpenCodeMachine(p source.Project, cfg config.Config) ([]artifact.Arti
 	}
 	roster := map[string]string{}
 	discoverOpenCodeCommandRoster(p.SourceCommandDir, roster, problem, dangling, &p)
-	compileOpenCodeCommands(p.SourceCommandDir, "$HOME/.claude/commands", roster, filepath.Join(p.Home, ".config", openCodeName(), "command"), add, problem, warn, dangling, &p, cfg)
+	compileOpenCodeCommands(p.SourceCommandDir, "$HOME/.claude/commands", roster, filepath.Join(p.Home, ".config", openCodeName(), "command"), add, problem, warn, dangling, &p, cfg.Machine.ManagedBy, cfg)
 	return outputs, ds
 }
 
@@ -43,7 +43,7 @@ func MachineAgentsDir(home string) string {
 }
 
 // renderOpenCodeMachineAgents emits every machine-global agent, original and
-// variant, into MachineAgentsDir through the one OpenCode agent renderer. The
+// generated agent, into MachineAgentsDir through the one OpenCode agent renderer. The
 // machine path carries no preamble: no project AGENTS.md sits beside it.
 // Source problems are the Codex pass's to report, never repeated here.
 func renderOpenCodeMachineAgents(p source.Project, cfg config.Config) ([]artifact.Artifact, []diag.Diagnostic) {

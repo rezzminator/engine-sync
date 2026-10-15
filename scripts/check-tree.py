@@ -6,6 +6,7 @@ p.add_argument('--root',type=pathlib.Path,default=pathlib.Path(__file__).resolve
 p.add_argument('--measure',action='store_true');p.add_argument('--only');p.add_argument('--binary',type=pathlib.Path)
 a=p.parse_args();root=a.root.resolve();results={};error={}
 ids=['size-src','size-test','size-cmd','negation-dirs','doc-go','test-mirror','testjail','dup-functions','facade-write','facade-env','facade-exec','facade-marker','facade-frontmatter','spelling-professor','spelling-states','registry-parity','orientation-truth','publication']
+ids+=['spelling-variant']
 if a.only and a.only not in ids:
  print('CHECK selection ERROR unknown check '+a.only);sys.exit(2)
 for i in ids:results[i]=[]
@@ -42,6 +43,20 @@ for f,s in texts.items():
  if '/reconcile/' not in '/'+path and re.search(r'"(?:MISSING|STALE|ORPHAN|CONFLICT|UNPARSEABLE|INVALID|DANGLING|KEPT)(?:"| )',code):results['spelling-states'].append(path)
  for line in lines:
   if re.search(r'professor|pfm|gitter|\.professor|template[s]/global/|First actio[n]: read the repository root|Review the uncommitted changes only in your task.s own files',line,re.I) and path+'\t'+line not in allow:results['spelling-professor'].append(path);break
+# The published verb's home is exempt; string literals are never scanned.
+variant_home={'internal/cli/variants.go','internal/cli/variants_test.go'}
+variant_paths=set()
+for f in listed:
+ rel=f.relative_to(root);path=rel.as_posix()
+ if rel.parts[0] not in ['internal','cmd','testdata'] or path in variant_home:continue
+ for depth in range(1,len(rel.parts)+1):
+  if re.search('variant',rel.parts[depth-1],re.I):variant_paths.add('/'.join(rel.parts[:depth]))
+results['spelling-variant'].extend(sorted(variant_paths))
+for f,s in texts.items():
+ path=f.relative_to(root).as_posix()
+ if path in variant_home:continue
+ for line in s.splitlines():
+  if re.search(r'^(func|type|var|const)\s+(\([^)]*\)\s*)?\w*[Vv]ariant',line):results['spelling-variant'].append(path+': '+line)
 for name,paths in functions.items():
  if len(paths)>1:results['dup-functions'].append(name+' '+','.join(paths))
 count=sum(len(s.splitlines()) for f,s in texts.items() if f.parent in [root/'cmd/engine-sync',root/'internal/cli'] and not f.name.endswith('_test.go'))
@@ -76,6 +91,23 @@ if main.exists():
   section=f.read_text().split('## Commands\n',1)[-1].split('\n## ',1)[0]
   documented=set(re.findall(r'^\| `(\w+)`',section,re.M))
   if commands!=documented:results['registry-parity'].append(doc+' commands '+str(sorted(commands^documented)))
+# Every internal package directory holding Go is documented, and every documented package exists.
+architecture=root/'docs/architecture.md'
+package_dirs={f.parent.relative_to(root/'internal').as_posix() for f in files if f.relative_to(root).parts[0]=='internal' and f.parent!=root/'internal'}
+try:
+ if not architecture.exists():results['registry-parity'].append('docs/architecture.md missing')
+ else:
+  table=architecture.read_text().split('## Package responsibilities',1)
+  if len(table)==1:results['registry-parity'].append('docs/architecture.md lacks § Package responsibilities')
+  else:
+   documented=set()
+   for row in table[1].split('\n## ',1)[0].splitlines():
+    cell=row.split('|')[1].strip() if row.startswith('|') and row.count('|')>2 else ''
+    if cell in ['','Package'] or re.fullmatch(r'[-: ]+',cell):continue
+    documented.update(name.strip().strip('`') for name in cell.split(','))
+   results['registry-parity'].extend('docs/architecture.md lacks internal/'+name for name in sorted(package_dirs-documented))
+   results['registry-parity'].extend('docs/architecture.md names absent internal/'+name for name in sorted(documented) if not (root/'internal'/name).is_dir())
+except (OSError,UnicodeError) as exc:error['registry-parity']='architecture producer: '+str(exc)
 version_path=root/'plugins/engine-sync/.claude-plugin/plugin.json'
 if main.exists() and version_path.exists():
  try:

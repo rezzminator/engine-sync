@@ -1,4 +1,4 @@
-package releasecheck
+package releasechecktest
 
 import (
 	"github.com/rezzminator/engine-sync/internal/testjail"

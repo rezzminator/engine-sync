@@ -13,3 +13,15 @@ func TestNeutralRoleUsesEngineModelDefault(t *testing.T) {
 		t.Fatalf("unmapped neutral role=%#v err=%v", role, e)
 	}
 }
+
+// TestGlobalAgentEscapeMultilineNeutralisesTripleQuoteCollision pins the
+// multi-line basic-string escape to build-codex.mjs:153 exactly: backslash
+// doubled, then a literal `"""` neutralised so it can never be mistaken for
+// the string's own closing delimiter.
+func TestGlobalAgentEscapeMultilineNeutralisesTripleQuoteCollision(t *testing.T) {
+	in := "line one\nhas a literal \"\"\" inside\nand a backslash \\ alone"
+	want := "line one\nhas a literal \\\"\\\"\\\" inside\nand a backslash \\\\ alone"
+	if got := globalAgentEscapeMultiline(in); got != want {
+		t.Fatalf("globalAgentEscapeMultiline(%q) = %q, want %q", in, got, want)
+	}
+}

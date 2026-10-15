@@ -14,8 +14,8 @@ import (
 func TestMachineInspectionValidatesOnlyCodexRoles(t *testing.T) {
 	home := testjail.Scratch(t)
 	cfg := config.Default()
-	p := source.Project{Scope: source.MachineScope, Home: home, AgentSourceDir: filepath.Join(home, "source"), CodexHomes: []string{filepath.Join(home, ".codex")}, ClaudeConfigDirs: []string{filepath.Join(home, ".claude")}}
-	for _, dir := range []string{filepath.Join(home, ".claude", "agents"), filepath.Join(home, cfg.Machine.GeneratedAgentsDir)} {
+	p := source.Project{Scope: source.MachineScope, Home: home, AgentSourceDir: filepath.Join(home, "source"), GeneratedDir: filepath.Join(home, "generated"), CodexHomes: []string{filepath.Join(home, ".codex")}, ClaudeConfigDirs: []string{filepath.Join(home, ".claude")}}
+	for _, dir := range []string{filepath.Join(home, ".claude", "agents"), filepath.Join(home, "generated")} {
 		path := filepath.Join(dir, "unrelated.txt")
 		// A symlink loop is an entry no uid (root included) can read: ELOOP.
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -53,16 +53,16 @@ func TestClassifyGlobalRoleSeparatesOursFromTheirs(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(target string)
-		state GlobalRoleState
+		state reconcile.GlobalRoleState
 	}{
-		{"missing", func(string) {}, GlobalRoleMissing},
-		{"current", func(target string) { writeCodexFixture(t, target, string(want)) }, GlobalRoleCurrent},
+		{"missing", func(string) {}, reconcile.GlobalRoleMissing},
+		{"current", func(target string) { writeCodexFixture(t, target, string(want)) }, reconcile.GlobalRoleCurrent},
 		{
 			"stale",
 			func(target string) {
 				writeCodexFixture(t, target, globalRoleHeader("templates/global/agents/alpha.md")+"name = \"old\"\n")
 			},
-			GlobalRoleStale,
+			reconcile.GlobalRoleStale,
 		},
 		{"owned-link", func(target string) {
 			source := filepath.Join(legacy, "alpha.toml")
@@ -70,24 +70,24 @@ func TestClassifyGlobalRoleSeparatesOursFromTheirs(t *testing.T) {
 			if err := os.Symlink(source, target); err != nil {
 				t.Fatal(err)
 			}
-		}, GlobalRoleForeign},
+		}, reconcile.GlobalRoleForeign},
 		{"foreign file", func(target string) {
 			writeCodexFixture(t, target, "name = \"alpha\"\ndescription = \"the operator's own\"\n")
-		}, GlobalRoleForeign},
+		}, reconcile.GlobalRoleForeign},
 		{"foreign link", func(target string) {
 			source := filepath.Join(dir, "elsewhere.toml")
 			writeCodexFixture(t, source, "name = \"alpha\"\n")
 			if err := os.Symlink(source, target); err != nil {
 				t.Fatal(err)
 			}
-		}, GlobalRoleForeign},
+		}, reconcile.GlobalRoleForeign},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			target := filepath.Join(testjail.Scratch(t), "alpha.toml")
 			testCase.setup(target)
 
-			state, _, err := ClassifyGlobalRole(target, want, []string{legacy})
+			state, _, err := reconcile.ClassifyGlobalRole(target, want, []string{legacy})
 			if err != nil {
 				t.Fatalf("ClassifyGlobalRole: %v", err)
 			}
@@ -115,7 +115,7 @@ func TestGeneratedGlobalRoleAnchorsOnTheFirstLine(t *testing.T) {
 		{"the phrase buried in a body", "name = \"a\"\ndeveloper_instructions = \"\"\"\n" + artifact.Prefix + "\n", false},
 		{"empty", "", false},
 	} {
-		if got := GeneratedGlobalRole([]byte(testCase.content)); got != testCase.owned {
+		if got := reconcile.GeneratedGlobalRole([]byte(testCase.content)); got != testCase.owned {
 			t.Errorf("GeneratedGlobalRole(%s) = %v, want %v", testCase.name, got, testCase.owned)
 		}
 	}

@@ -18,6 +18,9 @@ type TransformOptions struct {
 	ModelMap          map[string]string
 	Commands          map[string]string
 	ReplaceClaudeFile bool
+	// ManagedBy names the installer the machine prompts credit; only the
+	// machine-global planner sets it.
+	ManagedBy string
 }
 
 func transformMarkdown(text string, options TransformOptions) string {

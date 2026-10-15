@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/cliargs"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"io"
 )
@@ -28,9 +29,9 @@ func runConfig(args []string, stdout, stderr io.Writer, e env) int {
 		fmt.Fprintln(stderr, "usage: engine-sync config show|validate|schema [--json] [root]")
 		return 2
 	}
-	flags := NewFlagSet("config", "usage: engine-sync config show|validate [--json] [root]", stderr)
+	flags := cliargs.NewFlagSet("config", "usage: engine-sync config show|validate [--json] [root]", stderr)
 	asJSON := flags.Bool("json", false, "print effective settings and provenance as JSON")
-	rest, code, ok := ParseFlagsAnywhere(flags, args[1:])
+	rest, code, ok := cliargs.ParseFlagsAnywhere(flags, args[1:])
 	if !ok {
 		return code
 	}
@@ -52,7 +53,7 @@ func runConfig(args []string, stdout, stderr io.Writer, e env) int {
 		} else {
 			fmt.Fprintln(stderr, err)
 		}
-		return 1
+		return cliargs.FailureCode(err)
 	}
 	if *asJSON {
 		err = json.NewEncoder(stdout).Encode(struct {

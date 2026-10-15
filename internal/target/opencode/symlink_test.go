@@ -1,3 +1,0 @@
-package opencode
-
-import ()

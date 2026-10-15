@@ -61,16 +61,15 @@ func runJailedTests(tests func() int, base string) int {
 	}()
 	home := filepath.Join(root, "home")
 	jailed := map[string]string{
-		"HOME":            home,
-		"TMPDIR":          base,
-		"XDG_DATA_HOME":   filepath.Join(root, "data"),
-		"XDG_STATE_HOME":  filepath.Join(root, "state"),
-		"XDG_CONFIG_HOME": filepath.Join(root, "config"),
+		"HOME":           home,
+		"TMPDIR":         base,
+		"XDG_DATA_HOME":  filepath.Join(root, "data"),
+		"XDG_STATE_HOME": filepath.Join(root, "state"),
 		// Git fixtures read only repository-local configuration.
 		"GIT_CONFIG_GLOBAL":   "/dev/null",
 		"GIT_CONFIG_NOSYSTEM": "1",
 	}
-	for _, dir := range []string{home, jailed["XDG_DATA_HOME"], jailed["XDG_STATE_HOME"], jailed["XDG_CONFIG_HOME"]} {
+	for _, dir := range []string{home, jailed["XDG_DATA_HOME"], jailed["XDG_STATE_HOME"]} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			warnSetup("create jail directory %s: %v", dir, err)
 			return 1

@@ -6,9 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/rezzminator/engine-sync/internal/paths"
 )
 
 // GlobalLinkState is the on-disk shape check found at one desired global
@@ -139,17 +136,4 @@ func ResolveLink(path, raw string) string {
 		target = filepath.Join(filepath.Dir(path), target)
 	}
 	return filepath.Clean(target)
-}
-
-func WithinLinkRoot(candidate, root string) (bool, error) {
-	var e error
-	candidate, e = paths.PhysicalPath(candidate)
-	if e != nil {
-		return false, e
-	}
-	root, e = paths.PhysicalPath(root)
-	if e != nil {
-		return false, e
-	}
-	return candidate == root || strings.HasPrefix(candidate, root+string(filepath.Separator)), nil
 }

@@ -45,3 +45,9 @@ func DeclaredName(model *Project, path string) string {
 	}
 	return strings.TrimSuffix(filepath.Base(path), ".md")
 }
+
+// CommandName is the colon command name of a command file at rel (relative to
+// its commands directory): `.md` trimmed, path segments joined with `:`.
+func CommandName(rel string) string {
+	return strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(rel), ".md"), "/", ":")
+}

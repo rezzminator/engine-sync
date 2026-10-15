@@ -208,7 +208,7 @@ func codexReadOnly(tools string) bool {
 
 // renderGlobalAgentTOML compiles one agent's Markdown into the role name and
 // the exact TOML bytes its registry file holds. raw is passed in rather than
-// read here because a variant's Markdown exists only in memory until the build
+// read here because a generated agent's Markdown exists only in memory until the build
 // phase writes it; mdPath labels errors and, against agentsDir, names the
 // source the generated marker credits.
 func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Config) (string, string, string, error) {
@@ -247,7 +247,7 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 	description = rewrite.Configured(append(cfg.Machine.Rewrites, cfg.Rewrites...)).Apply(description, ctx)
 	body = rules.Apply(body, ctx)
 	content, warning, err := renderRole(roleSpec{
-		Header:       globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir, cfg.Machine.AgentMarkerDir)),
+		Header:       artifact.WithManagedBy(globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir, cfg.Machine.AgentMarkerDir)), cfg.Machine.ManagedBy),
 		Name:         name,
 		Description:  description,
 		Instructions: body,
@@ -293,5 +293,4 @@ type Role = codexRole
 func RoleSettings(f claudesource.Frontmatter, m map[string]string, s string) (Role, string, error) {
 	return codexRoleSettings(f, m, s)
 }
-func EscapeRole(s string) string          { return globalAgentEscape(s) }
-func EscapeRoleMultiline(s string) string { return globalAgentEscapeMultiline(s) }
+func EscapeRole(s string) string { return globalAgentEscape(s) }

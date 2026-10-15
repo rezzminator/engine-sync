@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/rezzminator/engine-sync/internal/atomicfile"
 	"github.com/rezzminator/engine-sync/internal/guard"
+	"github.com/rezzminator/engine-sync/internal/hook"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ func project(t *testing.T) (string, env) {
 
 func setFlag(t *testing.T, e env, root string) string {
 	t.Helper()
-	flag, err := hookDirtyFlag(e, root)
+	flag, err := hook.DirtyFlag(hookContext(e), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestMarkSetsTheFlagForAClaudeSourceInScope(t *testing.T) {
 			if code := hookMark(payload, &stderr, e); code != 0 {
 				t.Fatalf("mark exited %d: %s", code, stderr.String())
 			}
-			flag, err := hookDirtyFlag(e, root)
+			flag, err := hook.DirtyFlag(hookContext(e), root)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +138,7 @@ func TestStartRebuildsAStaleMirrorAndFlagsAFailedBuild(t *testing.T) {
 			if !reflect.DeepEqual(calls, append(tc.wantCalls, "global")) {
 				t.Fatalf("calls = %q, want %q (default machine roster is refreshed)", calls, append(tc.wantCalls, "global"))
 			}
-			flag, _ := hookDirtyFlag(e, root)
+			flag, _ := hook.DirtyFlag(hookContext(e), root)
 			_, statErr := os.Stat(flag)
 			if (statErr == nil) != tc.wantFlag {
 				t.Fatalf("flag set = %v, want %v", statErr == nil, tc.wantFlag)
@@ -152,11 +153,11 @@ func TestStartRebuildsAStaleMirrorAndFlagsAFailedBuild(t *testing.T) {
 func TestStartRunsGlobalWhenTargetsNameIt(t *testing.T) {
 	_, e := project(t)
 	home, _ := e.home()
-	targets := filepath.Join(home, ".config", "engine-sync", "targets.json")
+	targets := filepath.Join(home, ".claude", "engine-sync.json")
 	if err := os.MkdirAll(filepath.Dir(targets), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(targets, []byte(`{"codexHomes":[]}`), 0o644); err != nil {
+	if err := os.WriteFile(targets, []byte(`{"version":1,"targets":{"codexHomes":[]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var calls []string

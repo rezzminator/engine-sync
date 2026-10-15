@@ -20,15 +20,15 @@ The CLI resolves policy and destinations, snapshots Claude sources, renders each
 
 Codex rewrites model aliases in body text and command references to skill spellings. OpenCode maps model pins in frontmatter and rewrites command references; its body text does not swap model aliases. Configured literal rewrites run after built-in transformations. Codex review translation uses optional policy for model, effort and prompt. With no review policy, a bare invocation becomes `codex review`.
 
-Frontmatter is YAML, read by one node-based parser for every source kind so re-rendering keeps comments and key order; a header strict YAML refuses is retried once with each failing top-level single-line value read as a string, as Claude Code reads it, and one that still fails is `FRONTMATTER-INVALID` and skips the artifact. Each agent's `engines` block carries its per-engine settings, and its `requires` list is matched against the host's capability set (`--capability` plus targets.json `capabilities`) before anything is linked or emitted. One Codex role renderer serves project and machine roles through `codex.modelMap`. Missing command descriptions are per-file warnings. Frontmatter supports BOM, CRLF, spaced fences and quoted or flow-list tools; invalid UTF-8 and NUL fail at source entry. Every source read requires a regular file and has an 8 MiB bound. FIFO and device inputs are rejected before opening. Ownership headers have a 4 KiB bound.
+Frontmatter is YAML, read by one node-based parser for every source kind so re-rendering keeps comments and key order; a header strict YAML refuses is retried once with each failing top-level single-line value read as a string, as Claude Code reads it, and one that still fails is `FRONTMATTER-INVALID` and skips the artifact. Each agent's `engines` block carries its per-engine settings, and its `requires` list is matched against the host's capability set (`--capability` plus the global file's `targets.capabilities`) before anything is linked or emitted. One Codex role renderer serves project and machine roles through `codex.modelMap`. Missing command descriptions are per-file warnings. Frontmatter supports BOM, CRLF, spaced fences and quoted or flow-list tools; invalid UTF-8 and NUL fail at source entry. Every source read requires a regular file and has an 8 MiB bound. FIFO and device inputs are rejected before opening. Ownership headers have a 4 KiB bound.
 
 ## Configuration and targets
 
 The typed resolver merges defaults, machine policy, project policy, environment and flags. Maps merge, lists replace, and ordered permission tools replace their own rule sets. A lower bare permission survives as a leading wildcard fallback. Every effective key has provenance. Unknown or duplicate JSON keys, malformed templates and invalid paths are named errors. The schema is generated from the Go types and checked against `docs/engine-sync.schema.json`; the key inventory is checked against the public tables.
 
-Machine-only stores, sources, variants, retirements and destinations are forbidden in project files. Explicit source repositories use the configured agents directory. Additional project command directories and marker-source directories are policy data with neutral defaults. Product-specific adapters, preambles, model maps and access rules belong to integrator policy.
+Machine-only stores, sources, declarations, retirements and destinations are forbidden in project files. Explicit source repositories use the configured agents directory. Additional project command directories and marker-source directories are policy data with neutral defaults. Product-specific adapters, preambles, model maps and access rules belong to integrator policy.
 
-The shared machine resolver selects explicit roster flags, CODEX_HOME, targets.json, explicit machine.codexHomes, then defaults. Explicit empty lists remain empty. An explicit roster is a recovery path past malformed targets.json. Doctor, global, agents and SessionStart use the same resolver. Machine command output depends only on machine inputs and policy; project policy affects only project artifacts. A workbench suppresses home writes.
+The shared machine resolver selects explicit roster flags, CODEX_HOME, the global file's `targets`, explicit machine.codexHomes, then defaults. Explicit empty lists remain empty. An explicit roster is a recovery path past a malformed global file. Doctor, global, agents and SessionStart use the same resolver. Machine command output depends only on machine inputs and policy; project policy affects only project artifacts. A workbench suppresses home writes.
 
 Project roots are physical paths. Discovery stops at the nearest configured marker, Git root or regular orientation file. HOME and every ancestor of HOME are refused. Config show and validate use the same resolver as build.
 
@@ -60,18 +60,20 @@ Canonical public terms are source, target, artifact, mirror, marker, project sco
 | --- | --- |
 | cli | Commands, transport, policy caching and guarded orchestration |
 | config | Layers, provenance, typed target roster and schema |
-| source | Bounded reads, frontmatter, discovery, variants and naming |
+| source | Bounded reads, frontmatter, discovery, declarations and naming |
 | rewrite | Shared text transformations and literal rules |
 | target | Registry and target interface |
 | target/codex, target/opencode | Native renderers and validators |
 | artifact | Artifact shapes and ownership-marker syntax |
 | engine | Shared rendering, validation and reconciliation pipeline |
 | reconcile | Filesystem plan, ownership, kept outputs and selective cleanup |
-| machine | Machine plan/apply, retirements and doctor rows |
+| machine | Account targets and machine source mirrors through the pipeline; retirements and doctor --machine rows |
+| cliargs | Flag sets, exit codes and usage every command shares; the extraction that keeps cli inside the size-cmd budget |
+| pluginlog | The plugin's bounded errors, warnings and info JSON-line logs |
 | hook | Payload, scope, dirty store and lifecycle stages |
 | paths, atomicfile, guard | Path identity, bounded IO, publication and version guards |
-| diag | Diagnostic shapes |
-| testjail, wrappertest | Isolated tests and wrapper fixtures |
+| diag | Renders compiler diagnostics as text and contract-compatible JSON |
+| testjail, wrappertest, releasechecktest | Isolated tests; harnesses for the wrapper and scripts/release-check.sh |
 
 ## Tree gates
 
@@ -87,6 +89,7 @@ Canonical public terms are source, target, artifact, mirror, marker, project sco
 | facade-marker, facade-frontmatter | Marker and Claude parser boundaries |
 | spelling-professor | Operative product policy/layout in Go and shipped text, plus neutral goldens; exact historical decoder lines and fixture/check producers are exceptions |
 | spelling-states | Literal diagnostic states outside the reconciler |
+| spelling-variant | Names and Go declarations spelled "variant" outside the published `variants pin` verb's files |
 | registry-parity | Command/key tables, schema producer, and development prerelease strictly newer than the plugin manifest |
 | orientation-truth | Literal repository pointers and declared engine-sync environment variables, including the extensionless wrapper |
 | publication | A nonempty private denylist and a successful nonempty leak scan |

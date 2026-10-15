@@ -8,7 +8,7 @@ with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR', '/tmp')) as tmp:
   p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);return p
  def run(check):return subprocess.run(['python3',str(script),'--root',str(root),'--only',check,'--binary',str(root/'schema')],capture_output=True,text=True)
  put('scripts/baselines/size-src.txt','');r=run('size-src');assert r.returncode==2 and 'ERROR' in r.stdout,('empty tree certified',r.stdout,r.stderr)
- put('scripts/baselines/registry-parity.txt','');put('internal/cli/main.go','package cli\nvar Version = "0.1.0"\nvar table=[]entry{{"build",run}}\n');put('plugins/engine-sync/.claude-plugin/plugin.json',json.dumps({'version':'0.1.0'}));put('README.md','## Commands\n| `build` | Build |\n');put('docs/interface.md','## Commands\n| `build` | Build |\n');put('docs/engine-sync.schema.json','{}\n');p=put('schema','#!/bin/sh\nprintf "{}\\n"\n');p.chmod(0o755);r=run('registry-parity');assert r.returncode==1 and 'version' in r.stdout.lower(),('equal release version certified',r.stdout,r.stderr)
+ put('scripts/baselines/registry-parity.txt','');put('docs/architecture.md','## Package responsibilities\n\n| Package | Responsibility |\n| --- | --- |\n| cli | Commands |\n');put('internal/cli/main.go','package cli\nvar Version = "0.1.0"\nvar table=[]entry{{"build",run}}\n');put('plugins/engine-sync/.claude-plugin/plugin.json',json.dumps({'version':'0.1.0'}));put('README.md','## Commands\n| `build` | Build |\n');put('docs/interface.md','## Commands\n| `build` | Build |\n');put('docs/engine-sync.schema.json','{}\n');p=put('schema','#!/bin/sh\nprintf "{}\\n"\n');p.chmod(0o755);r=run('registry-parity');assert r.returncode==1 and 'version' in r.stdout.lower(),('equal release version certified',r.stdout,r.stderr)
  put('internal/cli/main.go','package cli\nvar Version = "0.2.0-alpha"\nvar table=[]entry{{"build",run}}\n')
  put('plugins/engine-sync/.claude-plugin/plugin.json',json.dumps({'version':'0.2.0'}));r=run('registry-parity');assert r.returncode==1,('prerelease core equals release',r.stdout,r.stderr)
  put('plugins/engine-sync/.claude-plugin/plugin.json',json.dumps({'version':'0.1.0'}));r=run('registry-parity');assert r.returncode==0,('newer prerelease refused',r.stdout,r.stderr)
@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR', '/tmp')) as tmp2:
  put('cmd/engine-sync/main.go','// Package main is the fixture command.\npackage main\n');put('cmd/engine-sync/main_test.go','package main\n')
  put('internal/cli/main.go','// Package cli runs the fixture.\npackage cli\nvar Version = "1.1.0-alpha"\nvar commands = []entry{{"build", run}}\n');put('internal/cli/main_test.go','package cli\n')
  put('plugins/engine-sync/.claude-plugin/plugin.json',json.dumps({'version':'1.0.0'}))
- put('README.md','## Commands\n\n| `build` | Build |\n');put('docs/interface.md','## Commands\n\n| `build` | Build |\n');put('docs/engine-sync.schema.json','{}\n')
+ put('README.md','## Commands\n\n| `build` | Build |\n');put('docs/interface.md','## Commands\n\n| `build` | Build |\n');put('docs/engine-sync.schema.json','{}\n');put('docs/architecture.md','## Package responsibilities\n\n| Package | Responsibility |\n| --- | --- |\n| cli, fixture | Fixture packages |\n')
  schema=put('schema','#!/bin/sh\nprintf "{}\\n"\n');schema.chmod(0o755)
  bare={k:v for k,v in os.environ.items() if k!='LEAK_TERMS'}
  def tree(*args,env=bare):return subprocess.run(['python3',str(script),'--root',str(root),'--binary',str(schema),*args],env=env,capture_output=True,text=True)

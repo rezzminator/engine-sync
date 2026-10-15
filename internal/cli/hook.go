@@ -68,9 +68,8 @@ func hookContext(e env) hook.Context {
 	}, Writer: writerPath}
 
 }
-func readHookPayload(r io.Reader) hookPayload          { return hook.ReadPayload(r) }
-func hookDirtyFlag(e env, root string) (string, error) { return hook.DirtyFlag(hookContext(e), root) }
-func hookMark(p hookPayload, w io.Writer, e env) int   { return hook.Mark(p, w, hookContext(e)) }
+func readHookPayload(r io.Reader) hookPayload        { return hook.ReadPayload(r) }
+func hookMark(p hookPayload, w io.Writer, e env) int { return hook.Mark(p, w, hookContext(e)) }
 func hookStop(p hookPayload, o, w io.Writer, e env, r stageRunner) int {
 	return hook.Stop(p, o, w, hookContext(e), hook.StageRunner(r))
 }

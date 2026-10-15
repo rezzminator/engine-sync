@@ -100,7 +100,7 @@ func TestProjectGoldenFixtures(t *testing.T) {
 			jail := testjail.Scratch(t)
 			root, home := filepath.Join(jail, "project"), filepath.Join(jail, "home")
 			copyGoldenInput(t, filepath.Join(fixture, "input"), jail)
-			variables := map[string]string{"PLUGIN_LOG_DIR": filepath.Join(jail, "logs"), "HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "XDG_STATE_HOME": filepath.Join(jail, "state"), "XDG_DATA_HOME": filepath.Join(home, ".local", "share"), "CLAUDE_PROJECT_DIR": root}
+			variables := map[string]string{"PLUGIN_LOG_DIR": filepath.Join(jail, "logs"), "HOME": home, "XDG_STATE_HOME": filepath.Join(jail, "state"), "XDG_DATA_HOME": filepath.Join(home, ".local", "share"), "CLAUDE_PROJECT_DIR": root}
 			e := env{get: func(key string) string { return variables[key] }}
 			globalArgs := []string{"global"}
 			if name == "professor" {

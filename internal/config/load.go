@@ -25,7 +25,7 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		cfg.ClaudeConfigDir = filepath.Join(home, ".claude")
 	}
 	cfg.Machine.ClaudeAgentsDir = filepath.Join(cfg.ClaudeConfigDir, "agents")
-	machinePath := MachinePath(home, env)
+	machinePath := MachinePath(home)
 	if object, found, err := readObject(machinePath); err != nil {
 		return Config{}, err
 	} else if found {
@@ -41,8 +41,11 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("config %s: %w", machinePath, err)
 		}
 		cfg.Version, cfg.Codex, cfg.OpenCode, cfg.WorkbenchMarker, cfg.MCP, cfg.Machine, cfg.Rewrites, cfg.Agents = machine.Version, machine.Codex, machine.OpenCode, machine.WorkbenchMarker, machine.MCP, machine.Machine, machine.Rewrites, machine.Agents
+		cfg.Targets = machine.Targets
 		cfg.CommandDirs = machine.CommandDirs
 		markSources(&cfg, object, "", machinePath)
+	} else if err := refuseOldPaths(home); err != nil {
+		return Config{}, err
 	}
 	// Cross-key rules run once, on the merged layers: a project may complete
 	// what the machine file starts.
@@ -66,6 +69,10 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// A project rooted at the home shares the global file: it was read above.
+	if found && path == machinePath {
+		found = false
+	}
 	if found {
 		for _, rel := range []string{LegacyRelPath, ".claude/opencode-build.json"} {
 			legacyPath := filepath.Join(root, rel)
@@ -77,6 +84,11 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		}
 		if err := refuseRemoved(object); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", path, err)
+		}
+		for _, key := range []string{"machine", "targets"} {
+			if _, ok := object[key]; ok {
+				return Config{}, &Refusal{Msg: fmt.Sprintf("config %s: %s: unknown key (it belongs in the global file %s)", path, key, MachinePath(home))}
+			}
 		}
 		if err := validateObject(object, reflect.TypeFor[Config](), ""); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", path, err)

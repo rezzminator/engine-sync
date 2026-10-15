@@ -2,7 +2,6 @@ package machine
 
 import (
 	"github.com/rezzminator/engine-sync/internal/config"
-	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
@@ -11,27 +10,27 @@ import (
 	"testing"
 )
 
-const variantSourceAgent = "---\nname: lead\ndescription: >\n  Folded lead description\n  over two lines.\ntools: Read, Agent\n" +
+const declaredAgentSource = "---\nname: lead\ndescription: >\n  Folded lead description\n  over two lines.\ntools: Read, Agent\n" +
 	"model: opus # tier note\neffort: low\n---\n\nLead body, byte for byte.\n\n## Section\n\n\"quoted\" text.\n"
 
-func variantAgentsDir(home string) string {
+func declarationsDir(home string) string {
 	return filepath.Join(home, "source-repo", "agents")
 }
 
-func TestGlobalAgentVariantsAbsentDeclarationIsNoVariants(t *testing.T) {
+func TestAbsentDeclarationsRenderNothing(t *testing.T) {
 	home := testjail.Scratch(t)
-	writeAgentFixture(t, filepath.Join(variantAgentsDir(home), "lead.md"), variantSourceAgent)
-	variants, err := source.LoadGlobalAgentVariants(variantAgentsDir(home), filepath.Join(home, "out"))
-	if err != nil || variants != nil {
-		t.Fatalf("variants = %#v, err = %v; want nil, nil", variants, err)
+	writeAgentFixture(t, filepath.Join(declarationsDir(home), "lead.md"), declaredAgentSource)
+	agents, err := source.LoadDeclarations(declarationsDir(home), filepath.Join(home, "out"))
+	if err != nil || agents != nil {
+		t.Fatalf("agents = %#v, err = %v; want nil, nil", agents, err)
 	}
 }
 
 // A malformed source declaration is named while healthy originals compile.
 func TestGlobalAgentDeclarationFailureKeepsHealthyAgents(t *testing.T) {
 	home := testjail.Scratch(t)
-	dir := variantAgentsDir(home)
-	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
+	dir := declarationsDir(home)
+	writeAgentFixture(t, filepath.Join(dir, "lead.md"), declaredAgentSource)
 	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: [lead]\n---\n")
 	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
 	if err != nil || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], "DECLARATION-INVALID") || len(result.Compiled) == 0 {
@@ -39,14 +38,14 @@ func TestGlobalAgentDeclarationFailureKeepsHealthyAgents(t *testing.T) {
 	}
 }
 
-func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
+func TestGlobalAgentsRenderLinkAndCompileAGeneratedAgent(t *testing.T) {
 	home := testjail.Scratch(t)
-	dir := variantAgentsDir(home)
+	dir := declarationsDir(home)
 	second := filepath.Join(home, ".cc", "2")
-	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
+	writeAgentFixture(t, filepath.Join(dir, "lead.md"), declaredAgentSource)
 	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: lead\ndescription: Deep lead.\neffort: medium\n---\n")
 	options := GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home, ClaudeConfigDirs: []string{filepath.Join(home, ".claude"), second}}
-	generatedMD := filepath.Join(paths.GeneratedClaudeAgentsDir(home), "super-lead.md")
+	generatedMD := filepath.Join(home, "source-repo", "generated", "agents", "super-lead.md")
 
 	options.Mode = ModeCheck
 	plan, err := runFixtureMachineAgents(options)
@@ -63,11 +62,11 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 		}
 	}
 	if !wroteMD {
-		t.Fatalf("check plan never names the variant write: %#v", plan.Actions)
+		t.Fatalf("check plan never names the agent write: %#v", plan.Actions)
 	}
 	for _, config := range options.ClaudeConfigDirs {
 		if !hasGlobalAgentLinkAction(plan.Actions, filepath.Join(config, "agents", "super-lead.md"), generatedMD) {
-			t.Fatalf("check plan never links the variant into %s: %#v", config, plan.Actions)
+			t.Fatalf("check plan never links the agent into %s: %#v", config, plan.Actions)
 		}
 	}
 
@@ -84,7 +83,7 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 	content := string(readAgentFixture(t, toml))
 	if !strings.Contains(content, `name = "super-lead"`) || !strings.Contains(content, `description = "Deep lead."`) ||
 		!strings.Contains(content, "Lead body, byte for byte.") {
-		t.Fatalf("variant TOML twin:\n%s", content)
+		t.Fatalf("agent TOML twin:\n%s", content)
 	}
 
 	options.Mode = ModeCheck
@@ -98,26 +97,26 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 }
 
 // Source-file fixtures render through the real compiler, pins included.
-func TestShippedGlobalAgentVariantsRender(t *testing.T) {
-	agentsDir := filepath.Join("testdata", "global-variants")
+func TestShippedDeclarationsRender(t *testing.T) {
+	agentsDir := filepath.Join("testdata", "global-declarations")
 	declared := []string{"digger-pro", "digger-max"}
-	variants, err := source.LoadGlobalAgentVariants(agentsDir, testjail.Scratch(t))
+	agents, err := source.LoadDeclarations(agentsDir, testjail.Scratch(t))
 	if err != nil {
-		t.Fatalf("variants fixture: %v", err)
+		t.Fatalf("agents fixture: %v", err)
 	}
-	if len(variants) != len(declared) {
-		t.Fatalf("rendered %d variants, the fixture declares %d", len(variants), len(declared))
+	if len(agents) != len(declared) {
+		t.Fatalf("rendered %d agents, the fixture declares %d", len(agents), len(declared))
 	}
 	byName := map[string]string{}
-	for _, variant := range variants {
-		role, toml, err := renderFixtureMachineAgent(variant.Path, string(variant.Content), testjail.Scratch(t))
+	for _, agent := range agents {
+		role, toml, err := renderFixtureMachineAgent(agent.Path, string(agent.Content), testjail.Scratch(t))
 		if err != nil {
-			t.Fatalf("variant %s does not compile to TOML: %v", variant.Name, err)
+			t.Fatalf("agent %s does not compile to TOML: %v", agent.Name, err)
 		}
-		if role != variant.Name || !strings.Contains(toml, `name = "`+variant.Name+`"`) {
-			t.Fatalf("variant %s compiled to role %q:\n%s", variant.Name, role, toml)
+		if role != agent.Name || !strings.Contains(toml, `name = "`+agent.Name+`"`) {
+			t.Fatalf("agent %s compiled to role %q:\n%s", agent.Name, role, toml)
 		}
-		byName[variant.Name] = string(variant.Content)
+		byName[agent.Name] = string(agent.Content)
 	}
 	if got := byName["digger-pro"]; !strings.Contains(got, "Spawn at most 6 helpers a round") ||
 		strings.Contains(got, "Spawn at most 4 helpers a round") || !strings.Contains(got, "effort: medium") {
@@ -135,8 +134,8 @@ func TestShippedGlobalAgentVariantsRender(t *testing.T) {
 // a second run plans nothing.
 func TestGlobalAgentsRenderIntoTheSourceRepository(t *testing.T) {
 	home := testjail.Scratch(t)
-	dir := variantAgentsDir(home)
-	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
+	dir := declarationsDir(home)
+	writeAgentFixture(t, filepath.Join(dir, "lead.md"), declaredAgentSource)
 	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: lead\ndescription: Deep lead.\neffort: medium\n---\n")
 	cfg, err := config.LoadConfigLayers("", home)
 	if err != nil {
@@ -154,9 +153,6 @@ func TestGlobalAgentsRenderIntoTheSourceRepository(t *testing.T) {
 	assertGlobalSymlink(t, filepath.Join(home, ".claude", "agents", "super-lead.md"), rendered)
 	if !strings.Contains(string(readAgentFixture(t, rendered)), "Lead body, byte for byte.") {
 		t.Fatalf("%s lacks the base body", rendered)
-	}
-	if _, err := os.Lstat(filepath.Join(paths.GeneratedClaudeAgentsDir(home), "super-lead.md")); !os.IsNotExist(err) {
-		t.Fatalf("home store written too (err=%v)", err)
 	}
 	options.Mode = ModeCheck
 	settled, err := RunGlobalAgents(options)
@@ -183,8 +179,8 @@ func TestGlobalAgentsRenderIntoTheSourceRepository(t *testing.T) {
 // one is not named.
 func TestDoctorNamesAGeneratedOrphan(t *testing.T) {
 	home := testjail.Scratch(t)
-	dir := variantAgentsDir(home)
-	writeAgentFixture(t, filepath.Join(dir, "lead.md"), variantSourceAgent)
+	dir := declarationsDir(home)
+	writeAgentFixture(t, filepath.Join(dir, "lead.md"), declaredAgentSource)
 	writeAgentFixture(t, filepath.Join(dir, "super-lead.md"), "---\nname: super-lead\nfrom: lead\ndescription: Deep lead.\n---\n")
 	cfg, err := config.LoadConfigLayers("", home)
 	if err != nil {

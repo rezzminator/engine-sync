@@ -16,7 +16,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-func (d *variantsDecl) content(name string, r *renderedVariant) ([]byte, error) {
+func (d *declarationSet) content(name string, r *renderedAgent) ([]byte, error) {
 	source := filepath.ToSlash(filepath.Join(d.markerDir, name+".md"))
 	if r.root != GeneralPurpose {
 		source = filepath.ToSlash(filepath.Join(d.markerDir, r.root+".md")) + " + " + name + ".md"
@@ -33,9 +33,9 @@ func (d *variantsDecl) content(name string, r *renderedVariant) ([]byte, error) 
 	return []byte("---\n" + artifact.GlobalMarker(artifact.YAMLFront, source) + "\n" + head.String() + "---\n" + r.body), nil
 }
 
-// render resolves one variant: its from (original, variant, or the built-in),
+// render resolves one declaration: its from (original, declaration, or the built-in),
 // then the profile chain's layers outermost first, then its own layer.
-func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, error) {
+func (d *declarationSet) render(name string, chain []string) (*renderedAgent, error) {
 	if r, ok := d.rendered[name]; ok {
 		return r, nil
 	}
@@ -44,18 +44,18 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 	}
 	chain = append(chain, name)
 	layer := d.declarations[name]
-	var base renderedVariant
+	var base renderedAgent
 	switch {
 	case layer.from == GeneralPurpose:
-		base = renderedVariant{front: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}, root: GeneralPurpose}
+		base = renderedAgent{front: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}, root: GeneralPurpose}
 	case d.declarations[layer.from].hasFrom:
 		parent, err := d.render(layer.from, chain)
 		if err != nil {
 			return nil, err
 		}
-		base = renderedVariant{front: cloneNode(parent.front), body: parent.body, root: parent.root}
+		base = renderedAgent{front: cloneNode(parent.front), body: parent.body, root: parent.root}
 	default:
-		if !globalAgentVariantName.MatchString(layer.from) {
+		if !declarationName.MatchString(layer.from) {
 			return nil, fmt.Errorf("%s: variant %q: \"from\" must name a source agent, a variant or %s, got %q", d.path, name, GeneralPurpose, layer.from)
 		}
 		if failure := d.failures[layer.from]; failure != nil {
@@ -76,7 +76,7 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 				return nil, fmt.Errorf("%s: variant %q: %s", d.path, name, DescribeParseError(sourcePath, err))
 			}
 		}
-		base = renderedVariant{front: front, body: body, root: layer.from}
+		base = renderedAgent{front: front, body: body, root: layer.from}
 	}
 	layers, err := d.sharedLayers(layer.path, layer.extends, nil)
 	if err != nil {
@@ -134,9 +134,9 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 		if err != nil {
 			return nil, sectionError(err, name, layer.from, s.key)
 		}
-		d.uses = append(d.uses, pinFound{variant: name, section: s, now: now})
+		d.uses = append(d.uses, pinFound{declaration: name, section: s, now: now})
 		if d.repin != nil && (d.repin(name) || d.repin(d.ownerName(s.owner))) {
-			d.pins = append(d.pins, pinFound{variant: name, section: s, now: now})
+			d.pins = append(d.pins, pinFound{declaration: name, section: s, now: now})
 		} else if !s.pinned {
 			return nil, fmt.Errorf("SECTION-UNPINNED %s: %s.md § %s has no pin — run engine-sync variants pin %s", name, layer.from, s.key, name)
 		} else if s.pin != now {
@@ -159,7 +159,7 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 	if len(appends) > 0 {
 		body = joinNonEmpty(body, strings.Join(appends, "\n\n"))
 	}
-	r := &renderedVariant{front: front, body: body, root: base.root}
+	r := &renderedAgent{front: front, body: body, root: base.root}
 	d.rendered[name] = r
 	return r, nil
 }
@@ -167,8 +167,8 @@ func (d *variantsDecl) render(name string, chain []string) (*renderedVariant, er
 // sharedLayers resolves owner's extends paths, each relative to owner's own
 // directory, to shared files below a subdirectory of the agents directory:
 // their own extends first, outermost first.
-func (d *variantsDecl) sharedLayers(owner string, refs, chain []string) ([]variantLayer, error) {
-	var out []variantLayer
+func (d *declarationSet) sharedLayers(owner string, refs, chain []string) ([]layer, error) {
+	var out []layer
 	for _, ref := range refs {
 		key := d.ownerName(filepath.Join(filepath.Dir(owner), filepath.FromSlash(ref)))
 		if !strings.Contains(key, "/") || strings.HasPrefix(key, "../") {
@@ -210,12 +210,12 @@ var (
 	errSectionAmbiguous = errors.New("section ambiguous")
 )
 
-func sectionError(err error, variant, from, key string) error {
+func sectionError(err error, declaration, from, key string) error {
 	switch {
 	case errors.Is(err, errSectionMissing):
-		return fmt.Errorf("SECTION-MISSING %s: %s.md has no section %q", variant, from, key)
+		return fmt.Errorf("SECTION-MISSING %s: %s.md has no section %q", declaration, from, key)
 	case errors.Is(err, errSectionAmbiguous):
-		return fmt.Errorf("SECTION-AMBIGUOUS %s: %s.md has more than one section %q", variant, from, key)
+		return fmt.Errorf("SECTION-AMBIGUOUS %s: %s.md has more than one section %q", declaration, from, key)
 	}
 	return err
 }

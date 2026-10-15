@@ -140,7 +140,7 @@ func LoadProject(root, home string, cfg config.Config) Project {
 				path = filepath.Join(path, "SKILL.md")
 			}
 			if front, body, ok := p.parsed(path, report); ok {
-				p.Commands = append(p.Commands, Command{Name: strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(e.Rel), ".md"), "/", ":"), Path: path, Front: front, Body: body, Directory: e.SkillDir})
+				p.Commands = append(p.Commands, Command{Name: CommandName(e.Rel), Path: path, Front: front, Body: body, Directory: e.SkillDir})
 			}
 		}
 	}

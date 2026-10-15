@@ -14,9 +14,8 @@ import (
 )
 
 const (
-	opencodeAllow = "allow"
-	opencodeDeny  = "deny"
-	opencodeType  = "type"
+	opencodeDeny = "deny"
+	opencodeType = "type"
 )
 
 func compileConfigWithSource(model *claudesource.Project, root string, add func(artifact.Artifact), problem, warn func(string, ...any), policies ...config.OpenCode) {

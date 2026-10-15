@@ -46,3 +46,15 @@ func TestDeclaredName(t *testing.T) {
 		}
 	}
 }
+
+func TestCommandName(t *testing.T) {
+	for rel, want := range map[string]string{
+		"flights/spec.md":   "flights:spec",
+		"pfm.md":            "pfm",
+		"quality/prompt.md": "quality:prompt",
+	} {
+		if got := CommandName(rel); got != want {
+			t.Errorf("CommandName(%q) = %q, want %q", rel, got, want)
+		}
+	}
+}

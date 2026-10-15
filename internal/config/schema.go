@@ -62,6 +62,8 @@ func schemaType(t reflect.Type) map[string]any {
 			props["version"] = map[string]any{"const": 1}
 		}
 		return out
+	case reflect.Pointer:
+		return schemaType(t.Elem())
 	case reflect.Map:
 		return map[string]any{"type": "object", "additionalProperties": schemaType(t.Elem())}
 	case reflect.Slice:
