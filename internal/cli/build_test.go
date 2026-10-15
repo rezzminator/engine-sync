@@ -351,6 +351,9 @@ func TestProjectPluginLogWarnings(t *testing.T) {
 			if !ok || row["event"] != "build-warning" || row["where"] != "internal/cli/build.go#runProjectTargets" || row["level"] != "warning" || detail["count"] != float64(1) {
 				t.Fatalf("wrong warning: %s", raw)
 			}
+			if texts, _ := detail["warnings"].([]any); len(texts) != 1 || texts[0] == "" {
+				t.Fatalf("warning text missing: %s", raw)
+			}
 		})
 	}
 }

@@ -12,6 +12,8 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 - Failed project `check` and `doctor` commands write error rows with their diagnostic cause and session.
 
+- The `build-warning` plugin-log row names its warnings in `detail.warnings` beside `detail.count`, instead of only counting them. A set too long for the 4096-byte row keeps as many whole warnings as fit, cuts the next one, and says so in `detail.truncated`, `detail.omitted` (warnings not shown) and `detail.cut`; the row is never dropped for its length.
+
 - A machine-global OpenCode agent keeps the `mcp__{server}__{tool}` grants of the servers the machine config names in `mcp.globalServers`: the machine path passed no known servers, so every such grant was dropped as an unknown server. A configured server name renders in OpenCode's tool-part charset (letters, digits, `_`, `-`; any other character becomes `_`), as a project server's does, so a dotted name grants and no configured name reaches an agent file raw. A tool of a server named nowhere, or of a retired one, is named in a warning and its server is denied outright (`{server}_*: false`): OpenCode enables a tool an agent's map leaves out. This changes the bytes of a machine-global OpenCode agent: each one now denies every configured global server it does not grant (`{server}_*: false`).
 
 ## [0.3.0] - 2026-10-12

@@ -63,12 +63,18 @@ func Record(get paths.Env, stderr io.Writer, row Row) {
 	processLog.failing = false
 }
 
+type wireRow struct {
+	TS     string `json:"ts"`
+	Plugin string `json:"plugin"`
+	Row
+}
+
+func newWireRow(row Row) wireRow {
+	return wireRow{TS: time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), Plugin: "engine-sync", Row: row}
+}
+
 func encodeRow(row Row) ([]byte, error) {
-	wire := struct {
-		TS     string `json:"ts"`
-		Plugin string `json:"plugin"`
-		Row
-	}{TS: time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), Plugin: "engine-sync", Row: row}
+	wire := newWireRow(row)
 	raw, err := json.Marshal(wire)
 	if err != nil {
 		return nil, fmt.Errorf("encode %s: %w", row.Event, err)
@@ -153,6 +159,82 @@ type ProjectOutcome struct {
 	Warnings, Problems []string
 }
 
+// buildWarningRow names the warnings in detail.warnings, bounded to RowMaxBytes:
+// whole warnings first, the next one cut to the room left, the rest counted in
+// detail.omitted, with detail.truncated (and detail.cut for a cut text) set.
+func buildWarningRow(outcome ProjectOutcome, where string) Row {
+	row := Row{Level: "warning", Event: "build-warning", Msg: fmt.Sprintf("%s reported %d warnings", outcome.Action, len(outcome.Warnings)), Where: where, Session: outcome.Session}
+	count, warnings := len(outcome.Warnings), outcome.Warnings
+	wire := newWireRow(row)
+	fits := func(detail map[string]any) bool {
+		wire.Detail = detail
+		raw, err := json.Marshal(wire)
+		return err == nil && len(raw)+1 <= RowMaxBytes
+	}
+	whole := map[string]any{"count": count, "warnings": warnings}
+	if fits(whole) {
+		row.Detail = whole
+		return row
+	}
+	partial := func(shown []string, omitted int, cut bool) map[string]any {
+		detail := map[string]any{"count": count, "warnings": shown, "truncated": true, "omitted": omitted}
+		if cut {
+			detail["cut"] = true
+		}
+		return detail
+	}
+	// The most whole warnings that fit; fits is monotonic in the prefix length.
+	low, high := 0, count
+	for low < high {
+		middle := (low + high + 1) / 2
+		if fits(partial(warnings[:middle], count-middle, false)) {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	shown := append(make([]string, 0, low+1), warnings[:low]...)
+	best := partial(shown, count-low, false)
+	if !fits(best) {
+		// Not even an empty list fits (an oversized session or location): keep
+		// the most that does, always saying the texts were withheld.
+		for _, detail := range []map[string]any{
+			{"count": count, "truncated": true, "omitted": count},
+			{"count": count, "truncated": true},
+			{"truncated": true},
+			{"count": count},
+		} {
+			if fits(detail) {
+				row.Detail = detail
+				return row
+			}
+		}
+		// Not even the count fits: the generic path in encodeRow marks the row truncated.
+		row.Detail = map[string]any{"count": count}
+		return row
+	}
+	withCut := func(whole []string, text []rune) []string {
+		return append(append(make([]string, 0, len(whole)+1), whole...), string(text))
+	}
+	if low < count {
+		runes := []rune(warnings[low])
+		lo, hi := 0, len(runes)
+		for lo < hi {
+			middle := (lo + hi + 1) / 2
+			if fits(partial(withCut(shown, runes[:middle]), count-low-1, true)) {
+				lo = middle
+			} else {
+				hi = middle - 1
+			}
+		}
+		if lo > 0 {
+			best = partial(withCut(shown, runes[:lo]), count-low-1, true)
+		}
+	}
+	row.Detail = best
+	return row
+}
+
 // OutcomeRows summarizes warnings once and records builds and failed project checks.
 func OutcomeRows(outcome ProjectOutcome) []Row {
 	var rows []Row
@@ -161,7 +243,7 @@ func OutcomeRows(outcome ProjectOutcome) []Row {
 	}
 	where := "internal/cli/build.go#runProjectTargets"
 	if len(outcome.Warnings) > 0 {
-		rows = append(rows, Row{Level: "warning", Event: "build-warning", Msg: fmt.Sprintf("%s reported %d warnings", outcome.Action, len(outcome.Warnings)), Where: where, Session: outcome.Session, Detail: map[string]any{"count": len(outcome.Warnings)}})
+		rows = append(rows, buildWarningRow(outcome, where))
 	}
 	if outcome.Code == 2 || (outcome.Code == 0 && (outcome.Action != "build" || !outcome.Applied)) {
 		return rows
