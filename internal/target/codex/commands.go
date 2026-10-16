@@ -28,7 +28,7 @@ func discoverCommandRosterIn(sourceRoot string, exclusions []string, result *Res
 				continue
 			}
 		}
-		name := colonName(filepath.ToSlash(rel))
+		name := claudesource.CommandName(rel)
 		roster[name] = "$" + flatName(filepath.ToSlash(rel))
 	}
 	return roster
@@ -147,7 +147,7 @@ func compileInstalledGlobalCommands(
 		sourceRoot = result.Source.SourceCommandDir
 	}
 	roster := discoverCommandRosterIn(sourceRoot, nil, result)
-	transform := TransformOptions{Review: cfg.Review, ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, RetiredFiles: policy.Machine.RetiredFiles, Rewrites: policy.Rewrites}
+	transform := TransformOptions{Review: cfg.Review, ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, RetiredFiles: policy.Machine.RetiredFiles, Rewrites: policy.Rewrites, ManagedBy: policy.Machine.ManagedBy}
 	compileGlobalCommands(outputHome, sourceHome, outputHome, cfg, transform, add, problem, warn, result)
 }
 
@@ -204,7 +204,7 @@ func compileCommandFile(
 	)
 	dst := filepath.Join(outputRoot, flat, "SKILL.md")
 	if global {
-		add(artifact.Artifact{Path: filepath.Join(outputBase, ".codex", "prompts", flat+".md"), Content: []byte(generated), Source: entry.Path, Syntax: artifact.YAMLFront})
+		add(artifact.Artifact{Path: filepath.Join(outputBase, ".codex", "prompts", flat+".md"), Content: []byte(artifact.WithManagedBy(generated, options.ManagedBy)), Source: entry.Path, Syntax: artifact.YAMLFront})
 		if fields["disable-model-invocation"] == "true" || retiredSkill(flat, options.RetiredFiles) {
 			return
 		}
@@ -225,9 +225,4 @@ func retiredSkill(name string, files []string) bool {
 func flatName(rel string) string {
 	rel = strings.TrimSuffix(filepath.ToSlash(rel), ".md")
 	return strings.ReplaceAll(rel, "/", "-")
-}
-
-func colonName(rel string) string {
-	rel = strings.TrimSuffix(filepath.ToSlash(rel), ".md")
-	return strings.ReplaceAll(rel, "/", ":")
 }

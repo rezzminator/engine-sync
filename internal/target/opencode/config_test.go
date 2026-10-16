@@ -50,7 +50,7 @@ func TestSerializeConfigDeniesGitWritesInAFixedOrderAfterAllow(t *testing.T) {
 		patterns = append(patterns, key.(string))
 		actions = append(actions, value.(string))
 	}
-	if len(patterns) == 0 || patterns[0] != "*" || actions[0] != opencodeAllow {
+	if len(patterns) == 0 || patterns[0] != "*" || actions[0] != "allow" {
 		t.Fatalf("bash rules must open with \"*\": allow so every deny after it wins: %s", config.Permission.Bash)
 	}
 	decide := func(command string) string {
@@ -78,13 +78,13 @@ func TestSerializeConfigDeniesGitWritesInAFixedOrderAfterAllow(t *testing.T) {
 		"git -C /work/repo push":              opencodeDeny,
 		"git -C repo am":                      opencodeDeny,
 		"gh release create v1.2.3":            opencodeDeny,
-		"git status":                          opencodeAllow,
-		"git merge-base --is-ancestor a b":    opencodeAllow,
-		"git -C repo merge-base a b":          opencodeAllow,
-		"git -C repo diff -- src/reset.go":    opencodeAllow,
-		"git -C repo log -- ambient.go":       opencodeAllow,
-		"git -C repo show HEAD:amend/file.go": opencodeAllow,
-		"go test ./...":                       opencodeAllow,
+		"git status":                          "allow",
+		"git merge-base --is-ancestor a b":    "allow",
+		"git -C repo merge-base a b":          "allow",
+		"git -C repo diff -- src/reset.go":    "allow",
+		"git -C repo log -- ambient.go":       "allow",
+		"git -C repo show HEAD:amend/file.go": "allow",
+		"go test ./...":                       "allow",
 	} {
 		if got := decide(command); got != want {
 			t.Errorf("OpenCode would %s %q, want %s", got, command, want)

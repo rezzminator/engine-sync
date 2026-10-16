@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/cliargs"
 	"io"
 	"path/filepath"
 	"time"
@@ -14,11 +15,11 @@ import (
 type Targets = config.Targets
 
 func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
-	flags := NewFlagSet("global", "usage: engine-sync global [--home H] [--source-repo R] [--claude-config-dir C]... "+
+	flags := cliargs.NewFlagSet("global", "usage: engine-sync global [--home H] [--source-repo R] [--claude-config-dir C]... "+
 		"[--codex-home X]... [--no-codex-home] [--source-home S] [--plan] [--uninstall] [--adopt] [--capability NAME]... [--json]", stderr)
 	home := flags.String("home", "", "the home every default is anchored on")
 	sourceRepo := flags.String("source-repo", "", "the source repository (default Claude config dir agents)")
-	var claudeDirs, codexHomes repeatString
+	var claudeDirs, codexHomes cliargs.RepeatString
 	flags.Var(&claudeDirs, "claude-config-dir", "a Claude config dir; repeatable")
 	flags.Var(&codexHomes, "codex-home", "a Codex home; repeatable")
 	noCodex := flags.Bool("no-codex-home", false, "no Codex home is configured")
@@ -26,10 +27,10 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 	plan := flags.Bool("plan", false, "write nothing; list what an apply would do")
 	uninstall := flags.Bool("uninstall", false, "retire every generated role and managed command")
 	adopt := flags.Bool("adopt", false, "move an unowned file at a declared agent's path aside, then replace it")
-	var capabilities repeatString
+	var capabilities cliargs.RepeatString
 	flags.Var(&capabilities, "capability", "a host capability an agent's requires may name; repeatable")
 	asJSON := flags.Bool("json", false, "print one JSON object")
-	positionals, code, ok := ParseFlagsAnywhere(flags, args)
+	positionals, code, ok := cliargs.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -55,7 +56,7 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 		var guardErr error
 		_, guardErr = guarded(e, machine.GuardRoots(options.Home, options.CodexHomes, options.ClaudeConfigDirs), !options.Plan, func() int {
 			// The capability set is read under the writer lock: a run that
-			// waited for another never acts on a targets.json read before it.
+			// waited for another never acts on a `targets` read before it.
 			withCapabilities, capErr := config.WithCapabilities(e.get, options.Home, options.Config, capabilities)
 			if capErr != nil {
 				report = machine.Report{Err: capErr}
@@ -76,7 +77,7 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 }
 
 func globalOptions(
-	e env, home, sourceRepo, sourceHome string, claudeDirs, codexHomes repeatString, noCodex bool,
+	e env, home, sourceRepo, sourceHome string, claudeDirs, codexHomes cliargs.RepeatString, noCodex bool,
 ) (machine.Options, error) {
 	resolvedHome, err := absoluteHome(home, e)
 	if err != nil {

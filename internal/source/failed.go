@@ -8,9 +8,9 @@ import (
 
 var errorCode = regexp.MustCompile(`^[A-Z]{3,}(-[A-Z]+)+ `)
 
-// variantProblem names one variant whose render failed: an error that carries
+// declarationProblem names one declaration whose render failed: an error that carries
 // its own code as it is, any other as VARIANT-INVALID.
-func variantProblem(err error) string {
+func declarationProblem(err error) string {
 	if errorCode.MatchString(err.Error()) {
 		return err.Error()
 	}

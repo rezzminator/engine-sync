@@ -9,8 +9,8 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 )
 
-// TestPinGlobalAgentVariants keeps every byte outside pins, including CRLF.
-func TestPinGlobalAgentVariants(t *testing.T) {
+// TestPinDeclarations keeps every byte outside pins, including CRLF.
+func TestPinDeclarations(t *testing.T) {
 	for _, newline := range []string{"\n", "\r\n"} {
 		t.Run(strings.ReplaceAll(newline, "\r", "CR"), func(t *testing.T) {
 			dir := filepath.Join(testjail.Scratch(t), "agents")
@@ -19,21 +19,21 @@ func TestPinGlobalAgentVariants(t *testing.T) {
 			}
 			a := "---\n# source note\nname: lead-a\nfrom: lead\npins: {Budget: 'sha256:00'}\nmodel: 'sonnet' # keep me\n---\n\n## Budget\n\nSpend more.\n"
 			b := "---\nname: lead-b\nfrom: lead\nappend: |-\n  Tail.\n---\n\n## Procedure\n\nDo less.\n"
-			for name, text := range map[string]string{"lead.md": variantLead, "lead-a.md": a, "lead-b.md": b} {
+			for name, text := range map[string]string{"lead.md": leadSource, "lead-a.md": a, "lead-b.md": b} {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.ReplaceAll(text, "\n", newline)), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
-			procedure, err := SectionPin(variantLeadBody, "Procedure")
+			procedure, err := SectionPin(leadSourceBody, "Procedure")
 			if err != nil {
 				t.Fatal(err)
 			}
-			budget, err := SectionPin(variantLeadBody, "Budget")
+			budget, err := SectionPin(leadSourceBody, "Budget")
 			if err != nil {
 				t.Fatal(err)
 			}
-			changes, err := PinGlobalAgentVariants(dir, []string{"lead-b"})
-			if err != nil || len(changes) != 1 || changes[0] != (PinChange{Variant: "lead-b", Heading: "Procedure", Pin: procedure}) {
+			changes, err := PinDeclarations(dir, []string{"lead-b"})
+			if err != nil || len(changes) != 1 || changes[0] != (PinChange{Declaration: "lead-b", Heading: "Procedure", Pin: procedure}) {
 				t.Fatalf("pin lead-b = %+v (%v)", changes, err)
 			}
 			wantB := strings.Replace(b, "---\n\n## Procedure", "pins:\n  Procedure: "+procedure+"\n---\n\n## Procedure", 1)
@@ -46,19 +46,19 @@ func TestPinGlobalAgentVariants(t *testing.T) {
 			}
 			check("lead-a", a)
 			check("lead-b", wantB)
-			changes, err = PinGlobalAgentVariants(dir, nil)
-			if err != nil || len(changes) != 1 || changes[0] != (PinChange{Variant: "lead-a", Heading: "Budget", Pin: budget}) {
+			changes, err = PinDeclarations(dir, nil)
+			if err != nil || len(changes) != 1 || changes[0] != (PinChange{Declaration: "lead-a", Heading: "Budget", Pin: budget}) {
 				t.Fatalf("pin all = %+v (%v)", changes, err)
 			}
 			wantA := strings.Replace(a, "pins: {Budget: 'sha256:00'}\n", "pins:\n  Budget: "+budget+"\n", 1)
 			check("lead-a", wantA)
 			check("lead-b", wantB)
-			if again, err := PinGlobalAgentVariants(dir, nil); err != nil || len(again) != 0 {
+			if again, err := PinDeclarations(dir, nil); err != nil || len(again) != 0 {
 				t.Fatalf("second pin = %+v (%v)", again, err)
 			}
 			check("lead-a", wantA)
 			check("lead-b", wantB)
-			if _, err := PinGlobalAgentVariants(dir, []string{"ghost"}); err == nil || !strings.Contains(err.Error(), "ghost") {
+			if _, err := PinDeclarations(dir, []string{"ghost"}); err == nil || !strings.Contains(err.Error(), "ghost") {
 				t.Fatalf("unknown = %v", err)
 			}
 		})

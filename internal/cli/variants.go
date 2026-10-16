@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/cliargs"
 	"io"
 
 	"github.com/rezzminator/engine-sync/internal/machine"
@@ -18,10 +19,10 @@ func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
-	flags := NewFlagSet("variants pin", usage, stderr)
+	flags := cliargs.NewFlagSet("variants pin", usage, stderr)
 	home := flags.String("home", "", "the home whose machine agents directory holds source declarations")
 	sourceRepo := flags.String("source-repo", "", "the repository whose configured agents directory holds source declarations")
-	names, code, ok := ParseFlagsAnywhere(flags, args[1:])
+	names, code, ok := cliargs.ParseFlagsAnywhere(flags, args[1:])
 	if !ok {
 		return code
 	}
@@ -33,10 +34,10 @@ func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 	policy, err := e.policy("", resolvedHome, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return cliargs.FailureCode(err)
 	}
 	// The source repository resolves as `global` resolves it: the flag, else
-	// targets.json, else the Claude config dir's agents.
+	// the global file's targets.sourceRepo, else the Claude config dir's agents.
 	options, err := globalOptions(e, resolvedHome, *sourceRepo, "", nil, nil, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "engine-sync variants pin: %v\n", err)
@@ -46,9 +47,9 @@ func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 	// The pin runs under its agents directory's writer guard: a second pin
 	// waits, then re-reads the declaration the first one rewrote.
 	code, err = guarded(e, []string{machine.GlobalRoot(agentsDir)}, true, func() int {
-		changes, err := source.PinGlobalAgentVariants(agentsDir, names)
+		changes, err := source.PinDeclarations(agentsDir, names)
 		for _, change := range changes {
-			fmt.Fprintf(stdout, "pinned %s § %s %s\n", change.Variant, change.Heading, change.Pin)
+			fmt.Fprintf(stdout, "pinned %s § %s %s\n", change.Declaration, change.Heading, change.Pin)
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "engine-sync variants pin: %v\n", err)

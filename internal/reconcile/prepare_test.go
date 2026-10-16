@@ -2,6 +2,7 @@ package reconcile_test
 
 import (
 	"github.com/rezzminator/engine-sync/internal/artifact"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"net"
@@ -77,17 +78,40 @@ func TestInspectNamesReadAndWalkErrors(t *testing.T) {
 	if len(problems) != 1 || !strings.Contains(problems[0], "read "+path) {
 		t.Fatalf("read error not named: %v", problems)
 	}
-	path = filepath.Join(root, "unreadable.toml")
+	// A regular file past the read bound fails the same way for every uid; a permission
+	// bit cannot stand in for it because root ignores the bit.
+	path = filepath.Join(root, "oversize.toml")
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, paths.MaxSourceBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	_, problems = reconcile.Inspect(nil, []artifact.Artifact{{Path: path}})
+	if len(problems) != 1 || !strings.Contains(problems[0], "read "+path) || !strings.Contains(problems[0], "byte limit") {
+		t.Fatalf("oversize read error not named: %v", problems)
+	}
+}
+
+// TestInspectNamesUnreadableEntries needs a file and a directory this process
+// cannot open, which root can never be denied: as root the test re-runs itself
+// as an unprivileged user.
+func TestInspectNamesUnreadableEntries(t *testing.T) {
+	if testjail.RanUnprivileged(t) {
+		return
+	}
+	root := testjail.Scratch(t)
+	path := filepath.Join(root, "unreadable.toml")
 	if err := os.WriteFile(path, []byte("model = 'sample'\n"), 0000); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "unreadable.toml"), 0600) })
 	if _, err := os.ReadFile(path); err == nil {
-		t.Skip("regular-file permission proof requires a non-root user")
+		t.Fatal("fixture does not deny the read")
 	}
-	_, problems = reconcile.Inspect(nil, []artifact.Artifact{{Path: path}})
-	if len(problems) != 1 || !strings.Contains(problems[0], "read "+path) {
-		t.Fatalf("regular-file read error not named: %v", problems)
+	_, problems := reconcile.Inspect(nil, []artifact.Artifact{{Path: path}})
+	if len(problems) != 1 || !strings.Contains(problems[0], "read "+path) || !strings.Contains(problems[0], "open "+path) {
+		t.Fatalf("regular-file open error not named: %v", problems)
 	}
 	path = filepath.Join(root, "blocked")
 	if err := os.Mkdir(path, 0000); err != nil {
@@ -95,7 +119,7 @@ func TestInspectNamesReadAndWalkErrors(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(path, 0700) })
 	if _, err := os.ReadDir(path); err == nil {
-		t.Skip("directory permission proof requires a non-root user")
+		t.Fatal("fixture does not deny the listing")
 	}
 	_, problems = reconcile.Inspect([]artifact.Root{{Path: path}}, nil)
 	if len(problems) != 1 || !strings.Contains(problems[0], "inspect "+path) {

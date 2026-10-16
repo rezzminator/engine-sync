@@ -4,3 +4,4 @@ dist/
 .DS_Store
 /engine-sync
 scripts/leak-terms.txt
+__pycache__/

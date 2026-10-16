@@ -3,7 +3,7 @@ package machine
 import (
 	"github.com/BurntSushi/toml"
 	"github.com/rezzminator/engine-sync/internal/artifact"
-	"github.com/rezzminator/engine-sync/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/target/codex"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
@@ -47,7 +47,7 @@ func assertGlobalRoleFile(t *testing.T, target string) {
 	if !info.Mode().IsRegular() {
 		t.Fatalf("%s mode=%v — Codex refuses anything but a regular file", target, info.Mode())
 	}
-	if !GeneratedGlobalRole(readAgentFixture(t, target)) {
+	if !reconcile.GeneratedGlobalRole(readAgentFixture(t, target)) {
 		t.Fatalf("%s carries no generated marker", target)
 	}
 }
@@ -103,8 +103,7 @@ func TestGlobalAgentBadCodexEffortNamesSource(t *testing.T) {
 // does.
 func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing.T) {
 	home := testjail.Scratch(t)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	writeAgentFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"children are Explore+haiku (never\nyour own type)","replace":"children are spawned via spawn_agent as the `+"`explorer`"+` role (never your own type)"}]}}`)
+	writeAgentFixture(t, filepath.Join(home, ".claude", "engine-sync.json"), `{"version":1,"machine":{"rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"children are Explore+haiku (never\nyour own type)","replace":"children are spawned via spawn_agent as the `+"`explorer`"+` role (never your own type)"}]}}`)
 	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\ntools: Read\nmodel: sonnet\n---\n\n"+
 			"Delegate to children are Explore+haiku (never\nyour own type) for search fan-out.\n")
@@ -125,7 +124,7 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 		t.Fatalf("installed = %#v, want 2 Claude link entries", result.Installed)
 	}
 	for _, installed := range result.Installed {
-		if installed.State != GlobalLinkMissing {
+		if installed.State != reconcile.GlobalLinkMissing {
 			t.Fatalf("installed %s classified %s before install ran, want missing", installed.Path, installed.State)
 		}
 	}
@@ -133,7 +132,7 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 		t.Fatalf("roles = %#v, want 2 Codex role files", result.Roles)
 	}
 	for _, role := range result.Roles {
-		if role.State != GlobalRoleMissing {
+		if role.State != reconcile.GlobalRoleMissing {
 			t.Fatalf("role %s classified %s before install ran, want missing", role.Path, role.State)
 		}
 	}
@@ -348,18 +347,6 @@ func TestGlobalAgentEscapeMirrorsBuildCodexMJS(t *testing.T) {
 	}
 }
 
-// TestGlobalAgentEscapeMultilineNeutralisesTripleQuoteCollision pins the
-// multi-line basic-string escape to build-codex.mjs:153 exactly: backslash
-// doubled, then a literal `"""` neutralised so it can never be mistaken for
-// the string's own closing delimiter.
-func TestGlobalAgentEscapeMultilineNeutralisesTripleQuoteCollision(t *testing.T) {
-	in := "line one\nhas a literal \"\"\" inside\nand a backslash \\ alone"
-	want := "line one\nhas a literal \\\"\\\"\\\" inside\nand a backslash \\\\ alone"
-	if got := codex.EscapeRoleMultiline(in); got != want {
-		t.Fatalf("codex.EscapeRoleMultiline(%q) = %q, want %q", in, got, want)
-	}
-}
-
 func TestGlobalAgentsAcceptsEmptySourceRegistry(t *testing.T) {
 	home := testjail.Scratch(t)
 	if err := os.MkdirAll(filepath.Join(home, "source-repo", "agents"), 0o755); err != nil {
@@ -387,14 +374,14 @@ func TestGlobalAgentsCheckReportsMissingBeforeInstall(t *testing.T) {
 	if len(result.Installed) != 1 || len(result.Roles) != 1 {
 		t.Fatalf("installed=%#v roles=%#v, want one of each desired target", result.Installed, result.Roles)
 	}
-	if result.Installed[0].State != GlobalLinkMissing {
+	if result.Installed[0].State != reconcile.GlobalLinkMissing {
 		t.Fatalf(
 			"check mode classified an absent link as %s, not missing: %#v",
 			result.Installed[0].State,
 			result.Installed[0],
 		)
 	}
-	if result.Roles[0].State != GlobalRoleMissing {
+	if result.Roles[0].State != reconcile.GlobalRoleMissing {
 		t.Fatalf("check mode classified an absent role as %s, not missing: %#v", result.Roles[0].State, result.Roles[0])
 	}
 	for _, path := range []string{
@@ -408,7 +395,7 @@ func TestGlobalAgentsCheckReportsMissingBeforeInstall(t *testing.T) {
 }
 
 // TestGlobalAgentsCodexRosterNilDefaultsEmptyPlansNoRole pins the roster
-// contract the installer relies on: a nil CodexHomes (`pfm codex agents`)
+// contract the installer relies on: a nil CodexHomes (`engine-sync codex agents`)
 // defaults to {Home}/.codex, while a non-nil empty CodexHomes (an install
 // with no Codex account) means no Codex home — the Claude link is still
 // planned and built, and no role is planned or written.
@@ -741,7 +728,7 @@ func TestGlobalAgentsPreservesUnprovenLegacyRoleLink(t *testing.T) {
 	home := testjail.Scratch(t)
 	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nAlpha body.\n")
-	legacy := filepath.Join(paths.LegacyGeneratedCodexAgentsDir(home), "alpha.toml")
+	legacy := filepath.Join(home, "handmade", "alpha.toml")
 	writeAgentFixture(t, legacy, "name = \"alpha\"\n")
 	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
 	if err := os.MkdirAll(filepath.Dir(role), 0o755); err != nil {

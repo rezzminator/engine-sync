@@ -21,8 +21,8 @@ func TestParseOpenCodeFrontmatterReadsAYAMLListAsTheCommaJoinedList(t *testing.T
 	if listed["tools"] != "Read, Grep" || listed["model"] != "sonnet" {
 		t.Fatalf("list fields = %q, want tools %q and model sonnet", listed, "Read, Grep")
 	}
-	listedBlock, _, _ := renderOpenCodeToolsBlock("worker.md", listed["tools"], []string{"professor"})
-	inlineBlock, _, _ := renderOpenCodeToolsBlock("worker.md", inline["tools"], []string{"professor"})
+	listedBlock, _, _ := renderOpenCodeToolsBlock("worker.md", listed["tools"], []string{"chat-professor", "harvester-professor"})
+	inlineBlock, _, _ := renderOpenCodeToolsBlock("worker.md", inline["tools"], []string{"chat-professor", "harvester-professor"})
 	if listedBlock != inlineBlock {
 		t.Fatalf("list block = %q, inline block = %q", listedBlock, inlineBlock)
 	}

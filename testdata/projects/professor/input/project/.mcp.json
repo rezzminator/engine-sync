@@ -1,10 +1,23 @@
 {
   "mcpServers": {
-    "professor": {
+    "chat-professor": {
       "command": "pfm",
       "args": [
         "mcp",
-        "serve"
+        "serve",
+        "--stdio",
+        "--family",
+        "chat"
+      ]
+    },
+    "harvester-professor": {
+      "command": "pfm",
+      "args": [
+        "mcp",
+        "serve",
+        "--stdio",
+        "--family",
+        "harvester"
       ]
     }
   }

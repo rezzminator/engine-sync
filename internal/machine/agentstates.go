@@ -28,6 +28,9 @@ const (
 	StateShadowed  = "SHADOWED"
 	StateSkipped   = "SKIPPED"
 	StateStray     = "STRAY"
+	// StateOrphan is a file engine-sync wrote, marked with the installer's
+	// managed-by line, that no source produces any more.
+	StateOrphan = string(reconciler.Orphan)
 )
 
 // The engines a machine-global agent reaches.
@@ -80,7 +83,7 @@ func (s AgentState) Describe() string {
 var errRenderFailures = errors.New("load or render agents")
 
 // AgentStates classifies every declared machine-global agent, original and
-// variant, closed-world per engine: one state per Claude registry link, per
+// generated agent, closed-world per engine: one state per Claude registry link, per
 // Codex role file and per OpenCode agent file, then every STRAY in the Codex
 // and OpenCode registries. The Claude registry is shared with hand-installed
 // agents, so it reports no STRAY. An owned file at an undeclared name is
@@ -120,7 +123,7 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 	if codexHomes == nil {
 		codexHomes = []string{filepath.Join(home, ".codex")}
 	}
-	ownedLinkDirs := []string{filepath.Join(home, cfg.Machine.LegacyCodexAgentsDir), agentsDir}
+	ownedLinkDirs := []string{agentsDir}
 	declaredRoles := map[string]bool{}
 	for _, name := range filtered.Failed {
 		for _, codexHome := range codexHomes {
@@ -137,13 +140,13 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 				states = append(states, AgentState{Engine: EngineClaude, Name: agent.name, Path: path, State: StateInstalled})
 				continue
 			}
-			state, found, err := ClassifyGlobalLink(path, agent.mdSource, filepath.Clean(sourceRoot), GlobalLinkFile)
+			state, found, err := reconciler.ClassifyGlobalLink(path, agent.mdSource, filepath.Clean(sourceRoot), reconciler.GlobalLinkFile)
 			if err != nil {
 				return nil, fmt.Errorf("inspect global agent link %s: %w", path, err)
 			}
 			s := AgentState{Engine: EngineClaude, Name: agent.name, Path: path, Detail: found}
 			switch state {
-			case GlobalLinkCorrect:
+			case reconciler.GlobalLinkCorrect:
 				s.State, s.Detail = StateInstalled, ""
 				if agent.mdContent != nil {
 					same, err := sameGlobalAgentFile(agent.mdSource, agent.mdContent)
@@ -154,9 +157,9 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 						s.State, s.Detail = StateStale, "rendered variant "+agent.mdSource+" is not current"
 					}
 				}
-			case GlobalLinkMissing:
+			case reconciler.GlobalLinkMissing:
 				s.State = StateMissing
-			case GlobalLinkConflict:
+			case reconciler.GlobalLinkConflict:
 				s.State = StateShadowed
 			default:
 				s.State = StateStale
@@ -169,17 +172,17 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		for _, codexHome := range codexHomes {
 			path := filepath.Join(codexHome, "agents", agent.name+".toml")
 			declaredRoles[path] = true
-			state, found, err := ClassifyGlobalRole(path, agent.tomlContent, ownedLinkDirs)
+			state, found, err := reconciler.ClassifyGlobalRole(path, agent.tomlContent, ownedLinkDirs)
 			if err != nil {
 				return nil, fmt.Errorf("inspect global role %s: %w", path, err)
 			}
 			s := AgentState{Engine: EngineCodex, Name: agent.name, Path: path, Detail: found}
 			switch state {
-			case GlobalRoleCurrent:
+			case reconciler.GlobalRoleCurrent:
 				s.State = StateInstalled
-			case GlobalRoleMissing:
+			case reconciler.GlobalRoleMissing:
 				s.State = StateMissing
-			case GlobalRoleForeign:
+			case reconciler.GlobalRoleForeign:
 				s.State = StateShadowed
 			default:
 				s.State = StateStale
@@ -254,7 +257,8 @@ func classifyOwnedFile(path string, want []byte) (string, error) {
 
 // registryStrays walks one managed registry for files at undeclared names:
 // an owned one (a marker-carrying file, or a link into ownedLinkDirs) is
-// STALE, anything else is a STRAY warning. An absent registry has none; an
+// STALE, or an ORPHAN when its file carries a managed-by line; anything else
+// is a STRAY warning. An absent registry has none; an
 // unreadable one is an error, never an empty registry.
 func registryStrays(engine, registry, suffix string, declared map[string]bool, ownedLinkDirs []string) ([]AgentState, error) {
 	entries, err := os.ReadDir(registry)
@@ -275,6 +279,7 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 			return nil, fmt.Errorf("inspect %s: %w", path, err)
 		}
 		owned := false
+		managedBy := ""
 		switch {
 		case info.Mode()&os.ModeSymlink != 0:
 			target, err := os.Readlink(path)
@@ -293,9 +298,13 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 				return nil, fmt.Errorf("read %s: %w", path, err)
 			}
 			owned = artifact.Claims(string(content))
+			managedBy, _ = artifact.ManagedBy(string(content))
 		}
 		s := AgentState{Engine: engine, Name: strings.TrimSuffix(entry.Name(), suffix), Path: path, State: StateStray}
-		if owned {
+		switch {
+		case owned && managedBy != "":
+			s.State, s.Detail = StateOrphan, "managed-by "+managedBy
+		case owned:
 			s.State, s.Detail = StateStale, "owned, no longer declared"
 		}
 		states = append(states, s)
@@ -304,7 +313,7 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 	return states, nil
 }
 
-// CheckSourceVariants validates the machine-global agents a project carries
+// CheckSourceDeclarations validates the machine-global agents a project carries
 // in {root}/{machine.sourceAgentsDir}, its declarations included: every
 // source and every rendered agent must parse,
 // validate and compile, and each agent whose requires the capabilities do
@@ -312,7 +321,7 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 // problem with global's message: both run skipBrokenAgents. A project whose
 // directory holds no from: source has nothing to render and
 // reports nothing. A failed render is a problem, never an absent agent.
-func CheckSourceVariants(root, home string, cfg config.Config) (problems, warnings []string) {
+func CheckSourceDeclarations(root, home string, cfg config.Config) (problems, warnings []string) {
 	// Resolve the project root before joining its configured agents directory.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -373,16 +382,4 @@ func (r *run) retireOwnedEntries(dir, reason string) error {
 		}
 	}
 	return nil
-}
-
-// retireMovedGeneratedStore retires what engine-sync owns in the home store
-// once declarations render into the source repository instead. It runs after
-// the registry links are repointed, so no link is left dangling into it and a
-// link without a receipt is still claimed through the file it points at.
-func (r *run) retireMovedGeneratedStore(generatedDir string) error {
-	store := filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir)
-	if r.policy.Machine.SourceGeneratedAgentsDir == "" || filepath.Clean(store) == filepath.Clean(generatedDir) {
-		return nil
-	}
-	return r.retireOwnedEntries(store, "generated agents now render into "+generatedDir)
 }

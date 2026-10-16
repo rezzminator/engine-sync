@@ -174,6 +174,9 @@ func renderOpenCodeAgent(
 	marker := artifact.Marker(artifact.YAMLFront, spec.Marker)
 	if spec.Global {
 		marker = artifact.GlobalMarker(artifact.YAMLFront, spec.Marker)
+		if policy.Machine.ManagedBy != "" {
+			marker += "\n" + artifact.ManagedByLine(artifact.YAMLFront, policy.Machine.ManagedBy)
+		}
 	}
 	content := "---\n" + marker + "\ndescription: " + quoteOpenCodeYAML(description) + "\nmode: " + mode + "\n"
 	alias := strings.TrimSpace(front.Model)

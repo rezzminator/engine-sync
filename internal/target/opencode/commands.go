@@ -20,7 +20,7 @@ func discoverOpenCodeCommandRoster(
 	models ...*claudesource.Project,
 ) {
 	for _, entry := range discoverOpenCodeMarkdown(root, problem, dangling, models...) {
-		colon := strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(entry.Rel), ".md"), "/", ":")
+		colon := claudesource.CommandName(entry.Rel)
 		flat := openCodeFlatName(entry.Rel)
 		if err := paths.ValidateName(flat); err != nil {
 			problem("%s: %v", entry.Path, err)
@@ -56,6 +56,7 @@ func compileOpenCodeCommands(
 	problem, skip func(string, ...any),
 	dangling func(string, error),
 	model *claudesource.Project,
+	managedBy string,
 	policies ...config.Config,
 ) {
 	keepDangling := func(path string, err error) {
@@ -108,11 +109,11 @@ func compileOpenCodeCommands(
 			continue
 		}
 		relSource := filepath.ToSlash(filepath.Join(sourceLabel, entry.Rel))
-		content := "---\n" + artifact.Marker(artifact.YAMLFront,
+		content := artifact.WithManagedBy("---\n"+artifact.Marker(artifact.YAMLFront,
 			relSource,
-		) + "\ndescription: " + quoteOpenCodeYAML(
+		)+"\ndescription: "+quoteOpenCodeYAML(
 			chain.Apply(strings.TrimSpace(fields["description"]), ctx),
-		) + "\n---\n" + chain.Apply(body, ctx)
+		)+"\n---\n"+chain.Apply(body, ctx), managedBy)
 		add(artifact.Artifact{Path: filepath.Join(outputRoot, flat+".md"), Content: []byte(content), Source: entry.Path, Syntax: artifact.YAMLFront})
 	}
 }

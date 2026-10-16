@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ func TestGlobalCommandsOnlyReconcilePreservesForeignFilesAndDeletesManagedOrphan
 	prompt := filepath.Join(home, ".codex", "prompts", "fixture.md")
 	skill := filepath.Join(home, ".codex", "skills", "fixture", "SKILL.md")
 	for _, path := range []string{prompt, skill} {
-		if !generatedBytes(readCodexFixture(t, path)) {
+		if !artifact.Claims(string(readCodexFixture(t, path))) {
 			t.Fatalf("generated output %s has no ownership marker", path)
 		}
 	}

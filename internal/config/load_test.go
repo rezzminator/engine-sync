@@ -12,14 +12,13 @@ import (
 func TestMachineRewriteAndTemplateLayers(t *testing.T) {
 	home := testjail.Scratch(t)
 	root := testjail.Scratch(t)
-	cfgDir := filepath.Join(home, ".config")
-	if e := os.MkdirAll(filepath.Join(cfgDir, "engine-sync"), 0700); e != nil {
+	if e := os.MkdirAll(filepath.Join(home, ".claude"), 0700); e != nil {
 		t.Fatal(e)
 	}
 	if e := os.MkdirAll(filepath.Join(root, ".claude"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	if e := os.WriteFile(filepath.Join(cfgDir, "engine-sync", "config.json"), []byte(`{"version":1,"codex":{"modelMap":{"fast":"machine-model"}},"machine":{"rewrites":[{"literal":"before","replace":"after"}]}}`), 0600); e != nil {
+	if e := os.WriteFile(filepath.Join(home, ".claude", "engine-sync.json"), []byte(`{"version":1,"codex":{"modelMap":{"fast":"machine-model"}},"machine":{"rewrites":[{"literal":"before","replace":"after"}]}}`), 0600); e != nil {
 		t.Fatal(e)
 	}
 	if e := os.WriteFile(filepath.Join(root, ".claude", "engine-sync.json"), []byte(`{"version":1,"codex":{"agentPreamble":"${name} {{.Engine}} {{.Source}} {{.Root}}"},"rewrites":[{"literal":"x","replace":"y","engines":["codex"],"kinds":["agent"]}]}`), 0600); e != nil {
@@ -41,7 +40,7 @@ func TestMachineRewriteAndTemplateLayers(t *testing.T) {
 func TestProjectLayerCompletesMachineLayer(t *testing.T) {
 	home := testjail.Scratch(t)
 	root := testjail.Scratch(t)
-	machine := filepath.Join(home, ".config", "engine-sync", "config.json")
+	machine := filepath.Join(home, ".claude", "engine-sync.json")
 	project := filepath.Join(root, ".claude", "engine-sync.json")
 	for path, body := range map[string]string{
 		machine: `{"version":1,"codex":{"suffixMode":"strip-prefix"}}`,
@@ -109,5 +108,132 @@ func TestLegacyTextIsLiteralNotATemplate(t *testing.T) {
 	}
 	if got, e := RenderTemplate(cfg.Codex.RootAdapter, TemplateData{Name: "reader", Root: "AGENTS.md"}); e != nil || got != "Write {{ braces }} and {{.Root}} for ${name}." {
 		t.Fatalf("legacy adapter = %q (%v)", got, e)
+	}
+}
+
+func putConfigFile(t *testing.T, path, body string) {
+	t.Helper()
+	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(path, []byte(body), 0600); e != nil {
+		t.Fatal(e)
+	}
+}
+
+// The one global policy file is {home}/.claude/engine-sync.json whatever the
+// environment says; it carries `machine` and `targets`.
+func TestGlobalFileIsHomeClaudeEngineSyncJSON(t *testing.T) {
+	home := testjail.Scratch(t)
+	want := filepath.Join(home, ".claude", "engine-sync.json")
+	if got := MachinePath(home); got != want {
+		t.Fatalf("MachinePath = %s, want %s", got, want)
+	}
+	codexHome := filepath.Join(home, ".codex")
+	putConfigFile(t, want, `{"version":1,"machine":{"managedBy":"professor"},"targets":{"codexHomes":["`+codexHome+`"]}}`)
+	cfg, e := Resolve("", home, func(key string) string {
+		if key == "XDG_CONFIG_HOME" || key == "CLAUDE_CONFIG_DIR" {
+			return filepath.Join(home, "elsewhere")
+		}
+		return ""
+	})
+	if e != nil {
+		t.Fatalf("Resolve: %v", e)
+	}
+	if cfg.Machine.ManagedBy != "professor" || cfg.Sources["machine.managedBy"] != want {
+		t.Fatalf("managedBy=%q source=%q, want professor from %s", cfg.Machine.ManagedBy, cfg.Sources["machine.managedBy"], want)
+	}
+	if cfg.Targets == nil || cfg.Targets.CodexHomes == nil || len(*cfg.Targets.CodexHomes) != 1 || (*cfg.Targets.CodexHomes)[0] != codexHome || cfg.Sources["targets.codexHomes"] != want {
+		t.Fatalf("targets=%+v source=%q, want the Codex home from %s", cfg.Targets, cfg.Sources["targets.codexHomes"], want)
+	}
+	listed := false
+	for _, row := range Describe(cfg) {
+		if row.Key == "targets.codexHomes" && strings.Contains(string(row.Value), codexHome) && row.Source == want {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatalf("Describe lists no targets.codexHomes row from %s: %+v", want, Describe(cfg))
+	}
+}
+
+// A machine without targets prints no targets row: config show is unchanged.
+func TestDescribeOmitsUnsetTargets(t *testing.T) {
+	for _, row := range Describe(Default()) {
+		if strings.HasPrefix(row.Key, "targets") || row.Key == "machine.managedBy" {
+			t.Fatalf("default config lists %s", row.Key)
+		}
+	}
+}
+
+func TestOldGlobalPathsAreRefusedLoudly(t *testing.T) {
+	for _, tc := range []struct {
+		name, old, want string
+		xdg             bool
+	}{
+		{"config.json", "config.json", `%s is no longer read; move its keys into %s`, false},
+		{"targets.json", "targets.json", `%s is no longer read; move its keys under "targets" in %s`, false},
+		{"XDG config.json", "config.json", `%s is no longer read; move its keys into %s`, true},
+		{"XDG targets.json", "targets.json", `%s is no longer read; move its keys under "targets" in %s`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := testjail.Scratch(t)
+			configHome := filepath.Join(home, ".config")
+			env := func(string) string { return "" }
+			if tc.xdg {
+				configHome = testjail.Scratch(t)
+				env = func(key string) string {
+					if key == "XDG_CONFIG_HOME" {
+						return configHome
+					}
+					return ""
+				}
+			}
+			old := filepath.Join(configHome, "engine-sync", tc.old)
+			putConfigFile(t, old, `{"version":1}`)
+			global := filepath.Join(home, ".claude", "engine-sync.json")
+			want := "engine-sync: " + strings.Replace(tc.want, "%s", old, 1)
+			want = strings.Replace(want, "%s", global, 1)
+			for _, root := range []string{"", testjail.Scratch(t)} {
+				_, e := Resolve(root, home, env)
+				if e == nil || e.Error() != want || !IsRefusal(e) {
+					t.Fatalf("Resolve(%q) = %v (refusal %v), want %q", root, e, IsRefusal(e), want)
+				}
+				if _, _, e := LoadTargets(env, home); e == nil || e.Error() != want {
+					t.Fatalf("LoadTargets = %v, want %q", e, want)
+				}
+			}
+			putConfigFile(t, global, `{"version":1}`)
+			cfg, e := Resolve("", home, env)
+			if e != nil || len(cfg.Deprecations) != 0 {
+				t.Fatalf("with both files: %v %v, want the new file read and nothing said of the old", e, cfg.Deprecations)
+			}
+		})
+	}
+	// A regular file where an old directory would be holds no old policy:
+	// the defaults load, as with no old path at all.
+	t.Run("config dir is a file", func(t *testing.T) {
+		home := testjail.Scratch(t)
+		putConfigFile(t, filepath.Join(home, ".config"), "not a directory\n")
+		if _, e := Resolve("", home, func(string) string { return "" }); e != nil {
+			t.Fatalf("Resolve = %v, want the defaults", e)
+		}
+		if _, found, e := LoadTargets(func(string) string { return "" }, home); e != nil || found {
+			t.Fatalf("LoadTargets = %v %v, want no targets and no error", found, e)
+		}
+	})
+}
+
+func TestProjectFileRefusesGlobalOnlyKeys(t *testing.T) {
+	for _, key := range []string{"targets", "machine"} {
+		t.Run(key, func(t *testing.T) {
+			home, root := testjail.Scratch(t), testjail.Scratch(t)
+			path := filepath.Join(root, RelPath)
+			putConfigFile(t, path, `{"version":1,"`+key+`":{}}`)
+			_, e := Resolve(root, home, func(string) string { return "" })
+			if e == nil || !IsRefusal(e) || !strings.Contains(e.Error(), path) || !strings.Contains(e.Error(), key+": unknown key") {
+				t.Fatalf("Resolve = %v (refusal %v), want a refusal naming %s and %s", e, IsRefusal(e), key, path)
+			}
+		})
 	}
 }

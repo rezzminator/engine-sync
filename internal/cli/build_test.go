@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"net"
 	"os"
@@ -84,13 +86,15 @@ func TestCommandsIgnoreUnrelatedEngineHomeEntries(t *testing.T) {
 				}
 				t.Cleanup(func() { listener.Close() })
 			} else {
-				putProjectFile(t, home, ".codex/sessions/x.jsonl", "private session\n")
-				if err := os.Chmod(path, 0000); err != nil {
+				// A symlink loop is an entry no uid (root included) can read: ELOOP.
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { os.Chmod(path, 0600) })
+				if err := os.Symlink(path, path); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := os.ReadFile(path); err == nil {
-					t.Skip("permission proof requires a non-root user")
+					t.Fatal("fixture does not deny the read")
 				}
 			}
 			before, err := os.Lstat(path)
@@ -237,5 +241,119 @@ func TestReviewSharedRoleNaming(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(root, rel)); err == nil {
 			t.Errorf("%s named by its file base", rel)
 		}
+	}
+}
+
+func TestProjectPluginLogOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		name, action     string
+		conflict, asJSON bool
+	}{
+		{"success", "build", false, false}, {"json-success", "build", false, true},
+		{"failure", "build", true, false}, {"json-failure", "build", true, true},
+		{"check-failure", "check", true, false}, {"json-check-failure", "check", true, true},
+		{"doctor-failure", "doctor", true, false}, {"json-doctor-failure", "doctor", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, home, logs := testjail.Scratch(t), testjail.Scratch(t), testjail.Scratch(t)
+			putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
+			if tc.conflict {
+				putProjectFile(t, root, "AGENTS.md", "foreign")
+			}
+			e := env{sessionID: "s1", get: func(k string) string {
+				if k == "HOME" {
+					return home
+				}
+				if k == "PLUGIN_LOG_DIR" {
+					return logs
+				}
+				return ""
+			}}
+			args := []string{tc.action, root}
+			if tc.asJSON {
+				args = append(args, "--json")
+			}
+			var out, stderr bytes.Buffer
+			code := dispatch(args, &out, &stderr, e)
+			level, event, want := "info", "build-done", 0
+			if tc.conflict {
+				level, event, want = "errors", tc.action+"-failed", 1
+			}
+			if code != want {
+				t.Fatalf("code%d: %s%s", code, &out, &stderr)
+			}
+			raw, err := os.ReadFile(filepath.Join(logs, "engine-sync", level+".jsonl"))
+			if err != nil {
+				t.Fatalf("%s outcome row missing: %v", tc.action, err)
+			}
+			lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
+			if len(lines) != 1 {
+				t.Fatalf("outcome count: %s", raw)
+			}
+			var row map[string]any
+			if err := json.Unmarshal(lines[0], &row); err != nil {
+				t.Fatal(err)
+			}
+			rowLevel := "info"
+			if tc.conflict {
+				rowLevel = "error"
+			}
+			if row["event"] != event || row["level"] != rowLevel || row["session"] != "s1" || row["where"] != "internal/cli/build.go#runProjectTargets" {
+				t.Fatalf("wrong outcome: %s", raw)
+			}
+			detail, ok := row["detail"].(map[string]any)
+			if !ok || detail["code"] != float64(want) {
+				t.Fatalf("wrong outcome detail: %s", raw)
+			}
+			if tc.conflict && (detail["problems"].(float64) < 1 || !strings.Contains(row["msg"].(string), tc.action+" failed") || !strings.Contains(row["msg"].(string), "CONFLICT")) {
+				t.Fatalf("failure cause missing: %s", raw)
+			}
+		})
+	}
+}
+
+func TestProjectPluginLogWarnings(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		t.Run(fmt.Sprint(asJSON), func(t *testing.T) {
+			root, home, logs := testjail.Scratch(t), testjail.Scratch(t), testjail.Scratch(t)
+			putProjectFile(t, root, "CLAUDE.md", "Root.\n")
+			putProjectFile(t, root, ".claude/agents/orch.md", "---\ndescription: Lab.\nmodel: claude-sonnet-5-5\n---\nLab.\n")
+			e := env{get: func(k string) string {
+				if k == "HOME" {
+					return home
+				}
+				if k == "PLUGIN_LOG_DIR" {
+					return logs
+				}
+				return ""
+			}}
+			args := []string{"build", root, "--engine", "codex"}
+			if asJSON {
+				args = append(args, "--json")
+			}
+			var out, stderr bytes.Buffer
+			if code := dispatch(args, &out, &stderr, e); code != 0 {
+				t.Fatalf("code%d: %s%s", code, &out, &stderr)
+			}
+			raw, err := os.ReadFile(filepath.Join(logs, "engine-sync", "warnings.jsonl"))
+			if err != nil {
+				t.Fatalf("build warning row missing: %v", err)
+			}
+			lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
+			if len(lines) != 1 {
+				t.Fatalf("warning count: %s", raw)
+			}
+			var row map[string]any
+			if err := json.Unmarshal(lines[0], &row); err != nil {
+				t.Fatal(err)
+			}
+			detail, ok := row["detail"].(map[string]any)
+			if !ok || row["event"] != "build-warning" || row["where"] != "internal/cli/build.go#runProjectTargets" || row["level"] != "warning" || detail["count"] != float64(1) {
+				t.Fatalf("wrong warning: %s", raw)
+			}
+			if texts, _ := detail["warnings"].([]any); len(texts) != 1 || texts[0] == "" {
+				t.Fatalf("warning text missing: %s", raw)
+			}
+		})
 	}
 }

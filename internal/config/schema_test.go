@@ -9,8 +9,8 @@ import (
 )
 
 // The documented leaf-key table follows the same shape as schema generation.
-func TestREADMEKeysMatchSchemaShape(t *testing.T) {
-	raw, err := os.ReadFile("../../README.md")
+func TestInterfaceKeysMatchSchemaShape(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/interface.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestREADMEKeysMatchSchemaShape(t *testing.T) {
 			if f.Type.Kind() == reflect.Struct && f.Type != reflect.TypeOf(Permission{}) {
 				walk(f.Type, key+".")
 			} else if !seen[key] {
-				t.Errorf("README key missing: %s", key)
+				t.Errorf("interface.md key missing: %s", key)
 			}
 		}
 	}

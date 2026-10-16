@@ -51,15 +51,15 @@ func TestRenderOpenCodeToolsBlockLetsWriteAndEditReachApplyPatch(t *testing.T) {
 }
 
 func TestRenderOpenCodeToolsBlockWithoutMCPEntriesDeniesEveryKnownServer(t *testing.T) {
-	got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "professor"})
-	want := openCodeBuiltinDenialsForReadBashAgent + "  local_*: false\n  professor_*: false\n"
+	got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "chat-professor", "harvester-professor"})
+	want := openCodeBuiltinDenialsForReadBashAgent + "  chat-professor_*: false\n  harvester-professor_*: false\n  local_*: false\n"
 	if err != nil || got != want || len(warnings) != 0 {
 		t.Fatalf("tools block = %q, %v, warnings %q; want %q", got, err, warnings, want)
 	}
 }
 
 func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
-	known := []string{"alpha", "my_server", "professor"}
+	known := []string{"alpha", "chat-professor", "harvester-professor", "my_server"}
 	for _, tc := range []struct {
 		name      string
 		allowList string
@@ -67,32 +67,35 @@ func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 	}{
 		{
 			name:      "one server",
-			allowList: "Read, mcp__professor__harvester_read, mcp__professor__harvester_search_web",
-			mcpLines: "  alpha_*: false\n  my_server_*: false\n" +
-				"  professor_*: false\n" +
-				"  professor_harvester_read: true\n" +
-				"  professor_harvester_search_web: true\n",
+			allowList: "Read, mcp__harvester-professor__read, mcp__harvester-professor__search_web",
+			mcpLines: "  alpha_*: false\n  chat-professor_*: false\n" +
+				"  harvester-professor_*: false\n" +
+				"  harvester-professor_read: true\n" +
+				"  harvester-professor_search_web: true\n" +
+				"  my_server_*: false\n",
 		},
 		{
-			name:      "two servers sorted, ids sorted and de-duplicated",
-			allowList: "Read, mcp__professor__harvester_search_web, mcp__alpha__zeta, mcp__professor__harvester_read, mcp__alpha__beta, mcp__alpha__zeta",
+			name:      "family servers sorted, ids sorted and de-duplicated",
+			allowList: "Read, mcp__harvester-professor__search_web, mcp__alpha__zeta, mcp__chat-professor__call, mcp__harvester-professor__read, mcp__alpha__beta, mcp__alpha__zeta",
 			mcpLines: "  alpha_*: false\n" +
 				"  alpha_beta: true\n" +
 				"  alpha_zeta: true\n" +
-				"  my_server_*: false\n" +
-				"  professor_*: false\n" +
-				"  professor_harvester_read: true\n" +
-				"  professor_harvester_search_web: true\n",
+				"  chat-professor_*: false\n" +
+				"  chat-professor_call: true\n" +
+				"  harvester-professor_*: false\n" +
+				"  harvester-professor_read: true\n" +
+				"  harvester-professor_search_web: true\n" +
+				"  my_server_*: false\n",
 		},
 		{
 			name:      "sanitized server keeps its underscores",
 			allowList: "Read, mcp__my.server__do-it",
-			mcpLines:  "  alpha_*: false\n  my_server_*: false\n  my_server_do-it: true\n  professor_*: false\n",
+			mcpLines:  "  alpha_*: false\n  chat-professor_*: false\n  harvester-professor_*: false\n  my_server_*: false\n  my_server_do-it: true\n",
 		},
 		{
 			name:      "server wildcard grants the whole server",
-			allowList: "Read, mcp__professor__*, mcp__professor__harvester_read",
-			mcpLines:  "  alpha_*: false\n  my_server_*: false\n  professor_*: true\n",
+			allowList: "Read, mcp__harvester-professor__*, mcp__harvester-professor__read",
+			mcpLines:  "  alpha_*: false\n  chat-professor_*: false\n  harvester-professor_*: true\n  my_server_*: false\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,32 +117,37 @@ func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		allowList string
+		servers   string // the MCP deny lines: an unmapped server is denied outright
 		warning   string
 	}{
 		{
-			name:      "retired harvester server",
-			allowList: "Read, mcp__harvester__read",
-			warning:   "retired MCP tool mcp__harvester__read in worker.md — the professor server serves it as mcp__professor__harvester_read",
+			name:      "retired server prefixes a bare tool",
+			allowList: "Read, mcp__archive__read",
+			servers:   "  archive_*: false\n  hub_*: false\n",
+			warning:   "retired MCP tool mcp__archive__read in worker.md — the hub server serves it as mcp__hub__archive_read",
 		},
 		{
-			name:      "retired chat server",
-			allowList: "Read, mcp__chat__chat_inject",
-			warning:   "retired MCP tool mcp__chat__chat_inject in worker.md — the professor server serves it as mcp__professor__chat_inject",
+			name:      "retired server keeps a prefixed tool",
+			allowList: "Read, mcp__legacy__legacy_ship",
+			servers:   "  hub_*: false\n  legacy_*: false\n",
+			warning:   "retired MCP tool mcp__legacy__legacy_ship in worker.md — the hub server serves it as mcp__hub__legacy_ship",
 		},
 		{
 			name:      "unknown server",
 			allowList: "Read, mcp__nosuch__x",
+			servers:   "  hub_*: false\n  nosuch_*: false\n",
 			warning:   "unknown MCP server in tool mcp__nosuch__x in worker.md — no configured or project .mcp.json server serves it; it stays denied",
 		},
 		{
 			name:      "unmapped Claude tool",
 			allowList: "Read, NotebookEdit",
+			servers:   "  hub_*: false\n",
 			warning:   "unmapped Claude tool NotebookEdit in worker.md — no OpenCode equivalent; it stays denied",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"professor"}, config.MCP{Renamed: map[string]string{"chat": "professor", "harvester": "professor"}})
-			want := openCodeBuiltinDenialsForReadOnly + "  professor_*: false\n"
+			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"hub"}, config.MCP{Renamed: map[string]string{"legacy": "hub", "archive": "hub"}})
+			want := openCodeBuiltinDenialsForReadOnly + tc.servers
 			if err != nil || got != want {
 				t.Fatalf("tools block = %q, %v; want %q", got, err, want)
 			}
@@ -153,11 +161,12 @@ func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
 func TestRenderOpenCodeToolsBlockKeepsARetiredNameThatIsAProjectServer(t *testing.T) {
 	got, warnings, err := renderOpenCodeToolsBlock(
 		"worker.md",
-		"Read, mcp__harvester__read",
-		[]string{"harvester", "professor"},
+		"Read, mcp__archive__read",
+		[]string{"archive", "hub"},
+		config.MCP{Renamed: map[string]string{"archive": "hub"}},
 	)
-	if err != nil || len(warnings) != 0 || !strings.Contains(got, "  harvester_*: false\n  harvester_read: true\n") {
-		t.Fatalf("tools block = %q, %v, warnings %q; want the project harvester server granted", got, err, warnings)
+	if err != nil || len(warnings) != 0 || !strings.Contains(got, "  archive_*: false\n  archive_read: true\n") {
+		t.Fatalf("tools block = %q, %v, warnings %q; want the project archive server granted", got, err, warnings)
 	}
 }
 

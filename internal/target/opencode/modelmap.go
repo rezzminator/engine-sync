@@ -58,14 +58,23 @@ var openCodeToolIDs = []string{
 	"write",
 }
 
-// openCodeKnownMCPServers combines configured machine servers and project servers.
-
+// knownMCPServers combines configured machine servers and project servers,
+// each in OpenCode's tool-part charset (a server name is a frontmatter key, so
+// no configured name reaches an agent file raw). A nil model is the
+// machine-global path: no project .mcp.json sits beside a machine-global
+// agent, so only the configured servers are known.
 func knownMCPServers(model *claudesource.Project, root string, policies ...config.MCP) []string {
 	known := map[string]bool{}
 	for _, server := range selectedMCP(policies).GlobalServers {
-		known[server] = true
+		if name, _, err := engine.OpenCodeMCPToolParts("mcp__" + server + "__tool"); err == nil {
+			known[name] = true
+		}
 	}
-	servers, _, err := model.Servers(filepath.Join(root, ".mcp.json"))
+	var servers []claudesource.MCPServer
+	var err error
+	if model != nil {
+		servers, _, err = model.Servers(filepath.Join(root, ".mcp.json"))
+	}
 	if err == nil {
 		for _, server := range servers {
 			if name, _, err := engine.OpenCodeMCPToolParts("mcp__" + server.Name + "__tool"); err == nil {
@@ -97,6 +106,7 @@ func renderOpenCodeToolsBlock(source, allowList string, known []string, policies
 	allowed := map[string]bool{}
 	mcpAllowed := map[string]map[string]bool{}
 	wildcard := map[string]bool{}
+	unmapped := map[string]bool{}
 	for _, claudeTool := range strings.Split(allowList, ",") {
 		claudeTool = strings.TrimSpace(claudeTool)
 		if claudeTool == "" {
@@ -123,6 +133,7 @@ func renderOpenCodeToolsBlock(source, allowList string, known []string, policies
 			return "", nil, err
 		}
 		if !knownServer[server] {
+			unmapped[server] = true
 			if replacementServer := policy.Renamed[server]; replacementServer != "" {
 				replacement := tool
 				if isWildcard {
@@ -164,7 +175,12 @@ func renderOpenCodeToolsBlock(source, allowList string, known []string, policies
 	for _, tool := range denied {
 		fmt.Fprintf(&content, "  %s: false\n", tool)
 	}
+	// A retired or unknown server is denied outright: OpenCode enables a tool
+	// its map leaves out, so leaving the server unnamed would not deny it.
 	servers := append([]string(nil), known...)
+	for server := range unmapped {
+		servers = append(servers, server)
+	}
 	sort.Strings(servers)
 	for _, server := range servers {
 		if wildcard[server] {

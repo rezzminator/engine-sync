@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/pluginlog"
 	"io"
 )
 
@@ -24,6 +25,7 @@ func ParseFlags(flags *flag.FlagSet, args []string) (int, bool) {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0, false
 		}
+		pluginlog.Record(nil, flags.Output(), pluginlog.Row{Level: "info", Event: "usage-refused", Msg: flags.Name() + ": " + err.Error(), Where: "internal/cliargs/flags.go#ParseFlags"})
 		return 2, false
 	}
 	return 0, true

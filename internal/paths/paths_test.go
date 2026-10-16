@@ -15,12 +15,12 @@ func TestLocationsRespectAbsoluteLayers(t *testing.T) {
 		if k == "ENGINE_SYNC_STATE" {
 			return filepath.Join(home, "chosen")
 		}
-		if k == "XDG_CONFIG_HOME" {
+		if k == "XDG_CONFIG_HOME" || k == "CLAUDE_CONFIG_DIR" {
 			return "relative"
 		}
 		return ""
 	}
-	if paths.EngineSyncState(get, home) != filepath.Join(home, "chosen") || paths.EngineSyncConfig(get, home) != filepath.Join(home, ".config", "engine-sync") {
+	if paths.EngineSyncState(get, home) != filepath.Join(home, "chosen") || paths.EngineSyncConfig(home) != filepath.Join(home, ".claude", "engine-sync.json") {
 		t.Fatal("layer resolution")
 	}
 }

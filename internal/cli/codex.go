@@ -17,19 +17,19 @@ import (
 // the operator-visible report.
 func runCodex(args []string, stdout, stderr io.Writer, e env) int {
 	if len(args) == 0 {
-		printCodexUsage(stderr)
+		cliargs.CodexUsage(stderr)
 		return 2
 	}
 	switch args[0] {
 	case "agents":
 		return runCodexAgents(args[1:], stdout, stderr, e)
 	case "help", "-h", "--help":
-		printCodexUsage(stdout)
+		cliargs.CodexUsage(stdout)
 		return 0
 	}
 	if args[0] != "build" && args[0] != "check" {
 		fmt.Fprintf(stderr, "engine-sync codex: unknown action %q\n", args[0])
-		printCodexUsage(stderr)
+		cliargs.CodexUsage(stderr)
 		return 2
 	}
 	return runProjectTargets(args[0], args[1:], stdout, stderr, e, "codex")
@@ -39,12 +39,12 @@ func runCodex(args []string, stdout, stderr io.Writer, e env) int {
 // runCodexAgents compiles the global (host-level) agents: no repository root,
 // every source and destination anchored on --home.
 func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
-	flags := NewFlagSet("codex agents", "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--capability NAME]...", stderr)
+	flags := cliargs.NewFlagSet("codex agents", "usage: engine-sync codex agents [--home PATH] [--source-repo PATH] [--capability NAME]...", stderr)
 	home := flags.String("home", "", "host HOME whose global agents get compiled and installed")
 	sourceRepo := flags.String("source-repo", "", "repository whose configured agent directory supplies the roles")
-	var capabilities repeatString
+	var capabilities cliargs.RepeatString
 	flags.Var(&capabilities, "capability", "a host capability an agent's requires may name; repeatable")
-	positionals, code, ok := ParseFlagsAnywhere(flags, args)
+	positionals, code, ok := cliargs.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -63,12 +63,12 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return cliargs.FailureCode(err)
 	}
 	options, err := globalOptions(e, resolvedHome, *sourceRepo, "", nil, nil, false)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return cliargs.FailureCode(err)
 	}
 	code, err = guarded(e, machine.GuardRoots(options.Home, options.CodexHomes, options.ClaudeConfigDirs), true, func() int {
 		result, err := machine.RunGlobalAgents(machine.GlobalAgentsOptions{Home: resolvedHome, SourceRepo: options.SourceRepo, Config: policy, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes})
@@ -132,11 +132,6 @@ func (e env) policy(root, home string, stderr io.Writer) (*config.Config, error)
 	return config.ResolveCached(root, home, e.get, e.policies, e.notices, stderr)
 }
 
-type repeatString = cliargs.RepeatString
-
-var reportRunFailure = cliargs.ReportFailure
-var printCodexUsage = cliargs.CodexUsage
-
-func parseCodexOptions(action string, args []string, stdout, stderr io.Writer, e env, selections ...*selection) (codex.Options, bool, int, bool) {
+func parseCodexOptions(action string, args []string, stdout, stderr io.Writer, e env, selections ...*cliargs.Selection) (codex.Options, bool, int, bool) {
 	return cliargs.ParseProjectOptions(action, args, stdout, stderr, func(p []string) (string, error) { return repoRoot(p, e) }, e.home, selections...)
 }

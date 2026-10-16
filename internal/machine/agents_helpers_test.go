@@ -62,6 +62,9 @@ func runFixtureMachineAgents(o GlobalAgentsOptions) (GlobalAgentsResult, error) 
 			c.Codex.ModelMap = fixtureMachinePolicy().Codex.ModelMap
 		}
 		c.Codex.Review = fixtureMachinePolicy().Codex.Review
+		if c.Machine.SourceGeneratedAgentsDir == "" {
+			c.Machine.SourceGeneratedAgentsDir = "generated/agents"
+		}
 		o.Config = &c
 	}
 	return RunGlobalAgents(o)

@@ -3,6 +3,7 @@ package codex
 import (
 	"bytes"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -26,7 +27,7 @@ func seedUnresolvedFixture(t *testing.T, root, home, rel, twin string) []byte {
 		t.Fatalf("seed build: result=%#v err=%v", build, err)
 	}
 	seeded := readCodexFixture(t, twin)
-	if !generatedBytes(seeded) {
+	if !artifact.Claims(string(seeded)) {
 		t.Fatalf("seeded twin %s has no ownership marker", twin)
 	}
 	return seeded

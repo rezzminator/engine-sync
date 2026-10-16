@@ -24,14 +24,17 @@ func machineRoots(p source.Project, cfg config.Config) []artifact.Root {
 		}
 		return roots
 	}
-	// A generated directory inside the source repository is bounded there,
-	// the home store by home.
-	boundary := p.Home
-	if rel, err := filepath.Rel(p.Home, p.GeneratedDir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		boundary = filepath.Dir(p.GeneratedDir)
+	// The generated directory, when machine.sourceGeneratedAgentsDir names
+	// one, is bounded inside the source repository.
+	sources := []string{p.AgentSourceDir, p.Root}
+	if p.GeneratedDir != "" {
+		boundary := p.Home
+		if rel, err := filepath.Rel(p.Home, p.GeneratedDir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			boundary = filepath.Dir(p.GeneratedDir)
+		}
+		roots = append(roots, artifact.Root{Path: p.GeneratedDir, Boundary: boundary, Suffix: ".md", SourceRoots: []string{p.AgentSourceDir}})
+		sources = append(sources, p.GeneratedDir)
 	}
-	roots = append(roots, artifact.Root{Path: p.GeneratedDir, Boundary: boundary, Suffix: ".md", SourceRoots: []string{p.AgentSourceDir}})
-	sources := []string{p.AgentSourceDir, p.GeneratedDir, filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), filepath.Join(p.Home, cfg.Machine.LegacyCodexAgentsDir), p.Root}
 	for _, home := range p.CodexHomes {
 		roots = append(roots, artifact.Root{Path: filepath.Join(home, "agents"), SourceRoots: sources, InspectForeign: true})
 		roots = append(roots, artifact.Root{Path: filepath.Join(home, "config.toml"), ValidateOnly: true})
@@ -111,11 +114,14 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Message: s})
 	}
 	for _, name := range p.Failed {
-		// An agent skipped for an error keeps its installed role and variant.
+		// An agent skipped for an error keeps its installed role and generated agent.
 		for _, home := range p.CodexHomes {
 			outputs = append(outputs, artifact.Artifact{Path: filepath.Join(home, "agents", name+".toml"), Kept: &artifact.SourceLink{Path: name}})
 		}
-		outputs = append(outputs, artifact.Artifact{Path: filepath.Join(p.GeneratedDir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
+		// With no generated directory there is no generated copy to keep.
+		if p.GeneratedDir != "" {
+			outputs = append(outputs, artifact.Artifact{Path: filepath.Join(p.GeneratedDir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
+		}
 	}
 	// A generated directory inside the source repository holds every
 	// declaration's render, capability or not: only links and roles are

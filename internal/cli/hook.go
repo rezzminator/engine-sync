@@ -31,6 +31,7 @@ func runHook(args []string, stdout, stderr io.Writer, e env) int {
 		return 2
 	}
 	payload := readHookPayload(e.stdin)
+	e.sessionID = payload.SessionID
 	if args[1] == "mark" && payload.ToolInput.FilePath == "" {
 		return 0
 	}
@@ -57,7 +58,7 @@ func hookContext(e env) hook.Context {
 	for _, t := range target.Registry {
 		names = append(names, t.Name())
 	}
-	return hook.Context{Get: e.get, Home: e.home, State: e.state, Policy: e.policy, Engines: names, Targets: func(home string) (bool, error) {
+	return hook.Context{SessionID: e.sessionID, Get: e.get, Home: e.home, State: e.state, Policy: e.policy, Engines: names, Targets: func(home string) (bool, error) {
 		cfg, err := e.policy("", home, io.Discard)
 		if err != nil {
 			return false, err
@@ -67,9 +68,8 @@ func hookContext(e env) hook.Context {
 	}, Writer: writerPath}
 
 }
-func readHookPayload(r io.Reader) hookPayload          { return hook.ReadPayload(r) }
-func hookDirtyFlag(e env, root string) (string, error) { return hook.DirtyFlag(hookContext(e), root) }
-func hookMark(p hookPayload, w io.Writer, e env) int   { return hook.Mark(p, w, hookContext(e)) }
+func readHookPayload(r io.Reader) hookPayload        { return hook.ReadPayload(r) }
+func hookMark(p hookPayload, w io.Writer, e env) int { return hook.Mark(p, w, hookContext(e)) }
 func hookStop(p hookPayload, o, w io.Writer, e env, r stageRunner) int {
 	return hook.Stop(p, o, w, hookContext(e), hook.StageRunner(r))
 }

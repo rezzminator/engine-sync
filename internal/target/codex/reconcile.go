@@ -27,7 +27,3 @@ func codexMode(mode Mode) reconciler.Mode {
 func (r *reconcileResult) reconcileFile(o artifact.Artifact, m Mode, owns func(string) bool) {
 	reconciler.FileArtifact((*reconciler.Result)(r), codexArtifact(o), codexMode(m), func(path string) (bool, error) { return owns(path), nil })
 }
-
-func generatedBytes(raw []byte) bool { return artifact.Claims(string(raw)) }
-
-func CodexMarkers() []string { return artifact.Markers() }

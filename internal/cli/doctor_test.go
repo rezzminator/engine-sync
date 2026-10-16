@@ -15,13 +15,12 @@ func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
 	putProjectFile(t, root, ".claude/agents/reader.md", "---\nname: reader\ndescription: Reads.\nmodel: opus\nengines:\n  opencode:\n    permission:\n      edit:\n        \"private/**\": deny\n      bash:\n        \"deploy preview\": ask\n---\nRead.\n")
-	configHome := filepath.Join(home, ".config")
-	putProjectFile(t, configHome, "engine-sync/config.json", `{"version":1,"codex":{"modelMap":{"opus":"machine-model"},"rootAdapter":"Machine adapter.\n"},"opencode":{"permission":{"bash":{"*":"allow","deploy *":"deny","deploy preview":"allow"}}},"machine":{"retiredAgents":["retired-reader"]}}`)
+	putProjectFile(t, home, ".claude/engine-sync.json", `{"version":1,"codex":{"modelMap":{"opus":"machine-model"},"rootAdapter":"Machine adapter.\n"},"opencode":{"permission":{"bash":{"*":"allow","deploy *":"deny","deploy preview":"allow"}}},"machine":{"retiredAgents":["retired-reader"]}}`)
 	putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"codex":{"modelMap":{"opus":"project-model"}},"mcp":{"globalServers":["central"]}}`)
-	vars := map[string]string{"HOME": home, "XDG_CONFIG_HOME": configHome, "ENGINE_SYNC_WORKBENCH_MARKER": ".project/workbench.json"}
+	vars := map[string]string{"HOME": home, "ENGINE_SYNC_WORKBENCH_MARKER": ".project/workbench.json"}
 	configReads := 0
 	e := env{get: func(key string) string {
-		if key == "XDG_CONFIG_HOME" {
+		if key == "CLAUDE_CONFIG_DIR" {
 			configReads++
 		}
 		return vars[key]
@@ -30,8 +29,8 @@ func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 	if code := dispatch([]string{"build", root, "--model", "opus=flag-model"}, &out, &errOut, e); code != 0 {
 		t.Fatalf("build rc=%d: %s%s", code, &out, &errOut)
 	}
-	if configReads != 4 {
-		t.Fatalf("configuration resolutions=%d want 4 (project, machine, target registry and capability set)", configReads)
+	if configReads != 2 {
+		t.Fatalf("configuration resolutions=%d want 2 (project and machine policy; the target registry and capability set read the global file's targets, which no environment variable moves)", configReads)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, ".codex/agents/reader.toml"))
 	if err != nil {
@@ -69,7 +68,7 @@ func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 	if code := dispatch([]string{"doctor", root, "--model", "opus=flag-model"}, &out, &errOut, e); code != 0 {
 		t.Fatalf("doctor rc=%d: %s%s", code, &out, &errOut)
 	}
-	for _, want := range []string{"codex.modelMap.opus", "flag --model", "codex.rootAdapter", filepath.Join(configHome, "engine-sync/config.json"), "ENGINE_SYNC_WORKBENCH_MARKER", "mcp.globalServers", filepath.Join(root, ".claude/engine-sync.json")} {
+	for _, want := range []string{"codex.modelMap.opus", "flag --model", "codex.rootAdapter", filepath.Join(home, ".claude/engine-sync.json"), "ENGINE_SYNC_WORKBENCH_MARKER", "mcp.globalServers", filepath.Join(root, ".claude/engine-sync.json")} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("doctor source lacks %q: %s", want, &out)
 		}
@@ -78,7 +77,7 @@ func TestArchitectureLayersNativePolicyAndDoctorSources(t *testing.T) {
 
 func TestMachineDoctorJSONNamesPolicySourcesAndConfigFailures(t *testing.T) {
 	home := testjail.Scratch(t)
-	path := filepath.Join(home, ".config", "engine-sync", "config.json")
+	path := filepath.Join(home, ".claude", "engine-sync.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}

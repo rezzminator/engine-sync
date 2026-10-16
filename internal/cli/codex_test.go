@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -91,5 +92,25 @@ func TestStopRunsTheFourStages(t *testing.T) {
 				t.Fatalf("the flag was removed after a failed stage: %v", flagErr)
 			}
 		})
+	}
+}
+
+// `engine-sync codex agents` takes no flag for what the global file's
+// `targets` already says: the source repository and the host capabilities.
+func TestCodexAgentsReadsTargetsWithNoFlag(t *testing.T) {
+	home, _, e := auditEnv(t)
+	repo := filepath.Join(home, "clone")
+	putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
+	putProjectFile(t, repo, "agents/astra.md", "---\nname: astra\ndescription: Astra.\ntools: Read\nrequires: [example-cap]\n---\nAstra.\n")
+	role := filepath.Join(home, ".codex", "agents", "astra.toml")
+	putTargets(t, home, `{"sourceRepo":`+strconvQuote(repo)+`}`)
+	auditOK(t, e, "codex", "agents")
+	if _, err := os.Lstat(role); !os.IsNotExist(err) {
+		t.Fatalf("a role requiring an absent capability was written: %v", err)
+	}
+	putTargets(t, home, `{"sourceRepo":`+strconvQuote(repo)+`,"capabilities":["example-cap"]}`)
+	auditOK(t, e, "codex", "agents")
+	if raw, err := os.ReadFile(role); err != nil || !strings.Contains(string(raw), `name = "astra"`) {
+		t.Fatalf("role from targets.sourceRepo with targets.capabilities: %v %s", err, raw)
 	}
 }

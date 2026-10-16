@@ -103,10 +103,10 @@ func plantLink(t *testing.T, path string, content []byte) {
 	}
 }
 
-// TestCheckSourceVariantsRelativeRoot pins the check a caller runs from the
+// TestCheckSourceDeclarationsRelativeRoot pins the check a caller runs from the
 // project directory (`engine-sync check .`): the agents directory and its
 // source declarations resolve once, never joined twice.
-func TestCheckSourceVariantsRelativeRoot(t *testing.T) {
+func TestCheckSourceDeclarationsRelativeRoot(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	dir := filepath.Join(root, "templates", "agents")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -122,19 +122,20 @@ func TestCheckSourceVariantsRelativeRoot(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.Machine.SourceAgentsDir = "templates/agents"
+	cfg.Machine.SourceGeneratedAgentsDir = "generated/agents"
 	t.Chdir(root)
-	problems, _ := CheckSourceVariants(".", home, cfg)
+	problems, _ := CheckSourceDeclarations(".", home, cfg)
 	if len(problems) != 0 {
 		t.Fatalf("problems = %q, want none", problems)
 	}
 }
 
-// TestCheckSourceVariantsIgnoresAProjectWithoutDeclarations: a project
+// TestCheckSourceDeclarationsIgnoresAProjectWithoutDeclarations: a project
 // whose agents directory holds no from: source has nothing to
 // render, so a stray markdown file there (notes without frontmatter, an agent
 // missing its description) is never a check problem; one declaration among
 // them makes the directory a machine source again.
-func TestCheckSourceVariantsIgnoresAProjectWithoutDeclarations(t *testing.T) {
+func TestCheckSourceDeclarationsIgnoresAProjectWithoutDeclarations(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	dir := filepath.Join(root, "agents")
 	plantDir(t, dir)
@@ -142,32 +143,32 @@ func TestCheckSourceVariantsIgnoresAProjectWithoutDeclarations(t *testing.T) {
 	plantFile(t, filepath.Join(dir, "half.md"), []byte("---\nname: half\n---\nHalf.\n"))
 	cfg := config.Default()
 	cfg.Machine.SourceAgentsDir = "agents"
-	if problems, warnings := CheckSourceVariants(root, home, cfg); len(problems) != 0 || len(warnings) != 0 {
+	if problems, warnings := CheckSourceDeclarations(root, home, cfg); len(problems) != 0 || len(warnings) != 0 {
 		t.Fatalf("no declarations: problems %q warnings %q, want none", problems, warnings)
 	}
 	plantFile(t, filepath.Join(dir, "lead.md"), []byte("---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n"))
 	plantFile(t, filepath.Join(dir, "lead-pro.md"), []byte("---\nname: lead-pro\nfrom: lead\ndescription: Leads more.\n---\n"))
-	if problems, _ := CheckSourceVariants(root, home, cfg); len(problems) == 0 {
+	if problems, _ := CheckSourceDeclarations(root, home, cfg); len(problems) == 0 {
 		t.Fatal("a declaration among broken sources: no problems, want notes.md and half.md named")
 	}
 }
 
-// TestCheckSourceVariantsNamesASecondRegistryCollision: check sees the whole
+// TestCheckSourceDeclarationsNamesASecondRegistryCollision: check sees the whole
 // Claude roster global installs into, so a declaration whose source directory
 // is a second account's agents directory is the collision global names.
-func TestCheckSourceVariantsNamesASecondRegistryCollision(t *testing.T) {
+func TestCheckSourceDeclarationsNamesASecondRegistryCollision(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	second := filepath.Join(root, "second")
 	dir := filepath.Join(second, "agents")
 	plantDir(t, dir)
 	plantFile(t, filepath.Join(dir, "lead.md"), []byte("---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n"))
 	plantFile(t, filepath.Join(dir, "lead-pro.md"), []byte("---\nname: lead-pro\nfrom: lead\ndescription: Leads more.\n---\n"))
-	targets := filepath.Join(paths.EngineSyncConfig(paths.Getenv, home), "targets.json")
+	targets := paths.EngineSyncConfig(home)
 	plantDir(t, filepath.Dir(targets))
-	plantFile(t, targets, []byte(`{"claudeConfigDirs":["`+filepath.Join(home, ".claude")+`","`+second+`"]}`))
+	plantFile(t, targets, []byte(`{"version":1,"targets":{"claudeConfigDirs":["`+filepath.Join(home, ".claude")+`","`+second+`"]}}`))
 	cfg := config.Default()
 	cfg.Machine.SourceAgentsDir = "agents"
-	problems, _ := CheckSourceVariants(second, home, cfg)
+	problems, _ := CheckSourceDeclarations(second, home, cfg)
 	if !strings.Contains(strings.Join(problems, "\n"), "Claude Code loads it raw") {
 		t.Fatalf("problems = %q, want the second-registry collision named", problems)
 	}
@@ -188,7 +189,7 @@ func TestCheckReportsEveryAgentGlobalSkips(t *testing.T) {
 	if err != nil || len(result.Problems) == 0 {
 		t.Fatalf("global: problems %q (%v), want the OpenCode tools refusal", result.Problems, err)
 	}
-	problems, _ := CheckSourceVariants(root, home, cfg)
+	problems, _ := CheckSourceDeclarations(root, home, cfg)
 	joined := strings.Join(problems, "\n")
 	for _, want := range result.Problems {
 		if !strings.Contains(joined, want) {

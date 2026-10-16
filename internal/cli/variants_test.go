@@ -22,6 +22,7 @@ import (
 func TestMachineAgentCast(t *testing.T) {
 	home, _, e := auditEnv(t)
 	repo := filepath.Join(home, "clone")
+	putGeneratedDir(t, home)
 	putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
 	putProjectFile(t, repo, "agents/lead.md", "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n\n## Budget\n\nSpend little.\n")
 	putProjectFile(t, repo, "agents/twin.md", "---\nname: twin\ndescription: Twins.\ntools: Read\nrequires: [gpt-agents]\n---\nTwin.\n")
@@ -166,6 +167,7 @@ func TestMachineBrokenSourceIsSkippedAndNamed(t *testing.T) {
 func TestMachineErrorSkipsKeepTheInstalledCopies(t *testing.T) {
 	home, _, e := auditEnv(t)
 	repo := filepath.Join(home, "clone")
+	putGeneratedDir(t, home)
 	putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
 	putProjectFile(t, repo, "agents/lead.md", "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n")
 	putProjectFile(t, repo, "agents/bad.md", "---\nname: bad\ndescription: Bad.\ntools: Read\n---\nBad.\n")
@@ -175,7 +177,7 @@ func TestMachineErrorSkipsKeepTheInstalledCopies(t *testing.T) {
 	if rc, out := auditRun(e, "global", "--source-repo", repo); rc != 0 {
 		t.Fatalf("first install rc=%d: %s", rc, out)
 	}
-	generated := filepath.Join(home, ".local", "state", "engine-sync", "generated", "claude-agents")
+	generated := filepath.Join(repo, "generated", "agents")
 	installed := func(names ...string) []string {
 		var out []string
 		for _, name := range names {
@@ -273,6 +275,7 @@ func TestAdoptMovesAFileListedUnderTwoSpellingsOnce(t *testing.T) {
 func TestVariantsPinWaitsForTheWriterGuard(t *testing.T) {
 	home, _, e := auditEnv(t)
 	repo := filepath.Join(home, "clone")
+	putGeneratedDir(t, home)
 	putProjectFile(t, repo, "agents/lead.md", "---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n")
 	putProjectFile(t, repo, "agents/lead-pro.md", "---\nname: lead-pro\nfrom: lead\n---\n")
 	done := make(chan int, 1)
@@ -326,9 +329,8 @@ func TestMachineRefusesRawDeclarationsInClaudeRegistry(t *testing.T) {
 				args = []string{"--source-repo", repo}
 			}
 			if form == "second registry" {
-				raw := `{"version":1,"machine":{"claudeAgentsDir":"` + dir + `"}}`
-				putProjectFile(t, home, ".config/engine-sync/config.json", raw)
-				putProjectFile(t, home, ".config/engine-sync/targets.json", `{"claudeConfigDirs":["`+filepath.Join(home, ".claude")+`","`+store+`"]}`)
+				raw := `{"version":1,"machine":{"claudeAgentsDir":"` + dir + `"},"targets":{"claudeConfigDirs":["` + filepath.Join(home, ".claude") + `","` + store + `"]}}`
+				putProjectFile(t, home, ".claude/engine-sync.json", raw)
 			}
 			for _, command := range [][]string{append([]string{"global", "--adopt"}, args...), append([]string{"doctor", "--machine"}, args...)} {
 				out := auditBad(t, e, "Claude Code loads it raw", command...)
@@ -349,5 +351,40 @@ func TestMachineRefusesRawDeclarationsInClaudeRegistry(t *testing.T) {
 				t.Fatalf("healthy plain agent not installed: %q (%v)", got, err)
 			}
 		})
+	}
+}
+
+// A declaration renders only into machine.sourceGeneratedAgentsDir: with the
+// key unset it is skipped by name, the original still installs, and the run
+// exits 1.
+func TestDeclarationWithoutAGeneratedDirIsSkippedByName(t *testing.T) {
+	home, _, e := auditEnv(t)
+	repo := filepath.Join(home, "clone")
+	putProjectFile(t, repo, "CLAUDE.md", "Clone\n")
+	putProjectFile(t, repo, "agents/astra.md", "---\nname: astra\ndescription: Astra.\ntools: Read\n---\nAstra.\n")
+	putProjectFile(t, repo, "agents/astra-pro.md", "---\nname: astra-pro\nfrom: astra\nextends: [shared/lane.md]\neffort: high\n---\n")
+	putProjectFile(t, repo, "agents/shared/lane.md", "---\nmodel: haiku\n---\n")
+	// No generated directory means no kept copy: a same-named file in the
+	// working directory is never taken for one.
+	cwd := filepath.Join(home, "cwd")
+	putProjectFile(t, cwd, "astra-pro.md", "---\nname: astra-pro\n---\n")
+	t.Chdir(cwd)
+	rc, out := auditRun(e, "global", "--source-repo", repo)
+	if rc != 1 || !strings.Contains(out, "VARIANT-INVALID astra-pro") || !strings.Contains(out, "machine.sourceGeneratedAgentsDir") {
+		t.Fatalf("global rc=%d, want 1 naming VARIANT-INVALID astra-pro and machine.sourceGeneratedAgentsDir: %s", rc, out)
+	}
+	if strings.Contains(out, "SHARED-UNUSED") {
+		t.Fatalf("global calls the shared file the skipped declaration extends unused: %s", out)
+	}
+	if strings.Contains(out, "output kept") {
+		t.Fatalf("global keeps a working-directory file as the skipped declaration's output: %s", out)
+	}
+	for _, path := range []string{filepath.Join(home, ".claude", "agents", "astra.md"), filepath.Join(home, ".codex", "agents", "astra.toml")} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Errorf("the original did not install: %v", err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "agents", "astra-pro.md")); !os.IsNotExist(err) {
+		t.Errorf("the skipped declaration installed: %v", err)
 	}
 }

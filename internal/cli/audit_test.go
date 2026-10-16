@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/guard"
+	"github.com/rezzminator/engine-sync/internal/hook"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -54,7 +55,7 @@ func TestAuditCWDDiscovery(t *testing.T) {
 				putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"codex":{"suffixPrefix":"audit-prefix"}}`)
 			}
 			if form == "machine marker" {
-				putProjectFile(t, home, ".config/engine-sync/config.json", `{"version":1,"workbenchMarker":"bench.json"}`)
+				putProjectFile(t, home, ".claude/engine-sync.json", `{"version":1,"workbenchMarker":"bench.json"}`)
 				putProjectFile(t, root, "bench.json", `{}`)
 				// The marker, rather than orientation fallback, must identify the root.
 				if err := os.Remove(filepath.Join(root, "CLAUDE.md")); err != nil {
@@ -97,7 +98,7 @@ func TestAuditCWDDiscovery(t *testing.T) {
 				vars["CLAUDE_PROJECT_DIR"] = ""
 				e.stdin = strings.NewReader(`{"tool_input":{"file_path":` + strconvQuote(filepath.Join(root, "CLAUDE.md")) + `}}`)
 				auditOK(t, e, "hook", "claude", "mark")
-				flag, err := hookDirtyFlag(e, root)
+				flag, err := hook.DirtyFlag(hookContext(e), root)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -117,6 +118,10 @@ func TestAuditCWDDiscovery(t *testing.T) {
 func TestAuditMachineFailures(t *testing.T) {
 	for _, form := range []string{"unwritable global", "unwritable agents", "foreign role", "foreign plan", "bare old copy", "dangling source", "locked foreign"} {
 		t.Run(form, func(t *testing.T) {
+			// An unwritable agents directory is a permission bit, which root ignores.
+			if strings.HasPrefix(form, "unwritable") && testjail.RanUnprivileged(t) {
+				return
+			}
 			home, _, e := auditEnv(t)
 			repo := filepath.Join(home, "source")
 			putProjectFile(t, repo, "agents/reader.md", auditAgent)
@@ -125,6 +130,7 @@ func TestAuditMachineFailures(t *testing.T) {
 				args = []string{"codex", "agents", "--source-repo", repo}
 			}
 			if strings.HasPrefix(form, "unwritable") {
+				// The role plans as missing, then its write fails: the failure under test is the write's.
 				dir := filepath.Join(home, ".codex", "agents")
 				if err := os.MkdirAll(dir, 0755); err != nil {
 					t.Fatal(err)
@@ -133,6 +139,9 @@ func TestAuditMachineFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+				if err := os.WriteFile(filepath.Join(dir, "probe"), nil, 0600); err == nil {
+					t.Fatal("fixture does not deny the write")
+				}
 			}
 			if form == "foreign role" || form == "foreign plan" {
 				putProjectFile(t, home, ".codex/agents/reader.toml", "user role\n")
@@ -152,12 +161,17 @@ func TestAuditMachineFailures(t *testing.T) {
 				args = []string{"global"}
 			}
 			if form == "locked foreign" {
+				// A symlink loop where a role file belongs: reading it fails with ELOOP for every uid.
 				p := filepath.Join(home, ".codex", "agents", "locked.toml")
-				putProjectFile(t, home, ".codex/agents/locked.toml", "foreign\n")
-				if err := os.Chmod(p, 0); err != nil {
+				if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = os.Chmod(p, 0755) })
+				if err := os.Symlink(p, p); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.ReadFile(p); err == nil {
+					t.Fatal("fixture does not deny the read")
+				}
 			}
 			rc, out := auditRun(e, args...)
 			if form == "dangling source" || form == "locked foreign" {
@@ -170,6 +184,9 @@ func TestAuditMachineFailures(t *testing.T) {
 				}
 			} else if rc != 1 || strings.Contains(out, "CODEX AGENTS PASS") {
 				t.Errorf("false success: rc=%d %s", rc, out)
+			}
+			if strings.HasPrefix(form, "unwritable") && !strings.Contains(out, "write "+filepath.Join(home, ".codex", "agents", "reader.toml")+": ") {
+				t.Errorf("the failed write is not named: %s", out)
 			}
 			if form == "foreign role" && !strings.Contains(out, "compiled") {
 				t.Errorf("unlabelled compiled size: %s", out)
@@ -205,9 +222,9 @@ func TestAuditRosterAndTargets(t *testing.T) {
 			args := []string{"global", "--source-repo", repo}
 			switch form {
 			case "empty homes":
-				putProjectFile(t, home, ".config/engine-sync/targets.json", `{"codexHomes":[]}`)
+				putTargets(t, home, `{"codexHomes":[]}`)
 			case "bad targets explicit", "bad targets disabled":
-				putProjectFile(t, home, ".config/engine-sync/targets.json", `{bad`)
+				putTargets(t, home, `{bad`)
 				if form == "bad targets explicit" {
 					args = append(args, "--codex-home", filepath.Join(home, "chosen"))
 				} else {
@@ -215,7 +232,7 @@ func TestAuditRosterAndTargets(t *testing.T) {
 				}
 			case "source and registries", "uninstall":
 				raw, _ := json.Marshal(map[string]any{"codexHomes": []string{filepath.Join(home, ".codex")}, "sourceRepo": repo, "claudeConfigDirs": []string{filepath.Join(home, ".claude"), filepath.Join(home, "other")}})
-				putProjectFile(t, home, ".config/engine-sync/targets.json", string(raw))
+				putTargets(t, home, string(raw))
 				putProjectFile(t, home, ".claude/agents/foreign.md", strings.ReplaceAll(auditAgent, "reader", "foreign"))
 				args = []string{"global"}
 			case "empty source":
@@ -224,9 +241,9 @@ func TestAuditRosterAndTargets(t *testing.T) {
 				}
 			}
 			if form == "bad targets explicit" || form == "bad targets disabled" {
-				// The capability set reads targets.json: a broken one fails
+				// The capability set reads the global file's targets: a broken one fails
 				// the run, never an empty capability set.
-				auditBad(t, e, "targets.json", args...)
+				auditBad(t, e, "engine-sync.json", args...)
 				return
 			}
 			auditOK(t, e, args...)
@@ -267,7 +284,7 @@ func TestAuditHookFailurePaths(t *testing.T) {
 				putProjectFile(t, root, ".claude/engine-sync.json", `{bad`)
 			}
 			if form == "invalid machine unrelated" {
-				putProjectFile(t, home, ".config/engine-sync/config.json", `{bad`)
+				putProjectFile(t, home, ".claude/engine-sync.json", `{bad`)
 				e.stdin = strings.NewReader(`{"tool_input":{"file_path":"/tmp/unrelated.txt"}}`)
 				if out := auditOK(t, e, "hook", "claude", "mark"); out != "" {
 					t.Fatal(out)
@@ -285,7 +302,7 @@ func TestAuditHookFailurePaths(t *testing.T) {
 			}
 			e.stdin = strings.NewReader(`{"tool_input":{"file_path":` + strconvQuote(filepath.Join(root, "CLAUDE.md")) + `}}`)
 			auditOK(t, e, "hook", "claude", "mark")
-			flag, err := hookDirtyFlag(e, root)
+			flag, err := hook.DirtyFlag(hookContext(e), root)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -335,12 +352,12 @@ func TestAuditUnusedAndForeignCommands(t *testing.T) {
 				putProjectFile(t, root, "bench.json", `{}`)
 			}
 			if form == "global disabled" || form == "workbench" {
+				// A regular file where the commands directory belongs: listing it fails with ENOTDIR for every uid.
 				p := filepath.Join(home, ".claude", "commands")
-				putProjectFile(t, home, ".claude/commands/unreadable.md", "secret\n")
-				if err := os.Chmod(p, 0); err != nil {
-					t.Fatal(err)
+				putProjectFile(t, home, ".claude/commands", "secret\n")
+				if _, err := os.ReadDir(p); err == nil {
+					t.Fatal("fixture does not deny the listing")
 				}
-				t.Cleanup(func() { _ = os.Chmod(p, 0755) })
 			}
 			if form == "extra directory" {
 				putProjectFile(t, root, filepath.Join("templates", "global", "commands", "unused.md"), "---\ndescription: Not a live command.\n---\nUnused\n")
@@ -408,31 +425,35 @@ func TestAuditHomeCommandOlderWriter(t *testing.T) {
 }
 
 func TestAuditDoctorBrokenState(t *testing.T) {
-	for _, form := range []string{"tampered variant", "tampered role", "orphan role", "stale prompt", "deleted skill", "unreadable prompts", "fifo skill", "corrupt writer", "bad targets", "second registry"} {
+	for _, form := range []string{"tampered generated agent", "tampered role", "orphan role", "stale prompt", "deleted skill", "unreadable prompts", "fifo skill", "corrupt writer", "bad targets", "second registry"} {
 		t.Run(form, func(t *testing.T) {
+			// Unreadable prompts are a permission bit, which root ignores.
+			if form == "unreadable prompts" && testjail.RanUnprivileged(t) {
+				return
+			}
 			home, _, e := auditEnv(t)
-			if form != "tampered variant" {
+			if form != "tampered generated agent" {
 				putProjectFile(t, home, ".claude/agents/reader.md", auditAgent)
 			}
 			putProjectFile(t, home, ".claude/commands/hello.md", "---\ndescription: Hello.\n---\nHello\n")
 			putProjectFile(t, home, ".claude/commands/family/SKILL.md", "---\nname: family\ndescription: Family.\n---\nFamily\n")
 			if form == "second registry" {
 				raw, _ := json.Marshal(map[string]any{"codexHomes": []string{filepath.Join(home, ".codex")}, "sourceRepo": filepath.Join(home, ".claude"), "claudeConfigDirs": []string{filepath.Join(home, ".claude"), filepath.Join(home, "other")}})
-				putProjectFile(t, home, ".config/engine-sync/targets.json", string(raw))
+				putTargets(t, home, string(raw))
 			}
-			if form == "tampered variant" {
+			if form == "tampered generated agent" {
 				putProjectFile(t, home, "agent-sources/reader.md", auditAgent)
 				putProjectFile(t, home, "agent-sources/reader-pro.md", "---\nname: reader-pro\nfrom: reader\ndescription: Deep read.\n---\n")
-				raw, err := json.Marshal(map[string]any{"version": 1, "machine": map[string]any{"claudeAgentsDir": filepath.Join(home, "agent-sources")}})
+				raw, err := json.Marshal(map[string]any{"version": 1, "machine": map[string]any{"claudeAgentsDir": filepath.Join(home, "agent-sources"), "sourceGeneratedAgentsDir": "generated/agents"}})
 				if err != nil {
 					t.Fatal(err)
 				}
-				putProjectFile(t, home, ".config/engine-sync/config.json", string(raw))
+				putProjectFile(t, home, ".claude/engine-sync.json", string(raw))
 			}
 			auditOK(t, e, "global")
 			switch form {
-			case "tampered variant":
-				putProjectFile(t, home, ".local/state/engine-sync/generated/claude-agents/reader-pro.md", artifact.Marker(artifact.Markdown, "agents/reader.md")+"\nchanged\n")
+			case "tampered generated agent":
+				putProjectFile(t, home, ".claude/generated/agents/reader-pro.md", artifact.Marker(artifact.Markdown, "agents/reader.md")+"\nchanged\n")
 			case "tampered role":
 				putProjectFile(t, home, ".codex/agents/reader.toml", artifact.Marker(artifact.TOML, "agents/reader.md")+"\nname = \"changed\"\n")
 			case "orphan role":
@@ -449,6 +470,9 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = os.Chmod(p, 0755) })
+				if _, err := os.ReadDir(p); err == nil {
+					t.Fatal("fixture does not deny the listing")
+				}
 			case "fifo skill":
 				p := filepath.Join(home, ".codex", "skills", "extra", "SKILL.md")
 				if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
@@ -466,7 +490,7 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "bad targets":
-				putProjectFile(t, home, ".config/engine-sync/targets.json", `{bad`)
+				putTargets(t, home, `{bad`)
 			case "second registry":
 				if err := os.Remove(filepath.Join(home, "other", "agents", "reader.md")); err != nil {
 					t.Fatal(err)
@@ -475,6 +499,9 @@ func TestAuditDoctorBrokenState(t *testing.T) {
 			rc, out := auditRun(e, "doctor", "--machine")
 			if rc != 1 {
 				t.Fatalf("doctor false ok rc=%d %s", rc, out)
+			}
+			if form == "unreadable prompts" && !strings.Contains(out, "inspect "+filepath.Join(home, ".codex", "prompts")+":") {
+				t.Errorf("the unlistable prompts directory is not named: %s", out)
 			}
 			if strings.Contains(out, "ok global-agents") {
 				t.Errorf("contradictory registry ok: %s", out)
@@ -572,7 +599,7 @@ func TestAuditPopulatedHomesAndProjectRosters(t *testing.T) {
 	putProjectFile(t, home, ".claude/commands/global.md", "---\ndescription: Global.\n---\nUse /foo:bar.\n")
 	auditOK(t, e, "global")
 	raw, _ := json.Marshal(map[string]any{"codexHomes": []string{filepath.Join(home, ".codex"), second}})
-	putProjectFile(t, home, ".config/engine-sync/targets.json", string(raw))
+	putTargets(t, home, string(raw))
 	auditOK(t, e, "global")
 	for _, h := range []string{filepath.Join(home, ".codex"), second} {
 		if _, err := os.Stat(filepath.Join(h, "prompts", "global.md")); err != nil {

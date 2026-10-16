@@ -82,7 +82,7 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 		}
 		p.Agents = append(p.Agents, Agent{Name: front.Fields["name"], Path: path, Raw: raw, Front: front, Body: body})
 	}
-	decl, err := readVariantsDecl(agentsDir, generatedDir, []string{opts.MarkerDir})
+	decl, err := readDeclarations(agentsDir, generatedDir, []string{opts.MarkerDir})
 	if err != nil {
 		return p, err
 	}
@@ -96,7 +96,7 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 		if brokenSources[name] || slices.Contains(p.Failed, name) {
 			continue
 		}
-		p.Problems = append(p.Problems, variantProblem(failed[name]))
+		p.Problems = append(p.Problems, declarationProblem(failed[name]))
 		// A shared file is never an agent: its failure has no copy to keep.
 		if _, shared := decl.shared[name]; !shared && !strings.Contains(name, "/") {
 			p.Failed = append(p.Failed, name)
@@ -141,13 +141,13 @@ func LoadMachineCommands(home, sourceHome string, uninstall bool, policies ...co
 }
 
 // GeneratedDirectory is where declarations render: the source repository's
-// machine.sourceGeneratedAgentsDir when set, else the home store
-// machine.generatedAgentsDir.
+// machine.sourceGeneratedAgentsDir, empty when unset — there is no other
+// place, and a declaration then fails by name (see readDeclarations).
 func GeneratedDirectory(home, repo string, cfg config.Config) string {
-	if cfg.Machine.SourceGeneratedAgentsDir != "" {
-		return filepath.Join(paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), filepath.FromSlash(cfg.Machine.SourceGeneratedAgentsDir))
+	if cfg.Machine.SourceGeneratedAgentsDir == "" {
+		return ""
 	}
-	return filepath.Join(home, cfg.Machine.GeneratedAgentsDir)
+	return filepath.Join(paths.GlobalSourceRoot(home, repo, cfg.ClaudeConfigDir), filepath.FromSlash(cfg.Machine.SourceGeneratedAgentsDir))
 }
 
 func AgentsDirectory(home, repo string, cfg config.Config) string {
@@ -165,7 +165,7 @@ func AgentsDirectory(home, repo string, cfg config.Config) string {
 
 // MachineMarkerSource names what a machine-global agent's generated marker
 // credits: the clone path of an original agent, or its declaration for a
-// variant, whose Markdown only ever existed in the engine-sync-owned
+// generated agent, whose Markdown only ever existed in the engine-sync-owned
 // generated directory. It is deliberately clone-relative — a host-absolute
 // path in a marker says nothing an operator on another machine can act on.
 // markerDir is machine.agentMarkerDir; empty is the agents directory's base.

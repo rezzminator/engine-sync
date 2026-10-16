@@ -41,7 +41,7 @@ type GlobalAgentsOptions struct {
 	Mode       Mode
 }
 
-// GlobalAgentCompiled is one desired role file or rendered variant source.
+// GlobalAgentCompiled is one desired role file or rendered generated agent source.
 // Build writes changed bytes; check reports the same desired artifact without
 // writing it.
 type GlobalAgentCompiled struct {
@@ -50,12 +50,12 @@ type GlobalAgentCompiled struct {
 }
 
 // GlobalAgentInstalled is one desired registry symlink and the shape check
-// found there — the classification codex.GlobalLinkState names, so a
+// found there — the classification GlobalLinkState names, so a
 // missing, drifted, or foreign target can never certify itself as installed.
 type GlobalAgentInstalled struct {
 	Path   string
 	Source string
-	State  GlobalLinkState
+	State  reconciler.GlobalLinkState
 	Found  string
 }
 
@@ -187,13 +187,10 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	if codexHomes == nil {
 		codexHomes = []string{filepath.Join(home, ".codex")}
 	}
-	// The registries a pre-migration role symlink is allowed to point into —
-	// the retired generated store, and the even older in-clone twin. A link
-	// resolving anywhere else was never written by engine-sync.
-	ownedLinkDirs := []string{
-		filepath.Join(home, cfg.Machine.LegacyCodexAgentsDir),
-		source.AgentsDirectory(home, sourceRepo, *cfg),
-	}
+	// The registry a pre-migration role symlink is allowed to point into —
+	// the in-clone twin. A link resolving anywhere else was never written by
+	// engine-sync.
+	ownedLinkDirs := []string{source.AgentsDirectory(home, sourceRepo, *cfg)}
 
 	type desiredLink struct {
 		target string
@@ -255,17 +252,17 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	// disk. A foreign file is a Problem and never an Action — it stays exactly
 	// as the operator left it.
 	for _, role := range roles {
-		state, foundAt, err := ClassifyGlobalRole(role.target, role.content, ownedLinkDirs)
+		state, foundAt, err := reconciler.ClassifyGlobalRole(role.target, role.content, ownedLinkDirs)
 		if err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("inspect global role %s: %w", role.target, err)
 		}
 		found := GlobalRoleInstalled{Path: role.target, State: state, Found: foundAt}
 		result.Roles = append(result.Roles, found)
 		switch state {
-		case GlobalRoleForeign:
+		case reconciler.GlobalRoleForeign:
 			// Reconciliation below reports the conflict once.
 			continue
-		case GlobalRoleCurrent:
+		case reconciler.GlobalRoleCurrent:
 			continue
 		}
 		result.Actions = append(result.Actions, GlobalAgentAction{Kind: actionWrite, Path: role.target})
@@ -275,7 +272,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	// actually on disk. A stat failure other than "not found" bubbles up as
 	// a genuine error — an unreadable target is never reported as absent.
 	for _, link := range links {
-		state, found, err := ClassifyGlobalLink(link.target, link.source, sourceRoot, GlobalLinkFile)
+		state, found, err := reconciler.ClassifyGlobalLink(link.target, link.source, sourceRoot, reconciler.GlobalLinkFile)
 		if err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("inspect global agent artifact %s: %w", link.target, err)
 		}
@@ -284,10 +281,10 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 			GlobalAgentInstalled{Path: link.target, Source: link.source, State: state, Found: found},
 		)
 		switch state {
-		case GlobalLinkConflict:
-			result.Problems = append(result.Problems, DescribeGlobalLinkState(state, link.target, link.source, found))
+		case reconciler.GlobalLinkConflict:
+			result.Problems = append(result.Problems, reconciler.DescribeGlobalLinkState(state, link.target, link.source, found))
 			continue
-		case GlobalLinkCorrect:
+		case reconciler.GlobalLinkCorrect:
 			continue
 		}
 		result.Actions = append(
@@ -339,7 +336,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	for _, problem := range applied.Problems {
 		duplicate := false
 		for _, link := range result.Installed {
-			if link.State == GlobalLinkConflict && strings.Contains(problem, link.Path) {
+			if link.State == reconciler.GlobalLinkConflict && strings.Contains(problem, link.Path) {
 				duplicate = true
 			}
 		}
@@ -353,8 +350,8 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 
 // compiledAgent is one global agent rendered for both engines. mdContent is
 // nil for an original agent (Claude links straight to the clone's .md) and
-// carries the rendered bytes for a variant, whose mdSource is its file in the
-// generated Claude directory: a variant is the Claude -> Claude step, and from
+// carries the rendered bytes for a generated agent, whose mdSource is its file in the
+// generated Claude directory: a generated agent is the Claude -> Claude step, and from
 // there it takes the same link and the same role file as any original.
 type compiledAgent struct {
 	name        string

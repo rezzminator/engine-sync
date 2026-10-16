@@ -174,6 +174,14 @@ func Symlink(target, path string) error {
 // link is os.Link; a variable so a test can make it cross a filesystem.
 var link = os.Link
 
+// MoveAside renames a capped file over its previous archive on the same filesystem.
+func MoveAside(from, to string) error {
+	if err := os.Rename(from, to); err != nil {
+		return fmt.Errorf("move %s aside to %s: %w", from, to, err)
+	}
+	return syncDirectory(filepath.Dir(to))
+}
+
 // Move moves from to to without ever replacing a file at to: a hard link
 // (refused when to exists), then from removed, both directories synced. A
 // link refused because the two sit on different filesystems (EXDEV) falls

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
-	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"io/fs"
 	"os"
@@ -30,17 +29,16 @@ func writeMachineFixture(t *testing.T, path, content string) {
 }
 
 // fixture is one home with a clone holding a single global agent and one
-// declared variant of it, and one Claude command to mirror.
+// declared generated agent of it, and one Claude command to mirror.
 func fixture(t *testing.T) (home, repo string) {
 	t.Helper()
 	home = testjail.Scratch(t)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	repo = filepath.Join(home, "clone")
 	agents := filepath.Join(repo, "agents")
 	writeMachineFixture(t, filepath.Join(agents, "gamma.md"), "---\nname: gamma\ndescription: Gamma role.\nmodel: sonnet\neffort: medium\n---\n\nGamma body.\n")
 	writeMachineFixture(t, filepath.Join(agents, "gamma-deep.md"), "---\nname: gamma-deep\nfrom: gamma\neffort: high\n---\n")
 	writeMachineFixture(t, filepath.Join(home, ".claude", "commands", "tidy.md"), "---\ndescription: Tidy.\n---\nTidy up.\n")
-	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"retiredAgents":["frr","rr-super"],"retiredFiles":[".codex/agents/explorer.toml"]}}`)
+	writeMachineFixture(t, filepath.Join(home, ".claude", "engine-sync.json"), `{"version":1,"machine":{"sourceGeneratedAgentsDir":"generated/agents","retiredAgents":["frr","rr-super"],"retiredFiles":[".codex/agents/explorer.toml"]}}`)
 	return home, repo
 }
 
@@ -110,9 +108,9 @@ func TestRetirementsKeepWhatEngineSyncCannotProveItWrote(t *testing.T) {
 			skips:     []string{".codex/agents/rr-super.toml is not a generated agent; preserved"},
 		},
 		{
-			name: "an undeclared rendered variant and its link go",
+			name: "an undeclared generated agent and its link go",
 			stage: func(t *testing.T, home string) {
-				ghost := filepath.Join(paths.GeneratedClaudeAgentsDir(home), "ghost.md")
+				ghost := filepath.Join(home, "clone", "generated", "agents", "ghost.md")
 				writeMachineFixture(t, ghost, "---\nname: ghost\n---\n")
 				if err := os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755); err != nil {
 					t.Fatal(err)
@@ -121,7 +119,7 @@ func TestRetirementsKeepWhatEngineSyncCannotProveItWrote(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			preserved: []string{".claude/agents/ghost.md", ".local/state/engine-sync/generated/claude-agents/ghost.md"},
+			preserved: []string{".claude/agents/ghost.md", "clone/generated/agents/ghost.md"},
 		},
 		{
 			name: "the retired explorer role and its backups go",
@@ -184,7 +182,7 @@ func TestNoCodexHomeWritesNoRoleAndSkipsTheMirrors(t *testing.T) {
 	// and the fixture's unmapped OpenCode aliases still warn.
 	want := []string{
 		`unmapped OpenCode model alias "sonnet" in ` + filepath.Join(repo, "agents", "gamma.md") + " — model omitted",
-		`unmapped OpenCode model alias "sonnet" in ` + filepath.Join(paths.GeneratedClaudeAgentsDir(home), "gamma-deep.md") + " — model omitted",
+		`unmapped OpenCode model alias "sonnet" in ` + filepath.Join(repo, "generated", "agents", "gamma-deep.md") + " — model omitted",
 		"no Codex accounts configured — command mirror has nothing to write",
 		"no Codex accounts configured — agent mirror has nothing to write",
 	}
@@ -207,7 +205,7 @@ func TestNoCodexHomeKeepsClaudeLinkOwnership(t *testing.T) {
 	registry := filepath.Join(home, ".claude", "agents")
 	foreign := filepath.Join(home, "elsewhere", ".claude", "agents", "gamma.md")
 	writeMachineFixture(t, foreign, "---\nname: gamma\ndescription: Theirs.\n---\n")
-	store := filepath.Join(home, paths.ClaudeVariantStore, "gamma-deep.md")
+	store := filepath.Join(repo, "generated", "agents", "gamma-deep.md")
 	relative, err := filepath.Rel(registry, store)
 	if err != nil {
 		t.Fatal(err)
@@ -270,14 +268,12 @@ func TestUninstallRetiresOnlyWhatIsGenerated(t *testing.T) {
 		t.Fatal(report.Err)
 	}
 	writeMachineFixture(t, filepath.Join(home, ".codex", "agents", "mine.toml"), "name = \"mine\"\n")
-	legacy := paths.LegacyGeneratedCodexAgentsDir(home)
-	writeMachineFixture(t, filepath.Join(legacy, "gamma.toml"), generatedRole)
 	report := RunMachine(Options{Home: home, SourceRepo: repo, Uninstall: true})
 	if report.Err != nil {
 		t.Fatalf("err=%v events=%#v", report.Err, report.Events)
 	}
 	for _, gone := range []string{
-		filepath.Join(home, ".codex", "agents", "gamma.toml"), legacy, paths.GeneratedClaudeAgentsDir(home),
+		filepath.Join(home, ".codex", "agents", "gamma.toml"),
 	} {
 		if _, err := os.Lstat(gone); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("%s survived uninstall: %v", gone, err)
@@ -422,8 +418,9 @@ func TestCapabilityOptOutRetiresClaudeSourcesAndPlansOnce(t *testing.T) {
 					filepath.Join(home, ".codex", "agents", "routed-v2.toml"),
 					filepath.Join(home, ".codex", "agents", "routed-deep.toml"),
 					filepath.Join(home, ".claude", "agents", "routed-deep.md"),
-					filepath.Join(home, paths.ClaudeVariantStore, "routed-deep.md"),
 				}
+				// The repository's generated copy is every declaration's render,
+				// capability or not: an opt-out never retires it.
 				for _, path := range planPaths {
 					count := 0
 					for _, event := range report.Events {
@@ -475,34 +472,4 @@ func capabilityPolicy(t *testing.T, home string, capabilities ...string) *config
 	}
 	cfg.Capabilities = capabilities
 	return &cfg
-}
-
-// TestMovedGeneratedDirRepointsReceiptlessLinksBeforeRetiringTheStore: a host
-// whose registry links into the home store carry no receipt moves to
-// machine.sourceGeneratedAgentsDir in one run — every link repoints into the
-// source repository, no link dangles, and the store is retired after.
-func TestMovedGeneratedDirRepointsReceiptlessLinksBeforeRetiringTheStore(t *testing.T) {
-	home, repo := fixture(t)
-	if report := RunMachine(Options{Home: home, SourceRepo: repo, CodexHomes: []string{}}); report.Err != nil {
-		t.Fatalf("first run: %v", report.Err)
-	}
-	link := filepath.Join(home, ".claude", "agents", "gamma-deep.md")
-	store := filepath.Join(home, paths.ClaudeVariantStore, "gamma-deep.md")
-	if got, _ := os.Readlink(link); got != store {
-		t.Fatalf("first run linked %s -> %q, want %q", link, got, store)
-	}
-	if err := os.RemoveAll(filepath.Join(paths.EngineSyncState(paths.Getenv, home), "links")); err != nil {
-		t.Fatal(err)
-	}
-	writeMachineFixture(t, filepath.Join(home, ".config", "engine-sync", "config.json"), `{"version":1,"machine":{"sourceGeneratedAgentsDir":"generated/agents"}}`)
-	report := RunMachine(Options{Home: home, SourceRepo: repo, CodexHomes: []string{}})
-	if report.Err != nil || len(messages(report.Events, VerbConflict)) != 0 {
-		t.Fatalf("move run: err=%v conflicts=%q", report.Err, messages(report.Events, VerbConflict))
-	}
-	if got, _ := os.Readlink(link); got != filepath.Join(repo, "generated", "agents", "gamma-deep.md") {
-		t.Fatalf("link not repointed into the source repository: -> %q", got)
-	}
-	if _, err := os.Lstat(store); !os.IsNotExist(err) {
-		t.Fatalf("home store entry not retired (err=%v)", err)
-	}
 }

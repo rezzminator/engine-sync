@@ -3,10 +3,10 @@ package machine
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"io"
 
 	"github.com/rezzminator/engine-sync/internal/config"
-	"github.com/rezzminator/engine-sync/internal/target/codex"
 )
 
 func PrintReport(report Report, asJSON bool, stdout, stderr io.Writer) int {
@@ -40,6 +40,9 @@ func PrintReport(report Report, asJSON bool, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "engine-sync global: %s\n", errText)
 		}
 	}
+	if config.IsRefusal(report.Err) {
+		return 2
+	}
 	if !ok {
 		return 1
 	}
@@ -47,8 +50,8 @@ func PrintReport(report Report, asJSON bool, stdout, stderr io.Writer) int {
 }
 
 // PrintDoctor writes the machine doctor's rows, preceded by the config
-// provenance, as text or as one JSON object, and returns the exit code: 1 when
-// err is set or any row fails.
+// provenance, as text or as one JSON object, and returns the exit code: 2 when
+// err is a configuration refusal, else 1 when err is set or any row fails.
 func PrintDoctor(rows []Row, sources []config.SourceRow, err error, asJSON bool, stdout, stderr io.Writer) int {
 	failed := err != nil
 	for _, row := range rows {
@@ -78,6 +81,9 @@ func PrintDoctor(rows []Row, sources []config.SourceRow, err error, asJSON bool,
 			fmt.Fprintf(stdout, "%s %s\n", row.Level, row.Message)
 		}
 	}
+	if config.IsRefusal(err) {
+		return 2
+	}
 	if failed {
 		return 1
 	}
@@ -95,7 +101,7 @@ func PrintGlobalAgents(result GlobalAgentsResult, stdout, stderr io.Writer) int 
 		fmt.Fprintf(stdout, "compiled %s: %d B, parses clean\n", compiled.Path, compiled.Size)
 	}
 	for _, installed := range result.Installed {
-		fmt.Fprintf(stdout, "%s %s\n", installed.State, codex.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found))
+		fmt.Fprintf(stdout, "%s %s\n", installed.State, reconcile.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found))
 	}
 	for _, role := range result.Roles {
 		fmt.Fprintf(stdout, "%s %s\n", role.State, role.Describe())

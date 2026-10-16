@@ -20,7 +20,6 @@ type Mode uint8
 const (
 	ModeBuild Mode = iota
 	ModeCheck
-	frontmatterFence = "---"
 )
 
 // Options is deliberately filesystem-only: the compiler has no process,
@@ -31,7 +30,7 @@ type Options struct {
 	Mode         Mode
 	CLIOverrides CLIOverrides
 	// Capabilities are the --capability values; the run's capability set
-	// adds the targets.json list (config.Capabilities).
+	// adds the global file's targets.capabilities list (config.Capabilities).
 	Capabilities []string
 	Config       *config.Config
 	Source       *claudesource.Project

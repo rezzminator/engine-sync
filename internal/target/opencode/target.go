@@ -107,11 +107,6 @@ func openCodeName() string {
 	return engine.MustLookup(engine.OpenCode).LongName
 }
 
-// GeneratedMarkers are the lines that mark a file this compiler (or its
-// declared predecessor) wrote: a project whose outputs carry one is in
-// engine-sync's scope.
-func OpenCodeMarkers() []string { return artifact.Markers() }
-
 type Target struct{}
 
 func (Target) Name() string { return "opencode" }
@@ -121,7 +116,10 @@ func (Target) Roots(p claudesource.Project, cfg config.Config) []artifact.Root {
 		return []artifact.Root{{Path: filepath.Join(p.Home, ".config", openCodeName(), "command"), SourceRoots: []string{p.SourceCommandDir}}}
 	}
 	if p.Scope == claudesource.MachineScope {
-		sources := []string{p.AgentSourceDir, p.GeneratedDir, filepath.Join(p.Home, cfg.Machine.GeneratedAgentsDir), p.Root}
+		sources := []string{p.AgentSourceDir, p.Root}
+		if p.GeneratedDir != "" {
+			sources = append(sources, p.GeneratedDir)
+		}
 		return []artifact.Root{{Path: MachineAgentsDir(p.Home), SourceRoots: sources, InspectForeign: true}}
 	}
 	sources := []string{filepath.Join(p.Root, ".claude"), filepath.Join(p.Home, ".claude")}
@@ -195,7 +193,7 @@ func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Arti
 		add,
 		problem,
 		skip,
-		dangling, model, cfg,
+		dangling, model, "", cfg,
 	)
 
 	compileOpenCodeSkills(root, add, problem, skip, dangling, model)

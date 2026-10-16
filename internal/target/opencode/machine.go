@@ -32,7 +32,7 @@ func renderOpenCodeMachine(p source.Project, cfg config.Config) ([]artifact.Arti
 	}
 	roster := map[string]string{}
 	discoverOpenCodeCommandRoster(p.SourceCommandDir, roster, problem, dangling, &p)
-	compileOpenCodeCommands(p.SourceCommandDir, "$HOME/.claude/commands", roster, filepath.Join(p.Home, ".config", openCodeName(), "command"), add, problem, warn, dangling, &p, cfg)
+	compileOpenCodeCommands(p.SourceCommandDir, "$HOME/.claude/commands", roster, filepath.Join(p.Home, ".config", openCodeName(), "command"), add, problem, warn, dangling, &p, cfg.Machine.ManagedBy, cfg)
 	return outputs, ds
 }
 
@@ -43,7 +43,7 @@ func MachineAgentsDir(home string) string {
 }
 
 // renderOpenCodeMachineAgents emits every machine-global agent, original and
-// variant, into MachineAgentsDir through the one OpenCode agent renderer. The
+// generated agent, into MachineAgentsDir through the one OpenCode agent renderer. The
 // machine path carries no preamble: no project AGENTS.md sits beside it.
 // Source problems are the Codex pass's to report, never repeated here.
 func renderOpenCodeMachineAgents(p source.Project, cfg config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
@@ -57,6 +57,7 @@ func renderOpenCodeMachineAgents(p source.Project, cfg config.Config) ([]artifac
 		ds = append(ds, diag.Diagnostic{Severity: diag.Warning, Message: fmt.Sprintf(f, args...)})
 	}
 	dir := MachineAgentsDir(p.Home)
+	known := knownMCPServers(nil, "", cfg.MCP)
 	for _, name := range p.Failed {
 		// An agent skipped for an error keeps its installed copy.
 		add(artifact.Artifact{Path: filepath.Join(dir, name+".md"), Kept: &artifact.SourceLink{Path: name}})
@@ -70,7 +71,7 @@ func renderOpenCodeMachineAgents(p source.Project, cfg config.Config) ([]artifac
 			Name: name, Path: a.Path, Generated: a.Generated, Global: true,
 			Marker: source.MachineMarkerSource(a.Path, p.AgentSourceDir, cfg.Machine.AgentMarkerDir),
 			Output: filepath.Join(dir, name+".md"),
-		}, a.Front, a.Body, map[string]string{}, cfg.OpenCode.ModelMap, nil, cfg.Rewrites, add, problem, warn, cfg)
+		}, a.Front, a.Body, map[string]string{}, cfg.OpenCode.ModelMap, known, cfg.Rewrites, add, problem, warn, cfg)
 	}
 	return outputs, ds
 }

@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/rezzminator/engine-sync/internal/config"
-	"github.com/rezzminator/engine-sync/internal/target/codex"
 )
 
 // The transcript verbs, the installer's own.
@@ -209,7 +208,7 @@ func (r *run) wireAgents() error {
 		return err
 	}
 	if r.options.Plan {
-		return r.retireMovedGeneratedStore(plan.Source.GeneratedDir)
+		return nil
 	}
 	agents.Source = plan.Source
 	agents.Mode = ModeBuild
@@ -228,13 +227,13 @@ func (r *run) wireAgents() error {
 		return fmt.Errorf("global agents: %s", strings.Join(result.Problems, "; "))
 	}
 	r.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
-	return r.retireMovedGeneratedStore(plan.Source.GeneratedDir)
+	return nil
 }
 
 // retireCodexRoles retires every role in registry not in keep that this compiler
-// provably wrote: a link into the retired generated store or the
-// in-clone twin, or a regular file carrying the generated marker.
-func (r *run) retireCodexRoles(registry, generated, legacyDir string, keep map[string]bool) error {
+// provably wrote: a link to the in-clone twin, or a regular file carrying the
+// generated marker.
+func (r *run) retireCodexRoles(registry, legacyDir string, keep map[string]bool) error {
 	entries, err := os.ReadDir(registry)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("inspect Codex global agents registry %s: %w", registry, err)
@@ -263,14 +262,14 @@ func (r *run) retireCodexRoles(registry, generated, legacyDir string, keep map[s
 				target = filepath.Join(filepath.Dir(path), target)
 			}
 			target = filepath.Clean(target)
-			owned = within(target, generated) || target == filepath.Clean(filepath.Join(legacyDir, entry.Name()))
+			owned = target == filepath.Clean(filepath.Join(legacyDir, entry.Name()))
 		case info.Mode().IsRegular():
-			content, err := codex.ReadGlobalRoleFile(path)
+			content, err := reconciler.ReadGlobalRoleFile(path)
 			if err != nil {
 				r.skip(fmt.Sprintf("inspect Codex global agent %s: %v; preserved", path, err))
 				continue
 			}
-			owned = codex.GeneratedGlobalRole(content)
+			owned = reconciler.GeneratedGlobalRole(content)
 		}
 		if !owned {
 			continue
@@ -283,10 +282,13 @@ func (r *run) retireCodexRoles(registry, generated, legacyDir string, keep map[s
 }
 
 // retireOrphanGlobalAgents retires, in every Claude agents registry, a link
-// to a rendered variant no longer declared, then every rendered variant
+// to a generated agent no longer declared, then every generated agent
 // source nothing declares.
 func (r *run) retireOrphanGlobalAgents(model source.Project) error {
 	generatedDir := model.GeneratedDir
+	if generatedDir == "" {
+		return nil // no machine.sourceGeneratedAgentsDir: nothing renders, nothing to retire
+	}
 	keep := make(map[string]bool, len(model.Agents))
 	for _, agent := range model.Agents {
 		if within(agent.Path, generatedDir) {
@@ -359,14 +361,14 @@ func (r *run) retireRenamedCodexAgents() error {
 	for _, home := range r.codexHomes() {
 		for _, name := range r.policy.Machine.RetiredAgents {
 			path := filepath.Join(home, "agents", name+".toml")
-			content, err := codex.ReadGlobalRoleFile(path)
+			content, err := reconciler.ReadGlobalRoleFile(path)
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			if err != nil {
 				return fmt.Errorf("read retired Codex agent %s: %w", path, err)
 			}
-			if !codex.GeneratedGlobalRole(content) {
+			if !reconciler.GeneratedGlobalRole(content) {
 				r.skip(path + " is not a generated agent; preserved")
 				continue
 			}
@@ -400,8 +402,8 @@ func (r *run) retireConfiguredFiles() error {
 	return nil
 }
 
-// unwireGeneratedAgents is uninstall's half: the rendered variant store, every
-// generated role in every Codex home, and the retired generated role store.
+// unwireGeneratedAgents is uninstall's half: every generated agent link and
+// every generated role in every Codex home.
 func (r *run) unwireGeneratedAgents() error {
 	for _, dir := range r.claudeConfigDirs() {
 		entries, e := os.ReadDir(filepath.Join(dir, "agents"))
@@ -428,20 +430,13 @@ func (r *run) unwireGeneratedAgents() error {
 		}
 	}
 
-	// A generated directory inside the source repository is the repository's;
-	// uninstall removes only the home store.
-	if err := r.removeDir(filepath.Join(r.options.Home, r.policy.Machine.GeneratedAgentsDir), "generated Claude agents directory"); err != nil {
-		return err
-	}
-	generated := filepath.Join(r.options.Home, r.policy.Machine.LegacyCodexAgentsDir)
+	// The generated directory is the source repository's; uninstall never
+	// removes it.
 	legacyDir := source.AgentsDirectory(r.options.Home, r.options.SourceRepo, r.policy)
 	for _, codexHome := range r.codexHomes() {
-		if err := r.retireCodexRoles(filepath.Join(codexHome, "agents"), generated, legacyDir, nil); err != nil {
+		if err := r.retireCodexRoles(filepath.Join(codexHome, "agents"), legacyDir, nil); err != nil {
 			return err
 		}
-	}
-	if err := r.removeDir(generated, "generated Codex agents directory"); err != nil {
-		return err
 	}
 	return r.retireOwnedEntries(opencode.MachineAgentsDir(r.options.Home), "uninstall OpenCode machine agent")
 }

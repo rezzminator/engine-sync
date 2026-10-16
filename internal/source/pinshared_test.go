@@ -9,7 +9,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 )
 
-func TestPinRefusesDriftingAnUnaskedVariantAndWritesThroughALink(t *testing.T) {
+func TestPinRefusesDriftingAnUnaskedDeclarationAndWritesThroughALink(t *testing.T) {
 	root := testjail.Scratch(t)
 	dir := filepath.Join(root, "agents")
 	shared := filepath.Join(root, "shared.md")
@@ -36,14 +36,14 @@ func TestPinRefusesDriftingAnUnaskedVariantAndWritesThroughALink(t *testing.T) {
 	if err := os.Symlink(shared, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PinGlobalAgentVariants(dir, []string{"shared/lane.md"}); err != nil {
+	if _, err := PinDeclarations(dir, []string{"shared/lane.md"}); err != nil {
 		t.Fatalf("pin shared file: %v", err)
 	}
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("link replaced: %v (%v)", info, err)
 	}
 	raw, err := os.ReadFile(shared)
-	if err != nil || !strings.Contains(string(raw), "pins:\n  Budget: "+variantPin("Spend little.")) {
+	if err != nil || !strings.Contains(string(raw), "pins:\n  Budget: "+pinBlock("Spend little.")) {
 		t.Fatalf("target = %q (%v)", raw, err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "lead.md"), []byte(agent("lead", "Spend nothing.")), 0o644); err != nil {
@@ -53,14 +53,14 @@ func TestPinRefusesDriftingAnUnaskedVariantAndWritesThroughALink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PinGlobalAgentVariants(dir, []string{"a"}); err == nil || !strings.Contains(err.Error(), `"b"`) || !strings.Contains(err.Error(), "SECTION-DRIFT") {
+	if _, err := PinDeclarations(dir, []string{"a"}); err == nil || !strings.Contains(err.Error(), `"b"`) || !strings.Contains(err.Error(), "SECTION-DRIFT") {
 		t.Fatalf("pin a = %v, want refusal naming b", err)
 	}
 	after, err := os.ReadFile(shared)
 	if err != nil || string(after) != string(before) {
 		t.Fatalf("refused pin changed target: %v", err)
 	}
-	if _, err := PinGlobalAgentVariants(dir, nil); err == nil || !strings.Contains(err.Error(), "pins differently") {
+	if _, err := PinDeclarations(dir, nil); err == nil || !strings.Contains(err.Error(), "pins differently") {
 		t.Fatalf("incompatible shared pins = %v", err)
 	}
 }
@@ -80,7 +80,7 @@ func TestPinIgnoresAnUnrelatedBrokenOriginal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	changes, err := PinGlobalAgentVariants(dir, nil)
+	changes, err := PinDeclarations(dir, nil)
 	if err != nil || len(changes) != 1 {
 		t.Fatalf("pin = %v (%v), want lead-pro's Budget pinned despite notes.md", changes, err)
 	}
@@ -107,8 +107,8 @@ func TestPinReportsWhatItWroteBeforeAFailedWrite(t *testing.T) {
 		}
 		return real(path, data, mode)
 	}
-	changes, err := PinGlobalAgentVariants(dir, nil)
-	if err == nil || len(changes) != 1 || changes[0].Variant != "a-pro" {
+	changes, err := PinDeclarations(dir, nil)
+	if err == nil || len(changes) != 1 || changes[0].Declaration != "a-pro" {
 		t.Fatalf("pin = %v (%v), want a-pro's pin reported with b-pro's write error", changes, err)
 	}
 }
