@@ -1,4 +1,6 @@
-import pathlib,tempfile,subprocess,json,os
+import pathlib,tempfile,subprocess,json,os,shutil
+real_git=shutil.which('git')
+original_path=os.environ['PATH']
 script=pathlib.Path(__file__).with_name('check-tree.py').resolve()
 with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR', '/tmp')) as tmp:
  from tree_test_fixture import git_enumerator
@@ -60,4 +62,24 @@ with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR', '/tmp')) as tmp2:
  probe="import pathlib,runpy,sys\nreal=pathlib.Path.is_file\ndef is_file(self):\n if self.name=='leak-terms.txt':raise PermissionError(13,'Permission denied',str(self))\n return real(self)\npathlib.Path.is_file=is_file\nsys.argv=sys.argv[1:]\nrunpy.run_path(sys.argv[0],run_name='__main__')\n"
  r=subprocess.run(['python3','-c',probe,str(script),'--root',str(root),'--binary',str(schema),'--only','publication'],env=bare,capture_output=True,text=True)
  assert r.returncode==2 and 'CHECK publication ERROR' in r.stdout and 'Traceback' not in r.stderr,('an unprobeable default terms file escaped as a traceback',r.returncode,r.stdout,r.stderr)
-print('GATE REGRESSIONS PASS — empty source/registry, version, standalone surface, malformed measure, UTF-8, publication input, unsupplied terms gap, gap under measure, gap with error, unprobeable default')
+# Adding an empty baseline must work against a valid older tree without that check.
+# An unknown ref or new exemption must still fail rather than look like an empty tree.
+with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR', '/tmp')) as tmp3:
+ root=pathlib.Path(tmp3)
+ env=dict(os.environ,PATH=original_path,CHECK_TREE_BASE_REF='HEAD')
+ def git(*args):
+  return subprocess.run([real_git,*args],cwd=root,env=env,check=True,capture_output=True,text=True)
+ git('init','-q')
+ put('internal/seed/doc.go','// Package seed seeds a complete enumeration.\npackage seed\n')
+ git('add','internal/seed/doc.go')
+ git('-c','user.name=Fixture','-c','user.email=fixture@example.org','-c','commit.gpgsign=false','commit','-qm','fixture')
+ def baseline():
+  return subprocess.run(['python3',str(script),'--root',str(root),'--only','spelling-variant'],env=env,capture_output=True,text=True)
+ put('scripts/baselines/spelling-variant.txt','')
+ r=baseline();assert r.returncode==0 and 'CHECK spelling-variant PASS' in r.stdout,('new empty baseline rejected against older tree',r.returncode,r.stdout,r.stderr)
+ put('scripts/baselines/spelling-variant.txt','internal/source/variants.go\n')
+ r=baseline();assert r.returncode==2 and 'baseline growth against HEAD' in r.stdout,('new baseline allowed exemptions',r.returncode,r.stdout,r.stderr)
+ put('scripts/baselines/spelling-variant.txt','')
+ env['CHECK_TREE_BASE_REF']='no-such-ref'
+ r=baseline();assert r.returncode==2 and 'trusted baseline producer failed' in r.stdout,('invalid ref rendered as absent baseline',r.returncode,r.stdout,r.stderr)
+print('GATE REGRESSIONS PASS — empty source/registry, version, standalone surface, malformed measure, UTF-8, publication input, unsupplied terms gap, gap under measure, gap with error, unprobeable default, new empty baseline, baseline growth, invalid base ref')

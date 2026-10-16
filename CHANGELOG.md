@@ -4,17 +4,30 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-16
+
 ### Added
 
 - Plugin errors, warnings and meaningful info are bounded JSON rows in `errors.jsonl`, `warnings.jsonl` and `info.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` (default `~/.local/state/engine-sync/logs`). Capped files move to `.1`, and a failed logging streak reports once on stderr without changing command results.
 
 ### Fixed
 
+- A plain release check compares version places without comparing binary checksums; `--release` still rebuilds all four binaries and verifies the committed sums.
+- Publication without supplied private leak terms reports GAP, not success. Permission fixtures remain meaningful when tests run as root.
+- Newly introduced tree checks accept an empty baseline against an older release tree that lacks it, while rejecting new exemptions and failed Git enumeration.
+
 - Failed project `check` and `doctor` commands write error rows with their diagnostic cause and session.
 
 - The `build-warning` plugin-log row names its warnings in `detail.warnings` beside `detail.count`, instead of only counting them. A set too long for the 4096-byte row keeps as many whole warnings as fit, cuts the next one, and says so in `detail.truncated`, `detail.omitted` (warnings not shown) and `detail.cut`; the row is never dropped for its length.
 
 - A machine-global OpenCode agent keeps the `mcp__{server}__{tool}` grants of the servers the machine config names in `mcp.globalServers`: the machine path passed no known servers, so every such grant was dropped as an unknown server. A configured server name renders in OpenCode's tool-part charset (letters, digits, `_`, `-`; any other character becomes `_`), as a project server's does, so a dotted name grants and no configured name reaches an agent file raw. A tool of a server named nowhere, or of a retired one, is named in a warning and its server is denied outright (`{server}_*: false`): OpenCode enables a tool an agent's map leaves out. This changes the bytes of a machine-global OpenCode agent: each one now denies every configured global server it does not grant (`{server}_*: false`).
+
+### Changed
+
+- Global configuration now lives in `~/.claude/engine-sync.json`, with machine destinations under its `targets` object. Move keys from the former config and targets files into that file; an old file without its replacement is refused visibly, including under an absolute `XDG_CONFIG_HOME`.
+- Generated declarations require `machine.sourceGeneratedAgentsDir`; the home generated-agent store and its `machine.generatedAgentsDir` and `machine.legacyCodexAgentsDir` keys are retired. Shared files likewise require the source generated directory. Machine-only declaration controls in project agent files are refused.
+- Optional `machine.managedBy` stamps machine Codex roles and prompts and OpenCode agents and commands with `managed-by: {installer}` immediately after the generated header. This changes those output bytes when configured; machine doctor fails with `ORPHAN` for stamped files whose source is gone. Project mirrors and rendered Claude declarations remain unstamped.
+- Command references use `chat call` and the current chat and harvester MCP server names; configured rewrites determine the corresponding mirror bytes.
 
 ## [0.3.0] - 2026-10-12
 

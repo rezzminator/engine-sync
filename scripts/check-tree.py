@@ -175,9 +175,12 @@ for i in ids:
   try:old=set(baseline.read_text().splitlines())
   except (OSError,UnicodeError) as exc:error[i]=str(exc);old=set()
   if compare:
-   try:trusted=subprocess.run(['git','show',base_ref+':scripts/baselines/'+i+'.txt'],cwd=root,capture_output=True,text=True,timeout=10)
+   try:
+    path='scripts/baselines/'+i+'.txt'
+    entry=subprocess.run(['git','ls-tree',base_ref,'--',path],cwd=root,capture_output=True,text=True,timeout=10)
+    trusted=subprocess.run(['git','show',base_ref+':'+path],cwd=root,capture_output=True,text=True,timeout=10) if entry.returncode==0 and entry.stdout.strip() else entry
    except (OSError,UnicodeError,subprocess.TimeoutExpired) as exc:print('CHECK '+i+' ERROR trusted baseline producer: '+str(exc));sys.exit(2)
-   if trusted.returncode:error[i]='trusted baseline producer failed: '+base_ref
+   if trusted.returncode:error[i]='trusted baseline producer failed: '+base_ref+': '+trusted.stderr.strip()
    trusted_rows=set(trusted.stdout.splitlines())
    if trusted.returncode==0 and not i.startswith('size-') and old-trusted_rows:error[i]='baseline growth against '+base_ref+': '+', '.join(sorted(old-trusted_rows))
    if trusted.returncode==0 and i.startswith('size-'):
