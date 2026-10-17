@@ -203,8 +203,8 @@ func TestReviewRejectHomeAndCanonicalizeProject(t *testing.T) {
 			if c := dispatch([]string{"config", "validate", alias}, &cfgOut, &errOut, e); c != 0 || !strings.Contains(cfgOut.String(), root) {
 				t.Errorf("root differs: %d %s", c, &cfgOut)
 			}
-		} else if rc == 0 || !strings.Contains(errOut.String(), "project root") {
-			t.Errorf("unsafe root allowed rc=%d %s%s", rc, &out, &errOut)
+		} else if want := "project root " + path + " is HOME or an ancestor of HOME; select a repository"; rc != 1 || !strings.Contains(errOut.String(), want) {
+			t.Errorf("unsafe root: rc=%d stdout=%q stderr=%q, want exit 1 and %q", rc, &out, &errOut, want)
 		}
 	}
 }

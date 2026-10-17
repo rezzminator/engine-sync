@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+// ErrHomeRoot means the selected root is too broad to be a project.
+var ErrHomeRoot = errors.New("is HOME or an ancestor of HOME; select a repository")
+
+// ErrNoProjectRoot means discovery reached the filesystem root without a marker.
+var ErrNoProjectRoot = errors.New("no project root found (expected configured marker, .git or CLAUDE.md)")
+
 func ProjectRoot(root, home string) (string, error) {
 	physical, e := PhysicalPath(root)
 	if e != nil {
@@ -20,7 +26,7 @@ func ProjectRoot(root, home string) (string, error) {
 	}
 	rel, e := filepath.Rel(physical, h)
 	if e == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
-		return "", fmt.Errorf("project root %s is HOME or an ancestor of HOME; select a repository", physical)
+		return "", fmt.Errorf("project root %s %w", physical, ErrHomeRoot)
 	}
 	return physical, nil
 }
@@ -48,7 +54,7 @@ func DiscoverRoot(start, home, marker string) (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no project root found (expected configured marker, .git or CLAUDE.md)")
+			return "", ErrNoProjectRoot
 		}
 		dir = parent
 	}

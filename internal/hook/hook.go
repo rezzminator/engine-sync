@@ -105,6 +105,26 @@ func resolveProjectRoot(e Context, dir string, session bool) (string, error) {
 	}
 	return root, err
 }
+
+// noProjectRoot accepts only absence errors. A policy failure joined with
+// absence must still be reported, rather than hidden by errors.Is on the join.
+func noProjectRoot(err error) bool {
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := wrapped.Unwrap()
+		for _, cause := range causes {
+			if !noProjectRoot(cause) {
+				return false
+			}
+		}
+		return len(causes) != 0
+	case interface{ Unwrap() error }:
+		return noProjectRoot(wrapped.Unwrap())
+	default:
+		return errors.Is(err, paths.ErrHomeRoot) || errors.Is(err, paths.ErrNoProjectRoot)
+	}
+}
+
 func hookNotice(stdout, stderr io.Writer, message string) {
 	fmt.Fprintln(stderr, message)
 	if stdout != nil {
@@ -172,6 +192,9 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 		return 0
 	}
 	root, rootErr := resolveProjectRoot(e, filepath.Dir(path), false)
+	if noProjectRoot(rootErr) {
+		return 0
+	}
 	if rootErr != nil {
 		recordHook(e, stderr, "hook-step-failed", "Mark", rootErr.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude mark: %v\n", rootErr)
@@ -237,6 +260,9 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 		return 0
 	}
 	root, rootErr := resolveProjectRoot(e, cwd, true)
+	if noProjectRoot(rootErr) {
+		return 0
+	}
 	if rootErr != nil {
 		notice("hook-step-failed", "engine-sync hook claude stop: "+rootErr.Error())
 		return 0
@@ -333,6 +359,11 @@ func Start(stderr io.Writer, e Context, runner StageRunner) int {
 		return 0
 	}
 	root, rootErr := resolveProjectRoot(e, cwd, true)
+	// No project skips only the project refresh; the machine refresh below
+	// does not depend on one.
+	if noProjectRoot(rootErr) {
+		root, rootErr = "", nil
+	}
 	if rootErr != nil {
 		recordHook(e, stderr, "hook-step-failed", "Start", rootErr.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude start: %v\n", rootErr)

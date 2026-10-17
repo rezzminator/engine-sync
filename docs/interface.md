@@ -268,7 +268,9 @@ Writer records and locks live under `{engine-sync state}/writers/`. A root writt
 
 `hook claude mark|stop|start` reads a hook JSON payload on stdin. Scope is a project having a new or legacy configuration, or an output carrying a recognized generated marker. Registered hooks and the wrapper exit 0; direct CLI usage errors exit 2; runtime failures appear in diagnostics or the hook response.
 
-`mark` handles `tool_input.file_path` under a `.claude` directory, a `CLAUDE.md`, a `.mcp.json`, or the home's global commands. Root is the physical session root for sources inside it, otherwise the edited file's nearest configured marker, `.git`, or regular `CLAUDE.md`. A second project is marked independently; HOME and its ancestors are refused. It sets `{engine-sync state}/dirty/{project}-{key}`.
+All three hooks treat root resolution to HOME or an ancestor (`paths.ErrHomeRoot`), or discovery finding no project (`paths.ErrNoProjectRoot`), as no project: exit 0, empty stdout and stderr, no error or warning log rows, and no project refresh; `start` still runs its machine refresh. Other root failures, including a policy error joined with a no-project error, retain their diagnostics and error rows; `stop` also emits a `systemMessage`. CLI commands still refuse HOME and its ancestors with the same errors and exit codes.
+
+`mark` handles `tool_input.file_path` under a `.claude` directory, a `CLAUDE.md`, a `.mcp.json`, or the home's global commands. Root is the physical session root for sources inside it, otherwise the edited file's nearest configured marker, `.git`, or regular `CLAUDE.md`. A second project is marked independently. It sets `{engine-sync state}/dirty/{project}-{key}`.
 
 `stop` keeps its dirty flag durable while running build/check for each registered target. Success clears only the unchanged generation, under the dirty-store lock, preserving concurrent marks and process termination. Failure retains dirtiness and prints `{"decision":"block","reason":"…"}`; with `stop_hook_active`, prints `{"systemMessage":"…"}`. Reasons name the failed stages, binary and neutral repair commands.
 
