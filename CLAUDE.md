@@ -16,7 +16,7 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 - machine scope: the machine-level Codex roles, Claude agent links and both targets' commands, with their retirements and `doctor --machine` rows, where an owned undeclared file marked by `machine.managedBy` fails `ORPHAN` · `internal/machine/`
 - version guard: the per-root writer record and lock; an older binary refuses a root a newer one wrote (`NEWER-WRITER`) · `internal/guard/`, records under `{engine-sync state}/writers/`
 - `{engine-sync home}`: `$ENGINE_SYNC_HOME`, else `$XDG_DATA_HOME/engine-sync`, else `~/.local/share/engine-sync`; holds `versions/{version}/engine-sync` and the stable link `bin/engine-sync` · `internal/paths/paths.go`
-- `{engine-sync state}`: `$ENGINE_SYNC_STATE`, else `$XDG_STATE_HOME/engine-sync`, else `~/.local/state/engine-sync`; writer records, locks, dirty flags
+- `{engine-sync state}`: `$ENGINE_SYNC_STATE`, else `$XDG_STATE_HOME/engine-sync`, else `~/.local/state/engine-sync`; writer records, locks, dirty flags, link and write receipts
 - `targets`: the Codex homes and Claude config dirs `global` writes, plus the source clone and capabilities · the `targets` object of `~/.claude/engine-sync.json`
 - plugin: what installs into Claude Code · `plugins/engine-sync/`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`

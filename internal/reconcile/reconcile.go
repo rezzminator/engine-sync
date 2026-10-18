@@ -227,6 +227,11 @@ func FileArtifact(result *Result, output artifact.Artifact, mode Mode, owns func
 	modeOnlyDrift := current == string(output.Content) && regular && haveMode != wantMode
 	if current == string(output.Content) && !modeOnlyDrift {
 		result.Unchanged++
+		// A build vouches for a file already right, so the next source edit's
+		// regeneration is told apart from a hand edit. Check and plan stay read-only.
+		if mode == Build && regular && output.Kind != artifact.Region && !wroteContent(output.Path, output.Content) {
+			_ = recordWrite(output.Path, output.Content)
+		}
 		return
 	}
 	if exists && output.Kind != artifact.Region {
@@ -264,12 +269,18 @@ func FileArtifact(result *Result, output artifact.Artifact, mode Mode, owns func
 		result.Wrote++
 		return
 	}
-	if regular && output.Kind != artifact.Region {
+	// Content engine-sync wrote itself is replaced because its source changed;
+	// only content it did not write can be someone's direct edit.
+	if regular && output.Kind != artifact.Region && !wroteContent(output.Path, []byte(current)) {
 		result.Warnings = append(result.Warnings, "replacing changed generated output "+output.Path+"; direct edits are discarded; edit its source")
 	}
 	if err := atomicfile.Write(output.Path, output.Content, wantMode); err != nil {
 		result.Problems = append(result.Problems, fmt.Sprintf("write %s: %v", output.Path, err))
 		return
+	}
+	if output.Kind != artifact.Region {
+		// Advisory: a lost receipt costs one later warning, never a failed build.
+		_ = recordWrite(output.Path, output.Content)
 	}
 	result.Actions = append(result.Actions, Action{Kind: actionWrite, Path: output.Path})
 	result.Wrote++

@@ -4,6 +4,10 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+### Fixed
+
+- `build` no longer warns `replacing changed generated output` when it regenerates a file from an edited source: it records the digest of each generated file it writes under `{engine-sync state}/writes/`, and names a replaced file only when its content is not what it last wrote (a direct edit) or no record exists. A file already right is recorded by the next `build`, so one warning can still appear per file the first time its source changes after upgrading from a binary that kept no record.
+
 ## [0.4.0] - 2026-10-16
 
 ### Added
