@@ -62,6 +62,6 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 ## Plugin
 
-- `plugins/engine-sync/` holds only what installs: manifest, hooks, wrapper, checksums, README and LICENSE; implementation source stays outside it.
+- `plugins/engine-sync/` holds only what installs: manifest, hooks, wrapper, checksums, README, LICENSE and SECURITY.md; implementation source stays outside it.
 - A hook never fails a turn by its exit code: every hook exits 0; a failing stage answers a `Stop` block or a `systemMessage`.
 - Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest and the marketplace.
