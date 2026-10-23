@@ -2,7 +2,7 @@
 
 **Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
 
-[![CI](https://github.com/rezzminator/engine-sync/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/rezzminator/engine-sync/actions/workflows/ci.yml)
+[![CI](https://github.com/rezzminator/engine-sync/actions/workflows/release.yml/badge.svg?branch=develop)](https://github.com/rezzminator/engine-sync/actions/workflows/release.yml)
 [![Version](https://img.shields.io/badge/version-0.4.1-blue)](./CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://docs.claude.com/en/docs/claude-code/plugins)
