@@ -44,7 +44,11 @@ func safeParents(path string, roots []artifact.Root) error {
 	}
 	return nil
 }
-func receiptPath(path string) (string, error) {
+func receiptPath(path string) (string, error) { return receiptIn("links", path) }
+
+// receiptIn is the state file proving what engine-sync recorded for path: the
+// link target under "links", the content digest under "writes".
+func receiptIn(kind, path string) (string, error) {
 	home, e := paths.Home()
 	if e != nil {
 		return "", e
@@ -54,7 +58,7 @@ func receiptPath(path string) (string, error) {
 		return "", e
 	}
 	sum := sha256.Sum256([]byte(filepath.Join(p, filepath.Base(path))))
-	return filepath.Join(paths.EngineSyncState(paths.Getenv, home), "links", hex.EncodeToString(sum[:])+".json"), nil
+	return filepath.Join(paths.EngineSyncState(paths.Getenv, home), kind, hex.EncodeToString(sum[:])+".json"), nil
 }
 func recordLink(path, target string) error {
 	p, e := receiptPath(path)
@@ -67,6 +71,31 @@ func recordLink(path, target string) error {
 	}
 	return atomicfile.Write(p, raw, 0600)
 }
+func digest(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
+// recordWrite remembers the digest of the content engine-sync last put at path.
+func recordWrite(path string, content []byte) error {
+	p, e := receiptIn("writes", path)
+	if e != nil {
+		return e
+	}
+	return atomicfile.Write(p, []byte(digest(content)), 0600)
+}
+
+// wroteContent reports whether content is byte-for-byte what engine-sync last
+// wrote at path. An absent, unreadable or unparsable receipt answers no.
+func wroteContent(path string, content []byte) bool {
+	p, e := receiptIn("writes", path)
+	if e != nil {
+		return false
+	}
+	raw, e := paths.ReadRegular(p)
+	return e == nil && string(raw) == digest(content)
+}
+
 func ownedLink(path, target string) (bool, error) {
 	p, e := receiptPath(path)
 	if e != nil {

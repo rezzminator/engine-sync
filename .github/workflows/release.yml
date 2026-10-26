@@ -1,49 +1,120 @@
 name: release
 
+# Releasing is merging the develop -> main pull request: its PR jobs run every
+# check (`make release-check` runs the same ones locally), and the merge tags
+# v{version} and publishes. No tag is pushed by hand.
 on:
-  push:
-    tags: ['v*']
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  version-proof:
+  check:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: install Claude Code
+        run: |
+          version=$(awk '$1 == "claude-code" { print $2 }' scripts/tool-versions.txt)
+          npm install -g @anthropic-ai/claude-code@"$version"
+      - name: gofmt, vet, staticcheck, tree gate tests, test, validate the marketplace and the plugin
+        run: make check
+      - name: compiler tree
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          LEAK_TERMS_CONTENT: ${{ secrets.LEAK_TERMS }}
+          CHECK_TREE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
+          LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt" make tree
+      - name: public compiler tree on fork pull requests
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: make tree-public
+      - name: leak gate
+        # A fork's pull request gets no secrets; a maintainer runs the gate before merging.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          LEAK_TERMS_CONTENT: ${{ secrets.LEAK_TERMS }}
+        run: |
+          printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
+          LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt" make leak
+
+  release-version:
+    if: github.event.action != 'closed'
     strategy:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       - name: execute native release asset and verify its version
-        run: scripts/build-release.sh --native-only --out "$RUNNER_TEMP/release"
+        run: make release-version
+
   release:
-    needs: version-proof
+    name: release
+    # always(): a skipped required check counts as passed, so a failed native proof must fail `release` itself.
+    needs: release-version
+    if: always() && github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: every native release-version leg passed
+        if: needs.release-version.result != 'success'
+        run: |
+          echo "::error::release-version finished '${{ needs.release-version.result }}'; the native release proof must pass before a release"
+          exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: the tagged commit is on main
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - name: the tag names plugin.json's version
+      - name: the version moved past main's, every version place agrees, the committed sums match a fresh build, the changelog yields notes
+        run: make release
+
+  publish:
+    name: publish
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: the tag is new
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          manifest="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' plugins/engine-sync/.claude-plugin/plugin.json | head -n 1 | sed 's/^"version"[[:space:]]*:[[:space:]]*"//; s/"$//')"
-          if [ "$version" != "$manifest" ]; then
-            echo "tag $GITHUB_REF_NAME names $version, plugin.json says $manifest" >&2
+          version="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' plugins/engine-sync/.claude-plugin/plugin.json | head -n 1 | sed 's/^"version"[[:space:]]*:[[:space:]]*"//; s/"$//')"
+          [ -n "$version" ] || { echo "::error::no version in plugins/engine-sync/.claude-plugin/plugin.json"; exit 1; }
+          tag="v$version"
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::tag $tag already exists"
+            exit 1
+          elif [ "$rc" -ne 2 ]; then
+            echo "::error::could not look up tag $tag (git ls-remote exit $rc)"
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
-      - name: every version place agrees and the committed sums match a fresh build
-        run: scripts/release-check.sh --release
+          echo "TAG=$tag" >> "$GITHUB_ENV"
       - name: build the four assets
         run: scripts/build-release.sh
       - name: release notes from the changelog
@@ -54,5 +125,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/engine-sync_* dist/SHA256SUMS \
-            --title "engine-sync $VERSION" --notes-file notes.md --verify-tag
+          gh release create "$TAG" dist/engine-sync_* dist/SHA256SUMS \
+            --target "${{ github.event.pull_request.merge_commit_sha }}" \
+            --title "engine-sync $VERSION" --notes-file notes.md

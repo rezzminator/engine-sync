@@ -17,7 +17,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 
 ## Binary and exits
 
-Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.5.0-alpha` for development, the plugin manifest version for release assets.
+Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.6.0-alpha` for development, the plugin manifest version for release assets.
 
 Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error or a configuration refusal (§ Policy resolution and schemas). Hooks preserve the hook protocol described below. `--json` prints exactly one stdout object for exits 0 and 1 and for a configuration refusal; usage errors print no JSON. Legacy-config deprecation notices go to stderr even with `--json`.
 
@@ -64,7 +64,7 @@ Project commands also accept `--engine codex|opencode`; the neutral selection ru
 
 One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `~/.claude/engine-sync.json` (the global file) < `{project}/.claude/engine-sync.json` < environment < flags. The global file is `{home}/.claude/engine-sync.json`, `{home}` being `--home` or `$HOME`; no environment variable moves it. A project rooted at the home shares it. Maps merge by key, lists replace, and scalars replace. In `opencode.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine` or `targets`: either is refused naming the key and the file, exit 2. A removed key, a malformed `machine.managedBy` and an old config path are refused the same way. When the global file is absent and `config.json` or `targets.json` exists in `{home}/.config/engine-sync/` or, with an absolute `XDG_CONFIG_HOME`, in `$XDG_CONFIG_HOME/engine-sync/`, every command exits 2 with `engine-sync: {old path} is no longer read; move its keys into {home}/.claude/engine-sync.json` (for `targets.json`, `… under "targets" in …`).
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.5.0-alpha`; released assets report the plugin manifest version.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.6.0-alpha`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .
@@ -90,8 +90,8 @@ engine-sync config schema
 | `codex.rootAdapter` | `Go template (text below)` | Go template appended to the generated root orientation. |
 | `codex.agentPreamble` | `Go template (text below)` | Go template prepended to project role instructions. |
 | `codex.excludeDirs` | `[]` | Source command subtrees excluded from discovery. |
-| `codex.projects` | `Automatic discovery` | Omitted: discover children; explicit empty list: root only. |
-| `codex.excludeProjects` | `[]` | Child project names excluded from automatic discovery. |
+| `codex.projects` | `Automatic discovery` | Omitted: discover direct children; explicit empty list: root only. A listed project is a relative path of any depth (`src/api`) whose directory resolves below the root and holds a regular `CLAUDE.md`; it gets its own `AGENTS.md`. |
+| `codex.excludeProjects` | `[]` | Child project paths excluded from discovery and from `codex.projects`; an entry also excludes every project below it. |
 | `codex.neverRegister` | `[]` | Role basenames omitted from native role registration. |
 | `codex.suffixMode` | `"project"` | Role naming: an agent's frontmatter `name`, suffixed in a nested project by project, none, or strip-prefix. |
 | `codex.suffixPrefix` | `""` | Prefix removed in strip-prefix mode. |
@@ -135,7 +135,7 @@ A project example:
 {"version":1,"codex":{"modelMap":{"smart":"example-model"},"agentPreamble":"Role {{.Name}} in {{.Engine}}. Read {{.Root}}.\n\n"},"opencode":{"permission":{"*":"allow","edit":{"private/**":"deny"}}},"mcp":{"globalServers":[],"renamed":{"old-tools":"tools"}},"rewrites":[{"engines":["codex"],"kinds":["agent"],"literal":"old protocol","replace":"current protocol"}],"workbenchMarker":""}
 ```
 
-Each rewrite has `engines` and `kinds` lists (empty or omitted means all), a nonempty `literal`, and `replace`. Kinds are `agent`, `command`, `skill`, and `orientation`; links carry no emitted body to rewrite. Rewrites apply after built-in rules, in declaration order.
+Each rewrite has `engines` and `kinds` lists (empty or omitted means all), a nonempty `literal`, and `replace`. Kinds are `agent`, `agent-tools`, `command`, `skill`, and `orientation`; links carry no emitted body to rewrite. Rewrites apply after built-in rules, in declaration order. OpenCode agent tool allowlists receive a separate `agent-tools` rewrite before their Claude MCP names are parsed into native permissions; keep replacements in `mcp__server__tool` form for that mapping, and use `agent` or `command` rewrites separately when prose needs engine-native tool names.
 
 A machine example:
 
@@ -262,13 +262,15 @@ Current markers are rendered by `internal/artifact/marker.go`: `Generated by eng
 
 Complete historical compiler headers remain ownership evidence; a quoted or partial marker does not. Links require a receipt proving engine-sync created that exact link; location or byte equality alone does not establish ownership. Old Codex MCP begin fences are recognized and replaced too. Global role ownership is anchored to its first line. Rebuild migrates old owned files in place; unmarked foreign files remain conflicts.
 
-Writer records and locks live under `{engine-sync state}/writers/`. A root written by a newer binary refuses an older writer with `NEWER-WRITER`. Global writes use the `global:{home}` root.
+Writer records and locks live under `{engine-sync state}/writers/`. A root written by a newer binary refuses an older writer with `NEWER-WRITER`. Global writes use the `global:{home}` root. Write receipts under `{engine-sync state}/writes/` hold the digest of the content `build` last wrote to each generated file: `build` names a replaced file in a `replacing changed generated output` warning only when its content differs from that digest or no receipt exists, so a source edit's regeneration is silent and a direct edit is named. `check` and `plan` write no receipt.
 
 ## Claude hooks
 
 `hook claude mark|stop|start` reads a hook JSON payload on stdin. Scope is a project having a new or legacy configuration, or an output carrying a recognized generated marker. Registered hooks and the wrapper exit 0; direct CLI usage errors exit 2; runtime failures appear in diagnostics or the hook response.
 
-`mark` handles `tool_input.file_path` under a `.claude` directory, a `CLAUDE.md`, a `.mcp.json`, or the home's global commands. Root is the physical session root for sources inside it, otherwise the edited file's nearest configured marker, `.git`, or regular `CLAUDE.md`. A second project is marked independently; HOME and its ancestors are refused. It sets `{engine-sync state}/dirty/{project}-{key}`.
+All three hooks treat root resolution to HOME or an ancestor (`paths.ErrHomeRoot`), or discovery finding no project (`paths.ErrNoProjectRoot`), as no project: exit 0, empty stdout and stderr, no error or warning log rows, and no project refresh; `start` still runs its machine refresh. Other root failures, including a policy error joined with a no-project error, retain their diagnostics and error rows; `stop` also emits a `systemMessage`. CLI commands still refuse HOME and its ancestors with the same errors and exit codes.
+
+`mark` handles `tool_input.file_path` under a `.claude` directory, a `CLAUDE.md`, a `.mcp.json`, or the home's global commands. Root is the physical session root for sources inside it, otherwise the edited file's nearest configured marker, `.git`, or regular `CLAUDE.md`. A second project is marked independently. It sets `{engine-sync state}/dirty/{project}-{key}`.
 
 `stop` keeps its dirty flag durable while running build/check for each registered target. Success clears only the unchanged generation, under the dirty-store lock, preserving concurrent marks and process termination. Failure retains dirtiness and prints `{"decision":"block","reason":"…"}`; with `stop_hook_active`, prints `{"systemMessage":"…"}`. Reasons name the failed stages, binary and neutral repair commands.
 

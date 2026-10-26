@@ -4,6 +4,19 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
+### Added
+
+- `codex.projects` and `codex.excludeProjects` accept a relative path of any depth, such as `src/api`, so a nested `CLAUDE.md` gets its own generated `AGENTS.md`, which `check` verifies; a nested project's roles take the path as their suffix (`clerk-src-api`). An absolute path, a `..` component, a project directory whose symlinks resolve outside the root, and a directory without a regular `CLAUDE.md` are refused with an error naming the entry.
+
+### Fixed
+
+- `build` no longer warns `replacing changed generated output` when it regenerates a file from an edited source: it records the digest of each generated file it writes under `{engine-sync state}/writes/`, and names a replaced file only when its content is not what it last wrote (a direct edit) or no record exists. A file already right is recorded by the next `build`, so one warning can still appear per file the first time its source changes after upgrading from a binary that kept no record.
+- An OpenCode agent's `tools` list gets the configured rewrites, as the rest of its rendered fields already did, so a rewritten tool name no longer reaches `.opencode/agent/*.md` under its Claude spelling. Affected mirrors change bytes at the next `build`.
+- The hooks stay silent in a chat with no project: a session rooted at `HOME` or one of its ancestors, or with no project found, no longer prints `project root … is HOME or an ancestor of HOME` on every `Stop` nor writes an error row per hook. `start` still runs its machine refresh, and the CLI still refuses `HOME`.
+- The plugin ships `SECURITY.md`.
+
 ## [0.4.0] - 2026-10-16
 
 ### Added

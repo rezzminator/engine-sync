@@ -377,7 +377,14 @@ func Validate(cfg Config) error {
 			return err
 		}
 	}
-	for key, values := range map[string][]string{"codex.projects": cfg.Codex.Projects, "codex.neverRegister": cfg.Codex.NeverRegister, "codex.excludeProjects": cfg.Codex.ExcludeProjects, "machine.retiredAgents": cfg.Machine.RetiredAgents} {
+	for key, values := range map[string][]string{"codex.projects": cfg.Codex.Projects, "codex.excludeProjects": cfg.Codex.ExcludeProjects} {
+		for _, value := range values {
+			if err := RelativePath(value, key); err != nil {
+				return err
+			}
+		}
+	}
+	for key, values := range map[string][]string{"codex.neverRegister": cfg.Codex.NeverRegister, "machine.retiredAgents": cfg.Machine.RetiredAgents} {
 		for _, value := range values {
 			if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "/\\ \t\n") || value == "." || value == ".." {
 				return fmt.Errorf("%s: invalid name %q", key, value)

@@ -194,6 +194,9 @@ func renderOpenCodeAgent(
 		}
 	}
 	if tools, ok := front.Fields["tools"]; ok {
+		toolsContext := ctx
+		toolsContext.Kind = "agent-tools"
+		tools = rewrite.Configured(rewrites).Apply(tools, toolsContext)
 		toolsBlock, toolsWarnings, toolsErr := renderOpenCodeToolsBlock(spec.Path, tools, knownServers, policy.MCP)
 		if toolsErr != nil {
 			skip("tools %s: %v", spec.Path, toolsErr)

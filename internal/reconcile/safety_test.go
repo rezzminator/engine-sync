@@ -213,6 +213,80 @@ func TestReviewRebuildNamesReplacedGeneratedContent(t *testing.T) {
 	}
 }
 
+// A source edit changes the render of a file engine-sync itself wrote; that
+// regeneration is the normal path and stays silent. Only content engine-sync
+// did not write (a hand edit, a file from before receipts) is named.
+func TestRebuildWarnsOnlyForContentEngineSyncDidNotWrite(t *testing.T) {
+	render := func(path, body string) []artifact.Artifact {
+		return []artifact.Artifact{{Path: path, Content: []byte(artifact.Marker(artifact.TOML, "source") + "\n" + body)}}
+	}
+	build := func(root, path, body string, mode reconcile.Mode) reconcile.Result {
+		return reconcile.Run(render(path, body), mode, []artifact.Root{{Path: root}})
+	}
+	read := func(path string) string {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	t.Run("source edit after engine-sync wrote the file", func(t *testing.T) {
+		root := testjail.Scratch(t)
+		path := filepath.Join(root, "role.toml")
+		if first := build(root, path, "one", reconcile.Build); len(first.Warnings) != 0 || first.Wrote != 1 {
+			t.Fatalf("creating the file: %+v", first)
+		}
+		second := build(root, path, "two", reconcile.Build)
+		if len(second.Warnings) != 0 || second.Wrote != 1 || !strings.HasSuffix(read(path), "two") {
+			t.Fatalf("source edit warned or did not write: %+v", second)
+		}
+	})
+	t.Run("hand edit after engine-sync wrote the file", func(t *testing.T) {
+		root := testjail.Scratch(t)
+		path := filepath.Join(root, "role.toml")
+		build(root, path, "one", reconcile.Build)
+		if err := os.WriteFile(path, []byte(read(path)+"\nhand edited"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		result := build(root, path, "two", reconcile.Build)
+		if !strings.Contains(strings.Join(result.Warnings, ";"), path) || !strings.HasSuffix(read(path), "two") {
+			t.Fatalf("hand edit not named or not replaced: %+v", result)
+		}
+	})
+	t.Run("a build backfills the receipt of an unchanged file", func(t *testing.T) {
+		root := testjail.Scratch(t)
+		path := filepath.Join(root, "role.toml")
+		if err := os.WriteFile(path, render(path, "one")[0].Content, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if unchanged := build(root, path, "one", reconcile.Build); unchanged.Unchanged != 1 {
+			t.Fatalf("file not unchanged: %+v", unchanged)
+		}
+		if result := build(root, path, "two", reconcile.Build); len(result.Warnings) != 0 {
+			t.Fatalf("source edit after a backfilled receipt warned: %+v", result)
+		}
+	})
+	t.Run("check and plan record nothing", func(t *testing.T) {
+		root := testjail.Scratch(t)
+		path := filepath.Join(root, "role.toml")
+		if err := os.WriteFile(path, render(path, "one")[0].Content, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0644); err != nil {
+			t.Fatal(err)
+		}
+		build(root, path, "one", reconcile.Check)
+		build(root, path, "one", reconcile.Plan)
+		if result := build(root, path, "two", reconcile.Build); !strings.Contains(strings.Join(result.Warnings, ";"), path) {
+			t.Fatalf("a read-only mode left a receipt: %+v", result)
+		}
+	})
+}
+
 func TestAuditContainedKeeperAndRetirement(t *testing.T) {
 	root := testjail.Scratch(t)
 	target := filepath.Join(root, "keeper.toml")

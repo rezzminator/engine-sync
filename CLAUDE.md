@@ -16,7 +16,7 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 - machine scope: the machine-level Codex roles, Claude agent links and both targets' commands, with their retirements and `doctor --machine` rows, where an owned undeclared file marked by `machine.managedBy` fails `ORPHAN` · `internal/machine/`
 - version guard: the per-root writer record and lock; an older binary refuses a root a newer one wrote (`NEWER-WRITER`) · `internal/guard/`, records under `{engine-sync state}/writers/`
 - `{engine-sync home}`: `$ENGINE_SYNC_HOME`, else `$XDG_DATA_HOME/engine-sync`, else `~/.local/share/engine-sync`; holds `versions/{version}/engine-sync` and the stable link `bin/engine-sync` · `internal/paths/paths.go`
-- `{engine-sync state}`: `$ENGINE_SYNC_STATE`, else `$XDG_STATE_HOME/engine-sync`, else `~/.local/state/engine-sync`; writer records, locks, dirty flags
+- `{engine-sync state}`: `$ENGINE_SYNC_STATE`, else `$XDG_STATE_HOME/engine-sync`, else `~/.local/state/engine-sync`; writer records, locks, dirty flags, link and write receipts
 - `targets`: the Codex homes and Claude config dirs `global` writes, plus the source clone and capabilities · the `targets` object of `~/.claude/engine-sync.json`
 - plugin: what installs into Claude Code · `plugins/engine-sync/`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
@@ -40,11 +40,12 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 - Leak gate: `scripts/leak-check.sh`; in a worktree, `LEAK_TERMS={checkout}/scripts/leak-terms.txt scripts/leak-check.sh`.
 - Fence: a parent project's dev container that mounts this checkout may export that project's own terms as `LEAK_TERMS`; there, set it inline to `{checkout}/scripts/leak-terms.txt` for the tree and leak gates, else they scan against the wrong denylist.
 - Validate: `claude plugin validate --strict .` (the marketplace) and `claude plugin validate --strict plugins/engine-sync` (the plugin)
+- Release check: `make release-check`, after `git fetch origin main`, runs every check the release pull request runs: `make check`, `make tree`, `make leak`, `make release-version`, `make release`; `make release` fails on `develop` between releases by design (undated heading, stale `SHA256SUMS`).
 - Scratch: `/tmp/engine-sync/{purpose}/`
 
 ## CI
 
-- `.github/workflows/ci.yml` on every push to `{develop|main}` and every pull request: gofmt, vet, pinned staticcheck, tree gates, tests, both validates, the leak gate. Fork pull requests run the public gates; private leak terms are available only to trusted runs.
+- `.github/workflows/release.yml` on every pull request to `main`, never on a push: `check` (gofmt, vet, pinned staticcheck, tree gates, tests, both validates, the leak gate), `release-version` (the native release asset on each matrix runner prints the version) and `release` (the version moved past main's, `scripts/release-check.sh --release`, non-empty CHANGELOG notes), each a `make` target; merging it runs `publish`, which tags `v{version}` and publishes the four assets. Fork pull requests run the public gates; private leak terms are available only to trusted runs.
 
 # Rules
 
@@ -58,10 +59,14 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 ## Git
 
 - Git writes go through the `gitter` agent.
-- Work lands on `develop`; `main` moves only by release.
+- Work lands on `develop`; `develop` is protected by the ruleset `develop keeps its history`: never force-push or delete it.
+- `main` is protected by `main is release-only`: it moves only by merging the `develop` -> `main` pull request with a merge commit, after `check` and `release` pass; never a direct push, never an admin override.
+- Every pull request merged into `main` publishes: its version moves past main's, and a pre-release version (`-dev.N`) is bumped to the real release version in that pull request.
+- Before opening it: `git fetch origin main`, then `make release-check` passes.
+- After the merge, the `publish` job tags `v{version}` on the merge commit and creates the GitHub release; nobody pushes a tag by hand.
 
 ## Plugin
 
-- `plugins/engine-sync/` holds only what installs: manifest, hooks, wrapper, checksums, README and LICENSE; implementation source stays outside it.
+- `plugins/engine-sync/` holds only what installs: manifest, hooks, wrapper, checksums, README, LICENSE and SECURITY.md; implementation source stays outside it.
 - A hook never fails a turn by its exit code: every hook exits 0; a failing stage answers a `Stop` block or a `systemMessage`.
 - Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest and the marketplace.

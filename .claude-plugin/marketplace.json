@@ -11,15 +11,15 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/engine-sync.git",
-        "path": "plugins/engine-sync",
+        "path": "./plugins/engine-sync",
         "ref": "main"
       },
       "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "license": "MIT",
       "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"],
       "author": {
-        "name": "Reza · Professor",
+        "name": "engine-sync maintainers",
         "url": "https://github.com/rezzminator/professor"
       }
     }
