@@ -4,6 +4,10 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+### Added
+
+- `codex.projects` and `codex.excludeProjects` accept a relative path of any depth, such as `src/api`, so a nested `CLAUDE.md` gets its own generated `AGENTS.md`, which `check` verifies; a nested project's roles take the path as their suffix (`clerk-src-api`). An absolute path, a `..` component, a project directory whose symlinks resolve outside the root, and a directory without a regular `CLAUDE.md` are refused with an error naming the entry.
+
 ### Fixed
 
 - `build` no longer warns `replacing changed generated output` when it regenerates a file from an edited source: it records the digest of each generated file it writes under `{engine-sync state}/writes/`, and names a replaced file only when its content is not what it last wrote (a direct edit) or no record exists. A file already right is recorded by the next `build`, so one warning can still appear per file the first time its source changes after upgrading from a binary that kept no record.

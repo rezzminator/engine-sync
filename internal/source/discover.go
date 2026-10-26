@@ -124,6 +124,14 @@ func Projects(root string, listed, excludes []string, report Reporter, markers .
 				}
 			}
 			if project != "." {
+				// A missing directory falls through to the CLAUDE.md check, which names it.
+				if inside, err := insideRoot(root, project); err != nil && !os.IsNotExist(err) {
+					report.Problem(fmt.Sprintf("listed project %s: %v", filepath.Join(root, project), err))
+					continue
+				} else if err == nil && !inside {
+					report.Problem(fmt.Sprintf("listed project %s: does not resolve below the root %s", filepath.Join(root, project), root))
+					continue
+				}
 				info, e := os.Stat(filepath.Join(root, project, "CLAUDE.md"))
 				if e != nil || !info.Mode().IsRegular() {
 					report.Problem(fmt.Sprintf("listed project %s: no regular CLAUDE.md (%v)", filepath.Join(root, project), e))
@@ -157,6 +165,23 @@ func Projects(root string, listed, excludes []string, report Reporter, markers .
 	}
 	sort.Strings(projects[1:])
 	return projects
+}
+
+// insideRoot reports whether root/project, every symlink resolved, stays below root.
+func insideRoot(root, project string) (bool, error) {
+	base, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false, err
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(root, project))
+	if err != nil {
+		return false, err
+	}
+	rel, err := filepath.Rel(base, resolved)
+	if err != nil {
+		return false, err
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
 }
 
 func HasOrientation(dir string) bool {

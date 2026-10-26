@@ -90,8 +90,8 @@ engine-sync config schema
 | `codex.rootAdapter` | `Go template (text below)` | Go template appended to the generated root orientation. |
 | `codex.agentPreamble` | `Go template (text below)` | Go template prepended to project role instructions. |
 | `codex.excludeDirs` | `[]` | Source command subtrees excluded from discovery. |
-| `codex.projects` | `Automatic discovery` | Omitted: discover children; explicit empty list: root only. |
-| `codex.excludeProjects` | `[]` | Child project names excluded from automatic discovery. |
+| `codex.projects` | `Automatic discovery` | Omitted: discover direct children; explicit empty list: root only. A listed project is a relative path of any depth (`src/api`) whose directory resolves below the root and holds a regular `CLAUDE.md`; it gets its own `AGENTS.md`. |
+| `codex.excludeProjects` | `[]` | Child project paths excluded from discovery and from `codex.projects`; an entry also excludes every project below it. |
 | `codex.neverRegister` | `[]` | Role basenames omitted from native role registration. |
 | `codex.suffixMode` | `"project"` | Role naming: an agent's frontmatter `name`, suffixed in a nested project by project, none, or strip-prefix. |
 | `codex.suffixPrefix` | `""` | Prefix removed in strip-prefix mode. |
