@@ -10,6 +10,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 - [Agent frontmatter](#agent-frontmatter)
 - [Declarations](#declarations)
 - [Global commands](#global-commands)
+- [Global rules](#global-rules)
 - [Machine targets](#machine-targets)
 - [Generated ownership](#generated-ownership)
 - [Claude hooks](#claude-hooks)
@@ -32,7 +33,7 @@ Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error
 | `codex` | `build`, `check`, `agents`; the existing Codex alias and role interface. |
 | `opencode` | `build`, `check`, `doctor`; the existing OpenCode alias. |
 | `config` | `show`, `validate`, `schema`; effective settings, validation and schema. |
-| `global` | Machine roles, OpenCode agents and commands; `--plan`, `--uninstall`, `--adopt`, `--capability NAME`, account flags. |
+| `global` | Machine roles, OpenCode agents and commands, always-on global rules; `--plan`, `--uninstall`, `--adopt`, `--capability NAME`, account flags. |
 | `variants` | `pin [name]…`; rewrite only the `pins:` block of source declarations or shared files (a shared file named by its path relative to the agents directory). |
 | `hook` | `claude mark`, `stop`, `start`; hook protocol on stdin/stdout. |
 | `version` | Print the binary version; `--version` is an alias. |
@@ -244,6 +245,19 @@ Machine doctor reports each declared agent once per engine registry as `agent {S
 
 `verb` is `change`, `retire`, `ok`, `skip`, or `conflict`; `path` appears only on retire. Conflicts clear `ok`; a plan continues listing them. Machine doctor JSON retains `ok` and `rows` and adds `configSources` with the same key/value/source rows as project doctor. Configuration failures print one object with `ok:false`, empty `rows` and `configSources`, and `error` naming the file and key. Row levels are `ok`, `warn`, `fail`, and a fail exits 1.
 
+## Global rules
+
+`global` reads the rules directory `{claude config dir}/rules` of the first Claude config dir: every `*.md` below it, links followed, in sorted relative-path order. A rule without `paths:` frontmatter is always-on; a rule with it is path-scoped and compiled for neither engine. A rule whose frontmatter does not parse is skipped, never treated as always-on, and so is a rule whose body holds either fence line below. A dangling link that is not a `.md` is passed over. An absent directory holds no rules; one that cannot be read, a rule that cannot, or a `{claude config dir}/commands` roster that cannot, fails the run and writes no rule.
+
+The compiled body is each always-on rule under its `<!-- rule: {rules dir}/{relative path} -->` line, its body given the same `/command` and model-name transform `CLAUDE.md` gets for `AGENTS.md`, rules joined by a blank line.
+
+- Codex: each Codex home's `AGENTS.md` carries the body between `<!-- BEGIN engine-sync rules — owned -->` and `<!-- END engine-sync rules — owned -->`. Text outside the fence is kept byte for byte; the block is appended when absent, after a blank line (on the next line when the file does not end in a newline), and replaced in place when present; removing a block that ends the file restores the bytes from before the append; a file is written only when its bytes differ, and created when absent. A symlinked or non-regular `AGENTS.md`, or a malformed fence, is refused.
+- OpenCode: the body, under a machine marker, is `{engine-sync home}/rules/global-always-on.md`, and that path is appended to the `instructions` array of `{home}/.config/opencode/opencode.jsonc` by a comment-preserving edit that leaves every other entry. `{engine-sync state}/opencode-instructions.json` records the entry as engine-sync's, written before the config; an entry the operator listed is never claimed or removed. `{home}/.config/opencode/AGENTS.md` is never written.
+
+No always-on rule, and `--uninstall`, remove the owned block (and an `AGENTS.md` it alone filled), the compiled file and the owned `instructions` entry, nothing else. `--plan` names each planned write and writes nothing.
+
+`doctor --machine` adds `global-rules` rows: `global-rules source={dir} always-on bytes={n}` (`ok`); one `RULE-FRONTMATTER {path}: {error}` or `RULE-FENCE {path}: …` `fail` row per skipped rule; a `global-rules /command roster: …` `warn` row per command link the roster skipped; `global-rules PATH-SCOPED {path} not delivered to Codex or OpenCode` (`warn`); `GLOBAL-BUDGET {bytes} > 8192 …` (`warn`) when the always-on body passes 8 KiB; then `global-rules codex {AGENTS.md} state=…`, `global-rules opencode {compiled file} state=…` and `global-rules opencode instructions entry {config} state=…`, each `ok`, `MISSING` or `STALE`, the Codex row also `SHADOWED` when an `AGENTS.override.md` in that home wins. A rules directory, command roster, file or config that cannot be read is a `global-rules ERROR …` `fail` row, never zero rules.
+
 ## Machine targets
 
 Contract path: the `targets` object of `{home}/.claude/engine-sync.json`.
@@ -258,7 +272,7 @@ OpenCode agents take `engines.opencode.model` as an explicit model and `engines.
 
 ## Generated ownership
 
-Current markers are rendered by `internal/artifact/marker.go`: `Generated by engine-sync from {source} — edit the source, then run: engine-sync build`, and `… then run: engine-sync global` on a machine render — a rendered declaration, a Codex global role and an OpenCode machine agent. Markdown uses an HTML comment, TOML and YAML frontmatter use `#`, and JSONC uses `//`. Codex MCP fences begin `# BEGIN mcp_servers — generated by .claude/scripts/build-codex.mjs from .mcp.json; do not edit inside this fence` and end `# END mcp_servers — generated`.
+Current markers are rendered by `internal/artifact/marker.go`: `Generated by engine-sync from {source} — edit the source, then run: engine-sync build`, and `… then run: engine-sync global` on a machine render — a rendered declaration, a Codex global role and an OpenCode machine agent. Markdown uses an HTML comment, TOML and YAML frontmatter use `#`, and JSONC uses `//`. Global rules use the owned `AGENTS.md` fence of § Global rules. Codex MCP fences begin `# BEGIN mcp_servers — generated by .claude/scripts/build-codex.mjs from .mcp.json; do not edit inside this fence` and end `# END mcp_servers — generated`.
 
 Complete historical compiler headers remain ownership evidence; a quoted or partial marker does not. Links require a receipt proving engine-sync created that exact link; location or byte equality alone does not establish ownership. Old Codex MCP begin fences are recognized and replaced too. Global role ownership is anchored to its first line. Rebuild migrates old owned files in place; unmarked foreign files remain conflicts.
 

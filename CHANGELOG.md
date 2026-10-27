@@ -4,6 +4,11 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+### Added
+
+- `engine-sync global` carries every always-on Claude rule (a `{claude config dir}/rules/**/*.md` file without `paths:` frontmatter) to Codex and OpenCode. Each Codex home's `AGENTS.md` gets the compiled rules between `<!-- BEGIN engine-sync rules — owned -->` and `<!-- END engine-sync rules — owned -->`, appended after the existing text, which keeps its bytes; an `AGENTS.md` absent before is created. OpenCode gets `{engine-sync home}/rules/global-always-on.md`, listed in the `instructions` array of `~/.config/opencode/opencode.jsonc` by an edit that keeps comments and every other entry. `--uninstall`, or an empty always-on set, removes the block, the file and the entry. A path-scoped rule is not delivered yet, and a rule whose frontmatter does not parse, or whose body holds a fence line, is skipped.
+- `engine-sync doctor --machine` reports the global rules: the Codex block and the OpenCode file and entry as `ok`, `MISSING` or `STALE` (the Codex block also `SHADOWED` by an `AGENTS.override.md`), a `RULE-FRONTMATTER` or `RULE-FENCE` failure per skipped rule, a `PATH-SCOPED` warning per undelivered rule, a `GLOBAL-BUDGET` warning past 8 KiB of always-on text, and an `ERROR` row for a rules directory it cannot read.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added

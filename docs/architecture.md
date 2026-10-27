@@ -62,12 +62,13 @@ Canonical public terms are source, target, artifact, mirror, marker, project sco
 | config | Layers, provenance, typed target roster and schema |
 | source | Bounded reads, frontmatter, discovery, declarations and naming |
 | rewrite | Shared text transformations and literal rules |
+| jsonc | Comment-preserving reads and single-property edits of a JSONC object |
 | target | Registry and target interface |
 | target/codex, target/opencode | Native renderers and validators |
 | artifact | Artifact shapes and ownership-marker syntax |
 | engine | Shared rendering, validation and reconciliation pipeline |
 | reconcile | Filesystem plan, ownership, kept outputs and selective cleanup |
-| machine | Account targets and machine source mirrors through the pipeline; retirements and doctor --machine rows |
+| machine | Account targets and machine source mirrors through the pipeline; global always-on rules; retirements and doctor --machine rows |
 | cliargs | Flag sets, exit codes and usage every command shares; the extraction that keeps cli inside the size-cmd budget |
 | pluginlog | The plugin's bounded errors, warnings and info JSON-line logs |
 | hook | Payload, scope, dirty store and lifecycle stages |

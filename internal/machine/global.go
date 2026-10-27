@@ -51,6 +51,9 @@ type Options struct {
 	// agent's path moves before the build replaces it (`global --adopt`).
 	// Empty leaves it a CONFLICT.
 	AdoptDir string
+	// skipRules leaves the global rules out: doctor reports them by their
+	// own rows, never again as plan events.
+	skipRules bool
 }
 
 // Report is the run's transcript. Err is a failure that stopped a step; a
@@ -147,9 +150,9 @@ func RunMachine(options Options) Report {
 	if options.Uninstall && len(r.options.CodexHomes) == 0 {
 		r.options.CodexHomes = []string{filepath.Join(options.Home, ".codex")}
 	}
-	steps := []func() error{r.retireRenamedCodexAgents, r.wireAgents, r.globalCommands, r.openCodeCommands}
+	steps := []func() error{r.retireRenamedCodexAgents, r.wireAgents, r.globalCommands, r.openCodeCommands, r.globalRules}
 	if options.Uninstall {
-		steps = []func() error{r.globalCommands, r.openCodeCommands, r.unwireGeneratedAgents}
+		steps = []func() error{r.globalCommands, r.openCodeCommands, r.unwireGeneratedAgents, r.globalRules}
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
