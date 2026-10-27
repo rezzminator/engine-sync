@@ -61,7 +61,7 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	writeOpenCodeFixture(
 		t,
 		filepath.Join(root, ".mcp.json"),
-		`{"mcpServers":{"local":{"command":"pfm","args":["mcp","serve"],"env":{"X":"1"}},"remote":{"url":"http://127.0.0.1:9/mcp"}}}`,
+		`{"mcpServers":{"local":{"command":"app","args":["mcp","serve"],"env":{"X":"1"}},"remote":{"url":"http://127.0.0.1:9/mcp"}}}`,
 	)
 	writeOpenCodeFixture(t, filepath.Join(root, "LICENSE"), "license\n")
 	writeOpenCodeFixture(t, filepath.Join(root, "SECURITY.md"), "security\n")

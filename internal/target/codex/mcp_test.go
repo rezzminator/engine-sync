@@ -3,6 +3,7 @@ package codex
 import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +16,26 @@ func TestMCPFenceProblemsAcceptsAWellFormedFence(t *testing.T) {
 		if got := mcpFenceProblems(current, "/repo/.codex/config.toml"); len(got) != 0 {
 			t.Fatalf("mcpFenceProblems(%q spelling) = %#v, want none", begin, got)
 		}
+	}
+}
+
+// TestBuildMigratesTheScriptMCPFenceToTheNeutralOne pins the written fence:
+// it names no producer script, and the script fence releases 0.1.0-0.5.0
+// wrote is replaced in place by exactly one neutral fence.
+func TestBuildMigratesTheScriptMCPFenceToTheNeutralOne(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	writeCodexFixture(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
+	configPath := filepath.Join(root, ".codex", "config.toml")
+	writeCodexFixture(t, configPath, "model = \"x\"\n\n"+legacyMCPBegin+"\n[mcp_servers.old]\ncommand = \"old\"\n"+mcpEnd+"\n")
+	writeCodexFixture(t, filepath.Join(root, ".mcp.json"), `{"mcpServers":{"fresh":{"command":"app","args":["mcp"]}}}`)
+	build, err := RunProject(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !build.OK {
+		t.Fatalf("build = %#v, %v", build, err)
+	}
+	got := string(readCodexFixture(t, configPath))
+	if strings.Contains(got, ".claude/scripts/") || strings.Count(got, "# BEGIN mcp_servers") != 1 ||
+		strings.Contains(got, "mcp_servers.old") || !strings.Contains(got, "[mcp_servers.fresh]") {
+		t.Fatalf("migrated config.toml:\n%s", got)
 	}
 }
 
@@ -76,7 +97,7 @@ func TestCompileMCPMalformedFenceIsAProblemInBothModesAndBuildNeverAppendsASecon
 	writeCodexFixture(
 		t,
 		filepath.Join(root, ".mcp.json"),
-		`{"mcpServers":{"fresh":{"command":"pfm","args":["mcp"]}}}`,
+		`{"mcpServers":{"fresh":{"command":"app","args":["mcp"]}}}`,
 	)
 
 	check, err := RunProject(Options{Root: root, Home: home, Mode: ModeCheck})

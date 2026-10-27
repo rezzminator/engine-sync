@@ -100,8 +100,8 @@ func TestClassifyGlobalRoleSeparatesOursFromTheirs(t *testing.T) {
 }
 
 // TestGeneratedGlobalRoleAnchorsOnTheFirstLine pins the ownership proof to
-// where pfm writes it. A body that merely quotes the marker phrase is not a
-// file pfm owns, and treating it as one would hand an operator's role to the
+// where engine-sync writes it. A body that merely quotes the marker phrase is
+// not a file engine-sync owns, and treating it as one would hand an operator's role to the
 // retire path.
 func TestGeneratedGlobalRoleAnchorsOnTheFirstLine(t *testing.T) {
 	for _, testCase := range []struct {

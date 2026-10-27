@@ -49,8 +49,8 @@ func TestDeclaredName(t *testing.T) {
 
 func TestCommandName(t *testing.T) {
 	for rel, want := range map[string]string{
-		"flights/spec.md":   "flights:spec",
-		"pfm.md":            "pfm",
+		"tasks/spec.md":     "tasks:spec",
+		"app.md":            "app",
 		"quality/prompt.md": "quality:prompt",
 	} {
 		if got := CommandName(rel); got != want {
