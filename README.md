@@ -65,7 +65,7 @@ Configuration is one typed resolver over built-in defaults, machine policy, proj
 
 ```sh
 go vet ./... && go test ./...
-claude plugin validate --strict . && claude plugin validate --strict plugins/engine-sync
+claude plugin validate --strict plugins/engine-sync
 ```
 
 Built and maintained with [Professor](https://github.com/rezzminator/professor).

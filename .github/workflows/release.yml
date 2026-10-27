@@ -27,7 +27,7 @@ jobs:
         run: |
           version=$(awk '$1 == "claude-code" { print $2 }' scripts/tool-versions.txt)
           npm install -g @anthropic-ai/claude-code@"$version"
-      - name: gofmt, vet, staticcheck, tree gate tests, test, validate the marketplace and the plugin
+      - name: gofmt, vet, staticcheck, tree gate tests, test, validate the plugin
         run: make check
       - name: compiler tree
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
