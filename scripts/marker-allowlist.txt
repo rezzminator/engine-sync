@@ -4,7 +4,6 @@
 CHANGELOG.md	- The `engine-sync` binary, extracted from pfm's `codex` and `opencode` compilers with their history: `codex build|check|agents`, `opencode build|check|doctor`, `build`, `check` and `doctor` over both engines, `doctor --machine`, `global` for the machine-level Codex roles, commands and Claude agent links, and `hook claude mark|stop|start`. Output is byte-identical to pfm's.
 CLAUDE.md	- Git writes go through the `gitter` agent.
 CLAUDE.md	- Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest and the marketplace.
-CLAUDE.md	- Golden: `scripts/golden-projects.py --binary PATH --fixture {plain|professor}` rewrites `testdata/projects/{fixture}/golden/artifacts.json`.
 README.md	[![Built with Professor](https://img.shields.io/badge/built%20with-Professor-8A2BE2)](https://github.com/rezzminator/professor)
 README.md	Built and maintained with [Professor](https://github.com/rezzminator/professor).
 docs/architecture.md	| spelling-professor | Operative product policy/layout in Go and shipped text, plus neutral goldens; exact historical decoder lines and fixture/check producers are exceptions |

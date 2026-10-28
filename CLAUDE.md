@@ -33,7 +33,7 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 - Affected: `go test ./internal/{pkg}/ -run {Test} -count=1`, or `./cmd/engine-sync/`
 - Full: `go test ./...`; permanent project and machine fixtures live in `testdata/projects/`.
-- Golden: `scripts/golden-projects.py --binary PATH --fixture {plain|professor}` rewrites `testdata/projects/{fixture}/golden/artifacts.json`.
+- Golden: `scripts/golden-projects.py --binary PATH --fixture {plain|integration}` rewrites `testdata/projects/{fixture}/golden/artifacts.json`.
 - Tree: `scripts/check-tree_test.sh`, then `LEAK_TERMS={checkout}/scripts/leak-terms.txt scripts/check-tree.sh` (`LEAK_TERMS` defaults to `{checkout}/scripts/leak-terms.txt`). With no terms supplied, `publication` prints GAP and the run exits 3 when nothing else failed: no pass, no red; a named unusable file is ERROR.
 - Static: install the staticcheck version in `scripts/tool-versions.txt`, then `staticcheck ./...`.
 - Lint: `go vet ./...`, and `"$(go env GOROOT)/bin/gofmt" -l .` printing nothing.
