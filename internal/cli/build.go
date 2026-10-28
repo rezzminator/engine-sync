@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/machine"
 	"github.com/rezzminator/engine-sync/internal/pluginlog"
 	"github.com/rezzminator/engine-sync/internal/reconcile"
+	"github.com/rezzminator/engine-sync/internal/runlog"
 	"github.com/rezzminator/engine-sync/internal/target"
 	"io"
 )
@@ -20,7 +21,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		return code
 	}
 	if (selected.DryRun && action != "build") || (filter != "" && filter != selected.Engine) {
-		pluginlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: action + ": incompatible --dry-run or --engine", Where: "internal/cli/build.go#runProjectTargets"})
+		runlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: action + ": incompatible --dry-run or --engine", Where: "internal/cli/build.go#runProjectTargets"})
 		fmt.Fprintf(stderr, "engine-sync %s: incompatible --dry-run or --engine\n", action)
 		return 2
 	}
@@ -31,7 +32,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		}
 	}
 	if len(targets) == 0 {
-		pluginlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: fmt.Sprintf("unknown engine %q", selected.Engine), Where: "internal/cli/build.go#runProjectTargets"})
+		runlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: fmt.Sprintf("unknown engine %q", selected.Engine), Where: "internal/cli/build.go#runProjectTargets"})
 		fmt.Fprintf(stderr, "engine-sync: unknown engine %q\n", selected.Engine)
 		return 2
 	}
@@ -116,7 +117,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		}
 		return 0
 	})
-	pluginlog.RecordOutcome(e.get, stderr, pluginlog.ProjectOutcome{Action: action, Code: code, Applied: mode == reconcile.Build, Warnings: combined.Warnings, Problems: combined.Problems, Error: err, Session: e.sessionID})
+	runlog.RecordOutcome(e.get, stderr, runlog.ProjectOutcome{Action: action, Code: code, Applied: mode == reconcile.Build, Warnings: combined.Warnings, Problems: combined.Problems, Error: err, Session: e.sessionID})
 	if asJSON {
 		if mode == reconcile.Plan {
 			return diag.WritePlan(stdout, stderr, combined, combined.Actions, err, code)
@@ -128,7 +129,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return cliargs.FailureCode(err)
 	}
 	if action == "doctor" {
 		for _, row := range config.Describe(*cfg) {

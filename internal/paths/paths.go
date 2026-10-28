@@ -154,11 +154,3 @@ func EngineSyncState(env Env, home string) string {
 func EngineSyncConfig(home string) string {
 	return filepath.Join(home, ".claude", "engine-sync.json")
 }
-
-// PluginLogDir is PLUGIN_LOG_DIR/engine-sync, else HOME/.local/state/engine-sync/logs.
-func PluginLogDir(env Env, home string) string {
-	if value := env("PLUGIN_LOG_DIR"); value != "" {
-		return filepath.Join(value, "engine-sync")
-	}
-	return filepath.Join(home, ".local", "state", "engine-sync", "logs")
-}
