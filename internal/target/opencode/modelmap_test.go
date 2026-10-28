@@ -51,15 +51,15 @@ func TestRenderOpenCodeToolsBlockLetsWriteAndEditReachApplyPatch(t *testing.T) {
 }
 
 func TestRenderOpenCodeToolsBlockWithoutMCPEntriesDeniesEveryKnownServer(t *testing.T) {
-	got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "chat-professor", "harvester-professor"})
-	want := openCodeBuiltinDenialsForReadBashAgent + "  chat-professor_*: false\n  harvester-professor_*: false\n  local_*: false\n"
+	got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "chat", "docs"})
+	want := openCodeBuiltinDenialsForReadBashAgent + "  chat_*: false\n  docs_*: false\n  local_*: false\n"
 	if err != nil || got != want || len(warnings) != 0 {
 		t.Fatalf("tools block = %q, %v, warnings %q; want %q", got, err, warnings, want)
 	}
 }
 
 func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
-	known := []string{"alpha", "chat-professor", "harvester-professor", "my_server"}
+	known := []string{"alpha", "chat", "docs", "my_server"}
 	for _, tc := range []struct {
 		name      string
 		allowList string
@@ -67,35 +67,35 @@ func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 	}{
 		{
 			name:      "one server",
-			allowList: "Read, mcp__harvester-professor__read, mcp__harvester-professor__search_web",
-			mcpLines: "  alpha_*: false\n  chat-professor_*: false\n" +
-				"  harvester-professor_*: false\n" +
-				"  harvester-professor_read: true\n" +
-				"  harvester-professor_search_web: true\n" +
+			allowList: "Read, mcp__docs__read, mcp__docs__search_web",
+			mcpLines: "  alpha_*: false\n  chat_*: false\n" +
+				"  docs_*: false\n" +
+				"  docs_read: true\n" +
+				"  docs_search_web: true\n" +
 				"  my_server_*: false\n",
 		},
 		{
 			name:      "family servers sorted, ids sorted and de-duplicated",
-			allowList: "Read, mcp__harvester-professor__search_web, mcp__alpha__zeta, mcp__chat-professor__call, mcp__harvester-professor__read, mcp__alpha__beta, mcp__alpha__zeta",
+			allowList: "Read, mcp__docs__search_web, mcp__alpha__zeta, mcp__chat__call, mcp__docs__read, mcp__alpha__beta, mcp__alpha__zeta",
 			mcpLines: "  alpha_*: false\n" +
 				"  alpha_beta: true\n" +
 				"  alpha_zeta: true\n" +
-				"  chat-professor_*: false\n" +
-				"  chat-professor_call: true\n" +
-				"  harvester-professor_*: false\n" +
-				"  harvester-professor_read: true\n" +
-				"  harvester-professor_search_web: true\n" +
+				"  chat_*: false\n" +
+				"  chat_call: true\n" +
+				"  docs_*: false\n" +
+				"  docs_read: true\n" +
+				"  docs_search_web: true\n" +
 				"  my_server_*: false\n",
 		},
 		{
 			name:      "sanitized server keeps its underscores",
 			allowList: "Read, mcp__my.server__do-it",
-			mcpLines:  "  alpha_*: false\n  chat-professor_*: false\n  harvester-professor_*: false\n  my_server_*: false\n  my_server_do-it: true\n",
+			mcpLines:  "  alpha_*: false\n  chat_*: false\n  docs_*: false\n  my_server_*: false\n  my_server_do-it: true\n",
 		},
 		{
 			name:      "server wildcard grants the whole server",
-			allowList: "Read, mcp__harvester-professor__*, mcp__harvester-professor__read",
-			mcpLines:  "  alpha_*: false\n  chat-professor_*: false\n  harvester-professor_*: true\n  my_server_*: false\n",
+			allowList: "Read, mcp__docs__*, mcp__docs__read",
+			mcpLines:  "  alpha_*: false\n  chat_*: false\n  docs_*: true\n  my_server_*: false\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -70,7 +70,7 @@ for f in {parent for file in listed for parent in file.parents if root in parent
 standalone=re.compile(r'\b(?:professor|pfm|gitter|flight|fleet|framework)\b|dispatch prompt|workbench\.json|templates/global|First action: read the repository root',re.I)
 for f in listed:
  path=f.relative_to(root).as_posix()
- if path.startswith('testdata/projects/professor/') or path=='scripts/marker-allowlist.txt':continue
+ if path.startswith('testdata/projects/integration/') or path=='scripts/marker-allowlist.txt':continue
  try:
   raw=f.read_bytes()
   if b'\0' in raw:continue

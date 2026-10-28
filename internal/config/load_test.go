@@ -130,7 +130,7 @@ func TestGlobalFileIsHomeClaudeEngineSyncJSON(t *testing.T) {
 		t.Fatalf("MachinePath = %s, want %s", got, want)
 	}
 	codexHome := filepath.Join(home, ".codex")
-	putConfigFile(t, want, `{"version":1,"machine":{"managedBy":"professor"},"targets":{"codexHomes":["`+codexHome+`"]}}`)
+	putConfigFile(t, want, `{"version":1,"machine":{"managedBy":"app"},"targets":{"codexHomes":["`+codexHome+`"]}}`)
 	cfg, e := Resolve("", home, func(key string) string {
 		if key == "XDG_CONFIG_HOME" || key == "CLAUDE_CONFIG_DIR" {
 			return filepath.Join(home, "elsewhere")
@@ -140,8 +140,8 @@ func TestGlobalFileIsHomeClaudeEngineSyncJSON(t *testing.T) {
 	if e != nil {
 		t.Fatalf("Resolve: %v", e)
 	}
-	if cfg.Machine.ManagedBy != "professor" || cfg.Sources["machine.managedBy"] != want {
-		t.Fatalf("managedBy=%q source=%q, want professor from %s", cfg.Machine.ManagedBy, cfg.Sources["machine.managedBy"], want)
+	if cfg.Machine.ManagedBy != "app" || cfg.Sources["machine.managedBy"] != want {
+		t.Fatalf("managedBy=%q source=%q, want app from %s", cfg.Machine.ManagedBy, cfg.Sources["machine.managedBy"], want)
 	}
 	if cfg.Targets == nil || cfg.Targets.CodexHomes == nil || len(*cfg.Targets.CodexHomes) != 1 || (*cfg.Targets.CodexHomes)[0] != codexHome || cfg.Sources["targets.codexHomes"] != want {
 		t.Fatalf("targets=%+v source=%q, want the Codex home from %s", cfg.Targets, cfg.Sources["targets.codexHomes"], want)

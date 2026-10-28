@@ -167,7 +167,7 @@ func TestGlobalCommandsConfigDefaultsTrue(t *testing.T) {
 }
 
 // TestGlobalCommandUninstallDeletesTheOrphanedSkillDirectorySymlink is the
-// regression for a dangling `pfm uninstall` leftover: compileGlobalCommands
+// regression for a dangling uninstall leftover: compileGlobalCommands
 // mirrors a skill-directory global command (a {home}/.claude/commands/<name>
 // directory carrying its own SKILL.md, e.g. "tokens") into
 // {home}/.codex/skills/<name> as a bare SYMLINK into that source directory —
@@ -255,7 +255,7 @@ func TestMCPBackedChatCommandsRetireGlobalSkillsButKeepInterrogate(t *testing.T)
 // real corruption: swapCommands matched a command name by its PREFIX only,
 // so a filesystem path that merely starts with a command name (/dev/tty)
 // was rewritten right along with the actual command invocation (/dev build
-// pfm). A slash command is followed by whitespace, end-of-line, or
+// app). A slash command is followed by whitespace, end-of-line, or
 // punctuation — never by another "/".
 func TestCommandSwapNeverRewritesASlashContinuedPath(t *testing.T) {
 	root := testjail.Scratch(t)
@@ -264,7 +264,7 @@ func TestCommandSwapNeverRewritesASlashContinuedPath(t *testing.T) {
 	writeCodexFixture(
 		t,
 		filepath.Join(root, "CLAUDE.md"),
-		"# Fixture\n\nTUI renders on /dev/tty. Use `/dev build pfm` for anything the pipeline reads.\n",
+		"# Fixture\n\nTUI renders on /dev/tty. Use `/dev build app` for anything the pipeline reads.\n",
 	)
 	result, err := RunProject(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !result.OK {
@@ -274,7 +274,7 @@ func TestCommandSwapNeverRewritesASlashContinuedPath(t *testing.T) {
 	if !strings.Contains(agents, "TUI renders on /dev/tty.") {
 		t.Fatalf("a /-continued path was rewritten, corrupting it:\n%s", agents)
 	}
-	if !strings.Contains(agents, "Use `$dev build pfm` for anything the pipeline reads.") {
+	if !strings.Contains(agents, "Use `$dev build app` for anything the pipeline reads.") {
 		t.Fatalf("the real /dev command invocation was not rewritten:\n%s", agents)
 	}
 }
@@ -283,9 +283,9 @@ func TestCommandSwapNeverRewritesASlashContinuedPath(t *testing.T) {
 // makes it claim AGENTS.md is hand-edited and compiled from itself.
 func TestTransformMarkdownKeepsLinesNamingBothFiles(t *testing.T) {
 	both := "- `CLAUDE.md` is the one hand-edited orientation file; `AGENTS.md` is compiled from it."
-	pointer := "- pfm: the fleet engine · child `pfm/CLAUDE.md`"
+	pointer := "- app: the main program · child `app/CLAUDE.md`"
 	got := transformMarkdown(both+"\n"+pointer+"\n", TransformOptions{ReplaceClaudeFile: true})
-	want := both + "\n- pfm: the fleet engine · child `pfm/AGENTS.md`\n"
+	want := both + "\n- app: the main program · child `app/AGENTS.md`\n"
 	if got != want {
 		t.Fatalf("transformMarkdown = %q, want %q", got, want)
 	}
@@ -441,7 +441,7 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeCodexFixture(
 		t,
 		filepath.Join(root, ".mcp.json"),
-		`{"mcpServers":{"fixture":{"command":"pfm","args":["mcp"],"future":true}}}`,
+		`{"mcpServers":{"fixture":{"command":"app","args":["mcp"],"future":true}}}`,
 	)
 
 	build, err := RunProject(Options{Root: root, Home: home, Mode: ModeBuild})

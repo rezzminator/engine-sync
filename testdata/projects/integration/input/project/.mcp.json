@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "chat-professor": {
-      "command": "pfm",
+    "chat": {
+      "command": "app",
       "args": [
         "mcp",
         "serve",
@@ -10,8 +10,8 @@
         "chat"
       ]
     },
-    "harvester-professor": {
-      "command": "pfm",
+    "docs": {
+      "command": "app",
       "args": [
         "mcp",
         "serve",

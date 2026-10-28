@@ -168,8 +168,8 @@ func TestCompiledCommandFrontmatterStaysParseableAroundTheReview(t *testing.T) {
 
 // Door 3's compiler half: whatever the fleet prompt's parts spell, the
 // compose-time mapping turns Claude's review command into Codex's shell
-// review. The composed prompt itself is pfm's (its fleet-prompt package
-// asserts the composed bytes); this pins the rewrite those bytes go through.
+// review. The composed prompt itself belongs to its caller, which asserts
+// the composed bytes; this pins the rewrite those bytes go through.
 func TestCodeReviewFixtureTailMapsToTheShellReview(t *testing.T) {
 	mapped := rewriteCodeReview("- Your last step is `"+codeReviewCommand+" low` over your own change.\n", nil, reviewFixturePolicy)
 	if strings.Contains(mapped, codeReviewCommand) || !strings.Contains(mapped, codexReviewWant("low")) {
