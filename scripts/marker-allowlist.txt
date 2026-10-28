@@ -10,7 +10,7 @@ CHANGELOG.md	- Installs as `engine-sync@professor` from the professor marketplac
 plugins/engine-sync/README.md	claude plugin marketplace add rezzminator/professor
 plugins/engine-sync/README.md	claude plugin install engine-sync@professor
 CLAUDE.md	- Git writes go through the `gitter` agent.
-CLAUDE.md	- Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest and the marketplace.
+CLAUDE.md	- Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest.
 CLAUDE.md	- Golden: `scripts/golden-projects.py --binary PATH --fixture {plain|professor}` rewrites `testdata/projects/{fixture}/golden/artifacts.json`.
 README.md	[![Built with Professor](https://img.shields.io/badge/built%20with-Professor-8A2BE2)](https://github.com/rezzminator/professor)
 README.md	Built and maintained with [Professor](https://github.com/rezzminator/professor).
