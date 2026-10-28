@@ -27,7 +27,7 @@ Claude Code is the source: `CLAUDE.md`, `.claude/agents`, `.claude/commands`, `.
 | `version` | Print the binary version; `--version` is an alias. |
 | `help` | Print usage and registered targets; `-h` and `--help` are aliases. |
 
-Exit codes: 0 pass, 1 a finding or failure, 2 a usage error. The complete flag and JSON contract is [interface.md](docs/interface.md).
+Exit codes: 0 pass, 1 a finding or failure, 2 a usage error, 75 a write refused because another live engine-sync process holds the lock (rerun once it finishes). The complete flag and JSON contract is [interface.md](docs/interface.md).
 
 ## The plugin
 
@@ -41,7 +41,7 @@ Exit codes: 0 pass, 1 a finding or failure, 2 a usage error. The complete flag a
 
 ## Logs
 
-Errors, warnings and meaningful info are JSON rows in `errors.jsonl`, `warnings.jsonl` and `info.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise they use `~/.local/state/engine-sync/logs`. Capped files move to `.1`; a failed logging streak reports once on stderr without changing command results.
+Logs go through the shared plugin-log library, vendored at `internal/pluginlog` as a byte-identical copy. Rows are JSON lines in `errors.jsonl`, `warnings.jsonl`, `info.jsonl` and `debug.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise under `~/.local/state/engine-sync/logs`. A file past its cap moves to `.1`, keeping five generations (`.1`…`.5`), with a `log-capped` warning row. A row that cannot be written is held for the next write. A failing streak reports one line on stderr without changing command results.
 
 ## Standalone use
 

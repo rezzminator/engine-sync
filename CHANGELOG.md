@@ -7,6 +7,8 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 ### Changed
 
 - Installs as `engine-sync@professor` from the professor marketplace; this repository's own marketplace file is gone, and the release check no longer reads it.
+- A Stop hook that finds a project's lock held by another live engine-sync process no longer prints `engine-sync WARNING: … BUSY lock …`: it writes a `lock-busy` info row, skips that engine's check (the holder is writing the mirror), keeps the dirty flag set and repeats next turn. A real build failure still shows. A CLI build refused for a held lock exits 75 instead of 1.
+- Logging goes through the shared plugin-log library, vendored at `internal/pluginlog` as a byte-identical copy; engine-sync's own level-row writer is gone. Level files are `errors.jsonl`, `warnings.jsonl`, `info.jsonl` and `debug.jsonl`; a file past its cap moves to `.1`, keeping five generations (`.1`…`.5`), with a `log-capped` warning row. Rows that cannot be written are held for the next write, and one stderr line reports each failing streak.
 
 ### Added
 

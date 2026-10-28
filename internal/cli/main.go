@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/pluginlog"
+	"github.com/rezzminator/engine-sync/internal/runlog"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/target"
 	"io"
@@ -58,7 +59,7 @@ func dispatch(args []string, stdout, stderr io.Writer, e env) int {
 		args[0] = "help"
 	}
 	if len(args) == 0 {
-		pluginlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: "a command is required", Where: "internal/cli/main.go#dispatch"})
+		runlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: "a command is required", Where: "internal/cli/main.go#dispatch"})
 		printUsage(stderr)
 		return 2
 	}
@@ -68,7 +69,7 @@ func dispatch(args []string, stdout, stderr io.Writer, e env) int {
 		}
 	}
 
-	pluginlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: fmt.Sprintf("unknown command %q", args[0]), Where: "internal/cli/main.go#dispatch"})
+	runlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: fmt.Sprintf("unknown command %q", args[0]), Where: "internal/cli/main.go#dispatch"})
 	fmt.Fprintf(stderr, "engine-sync: unknown command %q\n", args[0])
 	printUsage(stderr)
 	return 2

@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/guard"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/pluginlog"
+	"github.com/rezzminator/engine-sync/internal/runlog"
 	"io"
 	"io/fs"
 	"os"
@@ -293,15 +294,29 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 	// Keep the durable flag while stages run; a killed process cannot lose it.
 	var failed []string
 	var detail strings.Builder
+	busy := map[string]bool{}
 	for _, stage := range stopStages(root, e.Engines) {
+		if stage[1] == "check" && busy[stage[0]] {
+			// The lock holder is writing this mirror: checking it now judges a half-written tree.
+			continue
+		}
 		code, output := runner(stage)
 		if code == 0 {
 			continue
 		}
 		name := stage[0] + " " + stage[1]
+		if code == guard.BusyCode {
+			busy[stage[0]] = true
+			recordBusy(e, stderr, "Stop", name+": "+strings.TrimSpace(output), map[string]any{"stage": name})
+			continue
+		}
 		recordHook(e, stderr, "hook-step-failed", "Stop", name+" failed", map[string]any{"stage": name, "code": code})
 		failed = append(failed, name)
 		detail.WriteString(name + ":\n" + output + "\n")
+	}
+	if len(failed) == 0 && len(busy) > 0 {
+		// The flag stays set; the next turn's Stop repeats the stages.
+		return 0
 	}
 	if len(failed) == 0 {
 		home, err := e.Home()
@@ -310,6 +325,10 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 			return 0
 		}
 		release, err := guard.Lock(e.State(home), "dirty:"+root, 250*time.Millisecond)
+		if errors.Is(err, guard.ErrBusy) {
+			recordBusy(e, stderr, "Stop", "clear dirty flag: "+err.Error(), nil)
+			return 0
+		}
 		if err != nil {
 			notice("hook-lock-failed", "engine-sync: "+err.Error())
 			return 0
@@ -332,7 +351,7 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 		text = text[:detailLimit]
 	}
 	var answer any
-	if payload.StopHookActive || strings.Contains(detail.String(), "BUSY ") {
+	if payload.StopHookActive {
 		answer = map[string]string{"systemMessage": "engine-sync WARNING: " + stages +
 			" failed — the mirror is stale; the flag stays set and the check repeats next turn.\n" + text}
 	} else {
@@ -428,6 +447,11 @@ func hookLogEnv(e Context) paths.Env {
 	}
 }
 
+// recordBusy records a lock a live process holds: an info row, never a screen line.
+func recordBusy(e Context, stderr io.Writer, step, msg string, detail any) {
+	runlog.Record(hookLogEnv(e), stderr, pluginlog.Row{Level: "info", Event: "lock-busy", Msg: msg, Where: "internal/hook/hook.go#" + step, Session: e.SessionID, Detail: detail})
+}
+
 func recordHook(e Context, stderr io.Writer, event, step, msg string, detail any) {
-	pluginlog.Record(hookLogEnv(e), stderr, pluginlog.Row{Level: "error", Event: event, Msg: msg, Where: "internal/hook/hook.go#" + step, Session: e.SessionID, Detail: detail})
+	runlog.Record(hookLogEnv(e), stderr, pluginlog.Row{Level: "error", Event: event, Msg: msg, Where: "internal/hook/hook.go#" + step, Session: e.SessionID, Detail: detail})
 }
