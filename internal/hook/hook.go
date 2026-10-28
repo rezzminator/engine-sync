@@ -394,8 +394,13 @@ func Start(stderr io.Writer, e Context, runner StageRunner) int {
 		} else if scoped {
 			if code, _ := runner([]string{"check", root}); code != 0 {
 				if code, output := runner([]string{"build", root}); code != 0 {
-					recordHook(e, stderr, "hook-step-failed", "Start", "build failed", nil)
-					fmt.Fprintf(stderr, "engine-sync hook claude start: build %s failed:\n%s", root, output)
+					if code == guard.BusyCode {
+						// The holder is writing this mirror; the flag hands its check to the next Stop.
+						recordBusy(e, stderr, "Start", "build: "+strings.TrimSpace(output), nil)
+					} else {
+						recordHook(e, stderr, "hook-step-failed", "Start", "build failed", nil)
+						fmt.Fprintf(stderr, "engine-sync hook claude start: build %s failed:\n%s", root, output)
+					}
 					flag, flagErr := DirtyFlag(e, root)
 					if flagErr == nil {
 						flagErr = os.MkdirAll(filepath.Dir(flag), 0700)
@@ -420,7 +425,9 @@ func Start(stderr io.Writer, e Context, runner StageRunner) int {
 		recordHook(e, stderr, "hook-step-failed", "Start", err.Error(), nil)
 		fmt.Fprintf(stderr, "engine-sync hook claude start: %v\n", err)
 	} else if found {
-		if code, output := runner([]string{"global"}); code != 0 {
+		if code, output := runner([]string{"global"}); code == guard.BusyCode {
+			recordBusy(e, stderr, "Start", "global: "+strings.TrimSpace(output), nil)
+		} else if code != 0 {
 			recordHook(e, stderr, "hook-step-failed", "Start", "global failed", nil)
 			fmt.Fprintf(stderr, "engine-sync hook claude start: global failed:\n%s", output)
 		}

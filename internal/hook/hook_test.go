@@ -184,6 +184,50 @@ func TestStopHeldDirtyLockStaysOffScreen(t *testing.T) {
 	}
 }
 
+// A SessionStart build or global another live process holds the lock for is no
+// fault: an info row each, nothing on screen, and the flag hands the check to Stop.
+func TestStartBusyStagesStayOffScreen(t *testing.T) {
+	home := testjail.Scratch(t)
+	root := filepath.Join(home, "project")
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".claude", "engine-sync.json"), []byte(`{"version":1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e := Context{Home: func() (string, error) { return home, nil }, Get: func(key string) string {
+		if key == "CLAUDE_PROJECT_DIR" {
+			return root
+		}
+		return ""
+	}, State: func(string) string { return filepath.Join(home, "state") }, Targets: func(string) (bool, error) { return true, nil }}
+	var stderr bytes.Buffer
+	Start(&stderr, e, func(stage []string) (int, string) {
+		if stage[0] == "check" {
+			return 1, "stale"
+		}
+		return guard.BusyCode, "BUSY lock /state/locks/x.lock: holder pid=1; deadline exceeded\n"
+	})
+	if stderr.Len() != 0 {
+		t.Errorf("busy start stages reached the screen: %q", &stderr)
+	}
+	flag, err := DirtyFlag(e, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(flag); err != nil {
+		t.Errorf("busy start build left no dirty flag: %v", err)
+	}
+	dir := pluginlog.Dir("", home, "engine-sync")
+	if raw, err := os.ReadFile(filepath.Join(dir, "errors.jsonl")); err == nil {
+		t.Errorf("busy start stages wrote error rows: %s", raw)
+	}
+	info, err := os.ReadFile(filepath.Join(dir, "info.jsonl"))
+	if err != nil || strings.Count(string(info), `"event":"lock-busy"`) != 2 {
+		t.Errorf("want two lock-busy info rows: %v %s", err, info)
+	}
+}
+
 // A build another live process holds the lock for skips that engine's check
 // (the holder is writing the mirror) and stays off screen; a real failure still blocks.
 func TestStopBusyBuildStaysOffScreen(t *testing.T) {
