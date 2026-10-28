@@ -4,6 +4,10 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+### Changed
+
+- Installs as `engine-sync@professor` from the professor marketplace; this repository's own marketplace file is gone, and the release check no longer reads it.
+
 ### Added
 
 - `engine-sync global` carries every always-on Claude rule (a `{claude config dir}/rules/**/*.md` file without `paths:` frontmatter) to Codex and OpenCode. Each Codex home's `AGENTS.md` gets the compiled rules between `<!-- BEGIN engine-sync rules — owned -->` and `<!-- END engine-sync rules — owned -->`, appended after the existing text, which keeps its bytes; an `AGENTS.md` absent before is created. OpenCode gets `{engine-sync home}/rules/global-always-on.md`, listed in the `instructions` array of `~/.config/opencode/opencode.jsonc` by an edit that keeps comments and every other entry. `--uninstall`, or an empty always-on set, removes the block, the file and the entry. A path-scoped rule is not delivered yet, and a rule whose frontmatter does not parse, or whose body holds a fence line, is skipped.

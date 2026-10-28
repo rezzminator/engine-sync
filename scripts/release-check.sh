@@ -4,7 +4,6 @@
 # Passes only when every place that carries engine-sync's version says the same
 # one:
 #   - plugins/engine-sync/.claude-plugin/plugin.json  "version"   (the reference)
-#   - .claude-plugin/marketplace.json               the plugin entry's "version"
 #   - README.md                                     the badge/version-{X}- badge
 #   - CHANGELOG.md                                  a `## [{X}]` heading
 # --release also requires the CHANGELOG heading to carry a date,
@@ -38,12 +37,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 plugin_json="plugins/engine-sync/.claude-plugin/plugin.json"
-marketplace=".claude-plugin/marketplace.json"
 readme="README.md"
 changelog="CHANGELOG.md"
 sums="plugins/engine-sync/libexec/SHA256SUMS"
 
-for f in "$plugin_json" "$marketplace" "$readme" "$changelog" "$sums"; do
+for f in "$plugin_json" "$readme" "$changelog" "$sums"; do
   if [[ ! -r "$root/$f" ]]; then
     echo "release-check: cannot read $f" >&2
     exit 2
@@ -65,9 +63,6 @@ disagree() {
   echo "release-check: $1 says '$2', $plugin_json says '$version'" >&2
   bad=1
 }
-
-market_version="$(json_version "$marketplace")"
-[[ "$market_version" == "$version" ]] || disagree "$marketplace" "${market_version:-nothing}"
 
 badge_version="$(sed -n 's/.*badge\/version-\([0-9][0-9A-Za-z.+_]*\)-.*/\1/p' "$root/$readme" | head -n 1)"
 [[ "$badge_version" == "$version" ]] || disagree "$readme badge" "${badge_version:-nothing}"
