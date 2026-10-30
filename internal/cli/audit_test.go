@@ -6,6 +6,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/guard"
 	"github.com/rezzminator/engine-sync/internal/hook"
+	"github.com/rezzminator/engine-sync/internal/pluginlog"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -325,8 +326,17 @@ func TestAuditHookFailurePaths(t *testing.T) {
 			e.stdin = strings.NewReader(`{}`)
 			out := auditOK(t, e, "hook", "claude", "stop")
 			if form == "busy project" {
-				if time.Since(before) > 2*time.Second || !strings.Contains(out, "BUSY") || !strings.Contains(out, "holder pid=") || !strings.Contains(out, "systemMessage") {
-					t.Errorf("busy lock not surfaced promptly: %s", out)
+				// A live holder is no fault: no screen line, an info row, the flag kept (checked below).
+				if time.Since(before) > 2*time.Second || out != "" {
+					t.Errorf("busy lock answered late or on screen: %q", out)
+				}
+				logs := pluginlog.Dir("", home, "engine-sync")
+				info, err := os.ReadFile(filepath.Join(logs, "info.jsonl"))
+				if err != nil || !strings.Contains(string(info), `"event":"lock-busy"`) || !strings.Contains(string(info), "holder pid=") {
+					t.Errorf("no lock-busy info row: %v %s", err, info)
+				}
+				if errs, err := os.ReadFile(filepath.Join(logs, "errors.jsonl")); err == nil && strings.Contains(string(errs), "BUSY") {
+					t.Errorf("a held lock wrote an error row: %s", errs)
 				}
 			} else if !strings.Contains(out, `"decision":"block"`) {
 				t.Error(out)

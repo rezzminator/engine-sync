@@ -1,4 +1,4 @@
-package pluginlog_test
+package runlog_test
 
 import (
 	"github.com/rezzminator/engine-sync/internal/testjail"

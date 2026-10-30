@@ -10,6 +10,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 - [Agent frontmatter](#agent-frontmatter)
 - [Declarations](#declarations)
 - [Global commands](#global-commands)
+- [Global rules](#global-rules)
 - [Machine targets](#machine-targets)
 - [Generated ownership](#generated-ownership)
 - [Claude hooks](#claude-hooks)
@@ -17,7 +18,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 
 ## Binary and exits
 
-Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.6.0-alpha` for development, the plugin manifest version for release assets.
+Resolve an executable regular `$ENGINE_SYNC_BIN` first, then `{engine-sync home}/bin/engine-sync`. An unavailable binary is a visible failure; no silent skip. `version` prints `engine-sync {version}`: `0.7.0-alpha` for development, the plugin manifest version for release assets.
 
 Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error or a configuration refusal (§ Policy resolution and schemas). Hooks preserve the hook protocol described below. `--json` prints exactly one stdout object for exits 0 and 1 and for a configuration refusal; usage errors print no JSON. Legacy-config deprecation notices go to stderr even with `--json`.
 
@@ -32,7 +33,7 @@ Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error
 | `codex` | `build`, `check`, `agents`; the existing Codex alias and role interface. |
 | `opencode` | `build`, `check`, `doctor`; the existing OpenCode alias. |
 | `config` | `show`, `validate`, `schema`; effective settings, validation and schema. |
-| `global` | Machine roles, OpenCode agents and commands; `--plan`, `--uninstall`, `--adopt`, `--capability NAME`, account flags. |
+| `global` | Machine roles, OpenCode agents and commands, always-on global rules; `--plan`, `--uninstall`, `--adopt`, `--capability NAME`, account flags. |
 | `variants` | `pin [name]…`; rewrite only the `pins:` block of source declarations or shared files (a shared file named by its path relative to the agents directory). |
 | `hook` | `claude mark`, `stop`, `start`; hook protocol on stdin/stdout. |
 | `version` | Print the binary version; `--version` is an alias. |
@@ -64,7 +65,7 @@ Project commands also accept `--engine codex|opencode`; the neutral selection ru
 
 One typed resolver validates configuration before any stage runs. Layers are built-in neutral defaults < `~/.claude/engine-sync.json` (the global file) < `{project}/.claude/engine-sync.json` < environment < flags. The global file is `{home}/.claude/engine-sync.json`, `{home}` being `--home` or `$HOME`; no environment variable moves it. A project rooted at the home shares it. Maps merge by key, lists replace, and scalars replace. In `opencode.permission`, a lower bare action becomes the leading `*` fallback when a later layer adds tools. Tools and patterns merge across layers. A deny wins when both layers name the same pattern; more specific patterns follow broader ones. Absent policies and empty rule sets deny access. An absent file uses defaults; unknown keys, wrong types and unreadable files fail with the path and key. Project files cannot contain `machine` or `targets`: either is refused naming the key and the file, exit 2. A removed key, a malformed `machine.managedBy` and an old config path are refused the same way. When the global file is absent and `config.json` or `targets.json` exists in `{home}/.config/engine-sync/` or, with an absolute `XDG_CONFIG_HOME`, in `$XDG_CONFIG_HOME/engine-sync/`, every command exits 2 with `engine-sync: {old path} is no longer read; move its keys into {home}/.claude/engine-sync.json` (for `targets.json`, `… under "targets" in …`).
 
-The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.6.0-alpha`; released assets report the plugin manifest version.
+The legacy `.claude/codex-build.json` maps only onto `codex`, and the legacy `.claude/opencode-build.json` only onto `opencode.modelMap`; each is read only while `.claude/engine-sync.json` is absent, with one stderr deprecation notice. Configuration schema version is `1`. Development reports `0.7.0-alpha`; released assets report the plugin manifest version.
 
 ```sh
 engine-sync config show --json .
@@ -145,7 +146,7 @@ A machine example:
 
 Global roles use the Claude configuration directory by default; `--source-repo R` selects `R/{machine.sourceAgentsDir}/`. An agent's `engines.codex` block overrides its role settings (see [Agent frontmatter](#agent-frontmatter)). `engines.codex.sandbox` accepts `inherit`, `read-only`, or `workspace-write`; otherwise a tools list without Write, Edit, MultiEdit or NotebookEdit selects read-only; Bash alone does not declare write intent. Use `sandbox: inherit` for a role that writes through Bash. No role name has special treatment. `codex.modelMap` maps model aliases for project and machine roles alike.
 
-Generated file markers and rebuild hints name `engine-sync build`. MCP regions retain the unbranded legacy script fence understood by 0.1.0, including on a machine without writer records. Complete historical ownership headers remain evidence; partial marker phrases do not claim a file; rebuilding migrates owned mirrors in place and preserves unmarked foreign files.
+Generated file markers and rebuild hints name `engine-sync build`. The MCP region opens with `# BEGIN mcp_servers — generated by engine-sync from .mcp.json — edit the source, then run: engine-sync build`; `build` replaces the script fence releases 0.1.0 to 0.5.0 wrote in place, and released 0.1.0 reports the new fence as a `CONFLICT` (an END with no BEGIN) and leaves the file alone. Complete historical ownership headers remain evidence; partial marker phrases do not claim a file; rebuilding migrates owned mirrors in place and preserves unmarked foreign files.
 
 ## Agent frontmatter
 
@@ -244,6 +245,19 @@ Machine doctor reports each declared agent once per engine registry as `agent {S
 
 `verb` is `change`, `retire`, `ok`, `skip`, or `conflict`; `path` appears only on retire. Conflicts clear `ok`; a plan continues listing them. Machine doctor JSON retains `ok` and `rows` and adds `configSources` with the same key/value/source rows as project doctor. Configuration failures print one object with `ok:false`, empty `rows` and `configSources`, and `error` naming the file and key. Row levels are `ok`, `warn`, `fail`, and a fail exits 1.
 
+## Global rules
+
+`global` reads the rules directory `{claude config dir}/rules` of the first Claude config dir: every `*.md` below it, links followed, in sorted relative-path order. A rule without `paths:` frontmatter is always-on; a rule with it is path-scoped and compiled for neither engine. A rule whose frontmatter does not parse is skipped, never treated as always-on, and so is a rule whose body holds either fence line below. A dangling link that is not a `.md` is passed over. An absent directory holds no rules; one that cannot be read, a rule that cannot, or a `{claude config dir}/commands` roster that cannot, fails the run and writes no rule.
+
+The compiled body is each always-on rule under its `<!-- rule: {rules dir}/{relative path} -->` line, its body given the same `/command` and model-name transform `CLAUDE.md` gets for `AGENTS.md`, rules joined by a blank line.
+
+- Codex: each Codex home's `AGENTS.md` carries the body between `<!-- BEGIN engine-sync rules — owned -->` and `<!-- END engine-sync rules — owned -->`. Text outside the fence is kept byte for byte; the block is appended when absent, after a blank line (on the next line when the file does not end in a newline), and replaced in place when present; removing a block that ends the file restores the bytes from before the append; a file is written only when its bytes differ, and created when absent. A symlinked or non-regular `AGENTS.md`, or a malformed fence, is refused.
+- OpenCode: the body, under a machine marker, is `{engine-sync home}/rules/global-always-on.md`, and that path is appended to the `instructions` array of `{home}/.config/opencode/opencode.jsonc` by a comment-preserving edit that leaves every other entry. `{engine-sync state}/opencode-instructions.json` records the entry as engine-sync's, written before the config; an entry the operator listed is never claimed or removed. `{home}/.config/opencode/AGENTS.md` is never written.
+
+No always-on rule, and `--uninstall`, remove the owned block (and an `AGENTS.md` it alone filled), the compiled file and the owned `instructions` entry, nothing else. `--plan` names each planned write and writes nothing.
+
+`doctor --machine` adds `global-rules` rows: `global-rules source={dir} always-on bytes={n}` (`ok`); one `RULE-FRONTMATTER {path}: {error}` or `RULE-FENCE {path}: …` `fail` row per skipped rule; a `global-rules /command roster: …` `warn` row per command link the roster skipped; `global-rules PATH-SCOPED {path} not delivered to Codex or OpenCode` (`warn`); `GLOBAL-BUDGET {bytes} > 8192 …` (`warn`) when the always-on body passes 8 KiB; then `global-rules codex {AGENTS.md} state=…`, `global-rules opencode {compiled file} state=…` and `global-rules opencode instructions entry {config} state=…`, each `ok`, `MISSING` or `STALE`, the Codex row also `SHADOWED` when an `AGENTS.override.md` in that home wins. A rules directory, command roster, file or config that cannot be read is a `global-rules ERROR …` `fail` row, never zero rules.
+
 ## Machine targets
 
 Contract path: the `targets` object of `{home}/.claude/engine-sync.json`.
@@ -258,7 +272,7 @@ OpenCode agents take `engines.opencode.model` as an explicit model and `engines.
 
 ## Generated ownership
 
-Current markers are rendered by `internal/artifact/marker.go`: `Generated by engine-sync from {source} — edit the source, then run: engine-sync build`, and `… then run: engine-sync global` on a machine render — a rendered declaration, a Codex global role and an OpenCode machine agent. Markdown uses an HTML comment, TOML and YAML frontmatter use `#`, and JSONC uses `//`. Codex MCP fences begin `# BEGIN mcp_servers — generated by .claude/scripts/build-codex.mjs from .mcp.json; do not edit inside this fence` and end `# END mcp_servers — generated`.
+Current markers are rendered by `internal/artifact/marker.go`: `Generated by engine-sync from {source} — edit the source, then run: engine-sync build`, and `… then run: engine-sync global` on a machine render — a rendered declaration, a Codex global role and an OpenCode machine agent. Markdown uses an HTML comment, TOML and YAML frontmatter use `#`, and JSONC uses `//`. Global rules use the owned `AGENTS.md` fence of § Global rules. Codex MCP fences begin `# BEGIN mcp_servers — generated by .claude/scripts/build-codex.mjs from .mcp.json; do not edit inside this fence` and end `# END mcp_servers — generated`.
 
 Complete historical compiler headers remain ownership evidence; a quoted or partial marker does not. Links require a receipt proving engine-sync created that exact link; location or byte equality alone does not establish ownership. Old Codex MCP begin fences are recognized and replaced too. Global role ownership is anchored to its first line. Rebuild migrates old owned files in place; unmarked foreign files remain conflicts.
 
@@ -274,7 +288,7 @@ All three hooks treat root resolution to HOME or an ancestor (`paths.ErrHomeRoot
 
 `stop` keeps its dirty flag durable while running build/check for each registered target. Success clears only the unchanged generation, under the dirty-store lock, preserving concurrent marks and process termination. Failure retains dirtiness and prints `{"decision":"block","reason":"…"}`; with `stop_hook_active`, prints `{"systemMessage":"…"}`. Reasons name the failed stages, binary and neutral repair commands.
 
-`start` checks and repairs stale project mirrors and refreshes the common machine roster, including defaults. The wrapper runs hook binaries as children, preserves stdin and always exits zero. Child failure or invalid Stop JSON yields a named diagnostic and a Stop `systemMessage`. An unavailable binary reports that mirrors were not checked; it makes no claim that a dirty flag exists. Unavailable hooks save a deferred refresh for the physical session root; the next equipped hook in that project runs SessionStart recovery before handling its payload. Hook children terminate within 16 seconds. Failed downloads back off for 60 seconds; dead download owners and locks older than 120 seconds are reclaimed without waiting. Hook writer-lock waits are bounded to 250 ms and report BUSY without blocking the turn.
+`start` checks and repairs stale project mirrors and refreshes the common machine roster, including defaults. The wrapper runs hook binaries as children, preserves stdin and always exits zero. Child failure or invalid Stop JSON yields a named diagnostic and a Stop `systemMessage`. An unavailable binary reports that mirrors were not checked; it makes no claim that a dirty flag exists. Unavailable hooks save a deferred refresh for the physical session root; the next equipped hook in that project runs SessionStart recovery before handling its payload. Hook children terminate within 16 seconds. Failed downloads back off for 60 seconds; dead download owners and locks older than 120 seconds are reclaimed without waiting. Hook writer-lock waits are bounded to 250 ms; a lock another live process holds past the wait writes a `lock-busy` info row, keeps the dirty flag set for the next turn and shows nothing on screen. A CLI write refused for a held lock exits 75.
 
 ## Environment
 

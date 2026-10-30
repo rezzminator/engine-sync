@@ -143,8 +143,8 @@ func TestReviewDirtyLockIgnoresWorkingDirectory(t *testing.T) {
 		}
 		t.Fatal("second cwd bypassed held dirty lock")
 	}
-	if !strings.Contains(err.Error(), "BUSY") {
-		t.Fatalf("second lock: %v, want BUSY", err)
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("second lock: %v, want ErrBusy", err)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestAuditLockAliasesAndUnicode(t *testing.T) {
 		if unlock != nil {
 			_ = unlock()
 		}
-		if err == nil || !strings.Contains(err.Error(), "BUSY") {
+		if !errors.Is(err, ErrBusy) {
 			t.Errorf("lock spelling bypass %s %v", spelling, err)
 		}
 	}

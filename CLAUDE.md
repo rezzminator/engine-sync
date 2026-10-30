@@ -19,7 +19,6 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 - `{engine-sync state}`: `$ENGINE_SYNC_STATE`, else `$XDG_STATE_HOME/engine-sync`, else `~/.local/state/engine-sync`; writer records, locks, dirty flags, link and write receipts
 - `targets`: the Codex homes and Claude config dirs `global` writes, plus the source clone and capabilities · the `targets` object of `~/.claude/engine-sync.json`
 - plugin: what installs into Claude Code · `plugins/engine-sync/`
-- marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - manifest: the plugin's version · `plugins/engine-sync/.claude-plugin/plugin.json`
 - hooks: `mark` after a Write or Edit, `stop`, and `start` (async) · `plugins/engine-sync/hooks/hooks.json`
 - wrapper: the POSIX sh entry every hook runs; resolves `$ENGINE_SYNC_BIN` (never linked), then the cache, then a checksum-verified download pinned in `plugins/engine-sync/libexec/SHA256SUMS` · `plugins/engine-sync/libexec/engine-sync`
@@ -33,19 +32,19 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 - Affected: `go test ./internal/{pkg}/ -run {Test} -count=1`, or `./cmd/engine-sync/`
 - Full: `go test ./...`; permanent project and machine fixtures live in `testdata/projects/`.
-- Golden: `scripts/golden-projects.py --binary PATH --fixture {plain|professor}` rewrites `testdata/projects/{fixture}/golden/artifacts.json`.
+- Golden: `scripts/golden-projects.py --binary PATH --fixture {plain|integration}` rewrites `testdata/projects/{fixture}/golden/artifacts.json`.
 - Tree: `scripts/check-tree_test.sh`, then `LEAK_TERMS={checkout}/scripts/leak-terms.txt scripts/check-tree.sh` (`LEAK_TERMS` defaults to `{checkout}/scripts/leak-terms.txt`). With no terms supplied, `publication` prints GAP and the run exits 3 when nothing else failed: no pass, no red; a named unusable file is ERROR.
 - Static: install the staticcheck version in `scripts/tool-versions.txt`, then `staticcheck ./...`.
 - Lint: `go vet ./...`, and `"$(go env GOROOT)/bin/gofmt" -l .` printing nothing.
 - Leak gate: `scripts/leak-check.sh`; in a worktree, `LEAK_TERMS={checkout}/scripts/leak-terms.txt scripts/leak-check.sh`.
 - Fence: a parent project's dev container that mounts this checkout may export that project's own terms as `LEAK_TERMS`; there, set it inline to `{checkout}/scripts/leak-terms.txt` for the tree and leak gates, else they scan against the wrong denylist.
-- Validate: `claude plugin validate --strict .` (the marketplace) and `claude plugin validate --strict plugins/engine-sync` (the plugin)
+- Validate: `claude plugin validate --strict plugins/engine-sync`
 - Release check: `make release-check`, after `git fetch origin main`, runs every check the release pull request runs: `make check`, `make tree`, `make leak`, `make release-version`, `make release`; `make release` fails on `develop` between releases by design (undated heading, stale `SHA256SUMS`).
 - Scratch: `/tmp/engine-sync/{purpose}/`
 
 ## CI
 
-- `.github/workflows/release.yml` on every pull request to `main`, never on a push: `check` (gofmt, vet, pinned staticcheck, tree gates, tests, both validates, the leak gate), `release-version` (the native release asset on each matrix runner prints the version) and `release` (the version moved past main's, `scripts/release-check.sh --release`, non-empty CHANGELOG notes), each a `make` target; merging it runs `publish`, which tags `v{version}` and publishes the four assets. Fork pull requests run the public gates; private leak terms are available only to trusted runs.
+- `.github/workflows/release.yml` on every pull request to `main`, never on a push: `check` (gofmt, vet, pinned staticcheck, tree gates, tests, the plugin validate, the leak gate), `release-version` (the native release asset on each matrix runner prints the version) and `release` (the version moved past main's, `scripts/release-check.sh --release`, non-empty CHANGELOG notes), each a `make` target; merging it runs `publish`, which tags `v{version}` and publishes the four assets. Fork pull requests run the public gates; private leak terms are available only to trusted runs.
 
 # Rules
 
@@ -69,4 +68,4 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 - `plugins/engine-sync/` holds only what installs: manifest, hooks, wrapper, checksums, README, LICENSE and SECURITY.md; implementation source stays outside it.
 - A hook never fails a turn by its exit code: every hook exits 0; a failing stage answers a `Stop` block or a `systemMessage`.
-- Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest and the marketplace.
+- Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest.

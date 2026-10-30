@@ -37,7 +37,7 @@ func assertGlobalSymlink(t *testing.T, target, source string) {
 }
 
 // assertGlobalRoleFile fails the test unless target is a regular file carrying
-// pfm's generated marker — the shape Codex loads and the proof pfm owns it.
+// engine-sync's generated marker — the shape Codex loads and the proof it owns it.
 func assertGlobalRoleFile(t *testing.T, target string) {
 	t.Helper()
 	info, err := os.Lstat(target)
@@ -264,9 +264,9 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 // source frontmatter's name/description, and no `.toml` is ever written
 // beside the `.md` source (the clone stays clean).
 func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
-	// The professor clone's real roster is compiled by its own gate (the
-	// fence runs engine-sync over the checkout); this repository pins every
-	// shape that roster uses on an invented fixture roster.
+	// A source repository's real roster is compiled by that repository's own
+	// gate; this repository pins every shape such a roster uses on an
+	// invented fixture roster.
 	agentsDir := filepath.Join("testdata", "global-agents")
 	sources, err := filepath.Glob(filepath.Join(agentsDir, "*.md"))
 	if err != nil {
@@ -722,8 +722,8 @@ func TestGlobalAgentsInstallsCodexRoleAsRegularFile(t *testing.T) {
 
 // TestGlobalAgentsPreservesUnprovenLegacyRoleLink covers the upgrade
 // path every host that ever ran the symlinking installer is on: the link is
-// pfm's own, so it is replaced by the real file rather than reported as a
-// conflict.
+// the installer's own, so it is replaced by the real file rather than
+// reported as a conflict.
 func TestGlobalAgentsPreservesUnprovenLegacyRoleLink(t *testing.T) {
 	home := testjail.Scratch(t)
 	writeAgentFixture(t, filepath.Join(home, "source-repo", "agents", "alpha.md"),
@@ -749,7 +749,7 @@ func TestGlobalAgentsPreservesUnprovenLegacyRoleLink(t *testing.T) {
 }
 
 // TestGlobalAgentsRefusesForeignCodexRoleFile is the other half of ownership:
-// a regular file of the same name that pfm did not write carries no generated
+// a regular file of the same name that engine-sync did not write carries no generated
 // marker, so it is reported and left byte-for-byte alone. Overwriting it
 // would destroy an operator's own role.
 func TestGlobalAgentsRefusesForeignCodexRoleFile(t *testing.T) {

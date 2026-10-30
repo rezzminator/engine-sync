@@ -35,6 +35,14 @@ type Record struct {
 // ErrNewerWriter reports an output a newer binary wrote.
 var ErrNewerWriter = errors.New("NEWER-WRITER")
 
+// ErrBusy reports a lock a live process holds past the wait: flock frees a
+// dead holder's lock, so a busy lock always has a live holder.
+var ErrBusy = errors.New("BUSY")
+
+// BusyCode is the exit code of a run refused by ErrBusy, the in-process and
+// cross-process channel a caller tells it apart by (EX_TEMPFAIL).
+const BusyCode = 75
+
 // NewerWriterError names the newer version and who wrote it.
 type NewerWriterError struct {
 	Record Record
@@ -95,9 +103,9 @@ func Lock(state, root string, wait ...time.Duration) (func() error, error) {
 			owner := make([]byte, 1024)
 			n, readErr := file.ReadAt(owner, 0)
 			if readErr != nil && n == 0 {
-				return nil, errors.Join(fmt.Errorf("BUSY lock %s: holder unavailable: %w", path, readErr), file.Close())
+				return nil, errors.Join(fmt.Errorf("%w lock %s: holder unavailable: %w", ErrBusy, path, readErr), file.Close())
 			}
-			return nil, errors.Join(fmt.Errorf("BUSY lock %s: holder %s; deadline exceeded", path, strings.TrimSpace(string(owner[:n]))), file.Close())
+			return nil, errors.Join(fmt.Errorf("%w lock %s: holder %s; deadline exceeded", ErrBusy, path, strings.TrimSpace(string(owner[:n]))), file.Close())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

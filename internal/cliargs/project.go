@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/diag"
+	"github.com/rezzminator/engine-sync/internal/guard"
 	"github.com/rezzminator/engine-sync/internal/pluginlog"
+	"github.com/rezzminator/engine-sync/internal/runlog"
 	"github.com/rezzminator/engine-sync/internal/target/codex"
 	"github.com/rezzminator/engine-sync/internal/target/opencode"
 	"io"
@@ -88,7 +90,11 @@ func ParseProjectOptions(action string, args []string, stdout, stderr io.Writer,
 }
 
 func ReportFailure(prefix string, asJSON bool, err error, stdout, stderr io.Writer) int {
-	pluginlog.Record(nil, stderr, pluginlog.Row{Level: "error", Event: "run-failed", Msg: prefix + ": " + err.Error(), Where: "internal/cliargs/project.go#ReportFailure", Detail: map[string]any{"error": err.Error()}})
+	level, event := "error", "run-failed"
+	if errors.Is(err, guard.ErrBusy) {
+		level, event = "info", "lock-busy"
+	}
+	runlog.Record(nil, stderr, pluginlog.Row{Level: level, Event: event, Msg: prefix + ": " + err.Error(), Where: "internal/cliargs/project.go#ReportFailure", Detail: map[string]any{"error": err.Error()}})
 	if asJSON {
 		return max(diag.WriteJSON(stdout, stderr, opencode.Result{}, err), FailureCode(err))
 	}
@@ -97,10 +103,14 @@ func ReportFailure(prefix string, asJSON bool, err error, stdout, stderr io.Writ
 }
 
 // FailureCode is the exit code of a failed run: 2 for a configuration refusal
-// (a removed key, a moved file, a rejected value), else 1.
+// (a removed key, a moved file, a rejected value), guard.BusyCode for a lock a
+// live process holds, else 1.
 func FailureCode(err error) int {
 	if config.IsRefusal(err) {
 		return 2
+	}
+	if errors.Is(err, guard.ErrBusy) {
+		return guard.BusyCode
 	}
 	return 1
 }

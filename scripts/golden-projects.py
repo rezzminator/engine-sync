@@ -11,8 +11,7 @@ import tempfile
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--binary', type=Path, required=True)
-parser.add_argument('--fixture', choices=['plain', 'professor'], required=True)
-parser.add_argument('--base', action='store_true')
+parser.add_argument('--fixture', choices=['plain', 'integration'], required=True)
 args = parser.parse_args()
 fixture = Path(__file__).resolve().parent.parent / 'testdata/projects' / args.fixture
 scratch = Path(os.environ.get('TMPDIR','/tmp'))
@@ -21,21 +20,13 @@ with tempfile.TemporaryDirectory(prefix='golden-', dir=scratch) as temporary:
     jail = Path(temporary)
     shutil.copytree(fixture / 'input', jail, dirs_exist_ok=True)
     root, home = jail / 'project', jail / 'home'
-    if args.base:
-        config = root / '.claude/engine-sync.json'
-        legacy = {'version': 1, **json.loads(config.read_text())['codex']}
-        (root / '.claude/codex-build.json').write_text(json.dumps(legacy))
-        config.unlink()
-        for source in root.rglob('*.md'):
-            source.write_text(source.read_text().replace('codex-sandbox: inherit\n', ''))
-        (home / '.professor').symlink_to(root)
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('ENGINE_SYNC_', 'XDG_', 'CLAUDE_', 'CODEX_'))}
     env.update(HOME=str(home), TMPDIR=str(scratch),
                XDG_STATE_HOME=str(jail / 'state'), XDG_DATA_HOME=str(home / '.local/share'),
                CLAUDE_PROJECT_DIR=str(root), GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1')
     commands = [['build', str(root)], ['check', str(root)], ['global']]
-    if args.fixture == 'professor':
+    if args.fixture == 'integration':
         commands[-1] += ['--source-repo', str(root)]
     for command in commands:
         result = subprocess.run([str(args.binary.resolve()), *command], env=env,

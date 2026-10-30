@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/pluginlog"
+	"github.com/rezzminator/engine-sync/internal/runlog"
 	"io"
 	"path/filepath"
 )
@@ -30,13 +31,13 @@ func ResolveCached(root, home string, get paths.Env, policies map[string]CachedR
 	}
 	for _, notice := range cfg.Deprecations {
 		if !notices[notice] {
-			pluginlog.Record(get, stderr, pluginlog.Row{Level: "warning", Event: "config-deprecated", Msg: notice, Where: "internal/config/cached.go#ResolveCached"})
+			runlog.Record(get, stderr, pluginlog.Row{Level: "warning", Event: "config-deprecated", Msg: notice, Where: "internal/config/cached.go#ResolveCached"})
 			fmt.Fprintln(stderr, "engine-sync: "+notice)
 			notices[notice] = true
 		}
 	}
 	if cfg.Legacy && !notices[cfg.Source] {
-		pluginlog.Record(get, stderr, pluginlog.Row{Level: "warning", Event: "config-deprecated", Msg: fmt.Sprintf("%s is deprecated; use %s", cfg.Source, filepath.Join(root, RelPath)), Where: "internal/config/cached.go#ResolveCached"})
+		runlog.Record(get, stderr, pluginlog.Row{Level: "warning", Event: "config-deprecated", Msg: fmt.Sprintf("%s is deprecated; use %s", cfg.Source, filepath.Join(root, RelPath)), Where: "internal/config/cached.go#ResolveCached"})
 		fmt.Fprintf(stderr, "engine-sync: %s is deprecated; use %s\n", cfg.Source, filepath.Join(root, RelPath))
 		if notices != nil {
 			notices[cfg.Source] = true

@@ -36,7 +36,7 @@ func buildOpenCodeForTest(t *testing.T, action, root, home string) (int, string,
 }
 
 // An adopter's .claude/agents/labber.md symlinked into an uninitialised
-// submodule names a source pfm cannot read right now, not one the adopter
+// submodule names a source engine-sync cannot read right now, not one the adopter
 // retired: build keeps its .opencode/agent twin byte for byte and says so.
 func TestOpenCodeUnresolvableAgentSourceKeepsItsTwin(t *testing.T) {
 	root := testjail.Scratch(t)

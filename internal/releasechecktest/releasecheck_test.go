@@ -32,10 +32,9 @@ func releaseCheckTree(t *testing.T, committed, changelogHeading string) string {
 		"scripts/release-check.sh":                       string(src),
 		"scripts/build-release.sh":                       stubBuild,
 		"plugins/engine-sync/.claude-plugin/plugin.json": `{"name":"engine-sync","version":"` + version + `"}`,
-		".claude-plugin/marketplace.json":                `{"plugins":[{"name":"engine-sync","version":"` + version + `"}]}`,
-		"README.md":                                      "[![Version](https://img.shields.io/badge/version-" + version + "-blue)](./CHANGELOG.md)\n",
-		"CHANGELOG.md":                                   "# Changelog\n\n" + changelogHeading + "\n",
-		"plugins/engine-sync/libexec/SHA256SUMS":         committed,
+		"README.md":                              "[![Version](https://img.shields.io/badge/version-" + version + "-blue)](./CHANGELOG.md)\n",
+		"CHANGELOG.md":                           "# Changelog\n\n" + changelogHeading + "\n",
+		"plugins/engine-sync/libexec/SHA256SUMS": committed,
 	}
 	for rel, body := range files {
 		releaseCheckWriteFixture(t, root, rel, body)
@@ -111,7 +110,6 @@ func TestReleaseCheckComparesSumsOnlyForARelease(t *testing.T) {
 		{name: "plain does not invoke failing builder", committed: staleSums, heading: undated, files: failedBuilder, wantOut: plain},
 		{name: "release reports builder failure", committed: freshSums, heading: dated, args: []string{"--release"}, files: failedBuilder, wantCode: 1, wantOut: "build-release.sh failed, so plugins/engine-sync/libexec/SHA256SUMS cannot be compared:"},
 		{name: "release requires dated heading", committed: freshSums, heading: undated, args: []string{"--release"}, wantCode: 1, wantOut: "a release carries its date"},
-		{name: "plain rejects disagreeing marketplace", committed: staleSums, heading: undated, files: map[string]string{".claude-plugin/marketplace.json": `{"plugins":[{"name":"engine-sync","version":"0.0.1"}]}`}, wantCode: 1, wantOut: ".claude-plugin/marketplace.json says '0.0.1'"},
 		{name: "plain rejects disagreeing badge", committed: staleSums, heading: undated, files: map[string]string{"README.md": "badge/version-0.0.1-blue\n"}, wantCode: 1, wantOut: "README.md badge says '0.0.1'"},
 		{name: "plain rejects nonincreasing base", committed: staleSums, heading: undated, args: []string{version}, wantCode: 1, wantOut: "does not sort after " + version},
 		{name: "plain still requires readable ledger", committed: staleSums, heading: undated, remove: "plugins/engine-sync/libexec/SHA256SUMS", wantCode: 2, wantOut: "cannot read plugins/engine-sync/libexec/SHA256SUMS"},

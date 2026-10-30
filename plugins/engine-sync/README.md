@@ -4,8 +4,9 @@
 
 ## Install
 
-```text
-/plugin install engine-sync --marketplace rezzminator/engine-sync
+```sh
+claude plugin marketplace add rezzminator/professor
+claude plugin install engine-sync@professor
 ```
 
 ## What it does

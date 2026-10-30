@@ -141,6 +141,7 @@ func Doctor(options DoctorOptions) []Row {
 	if !options.ClaudeAbsent {
 		rows = append(rows, agentRows(options)...)
 	}
+	rows = append(rows, rulesRows(options)...)
 
 	failed := false
 	for _, row := range rows {
@@ -188,7 +189,7 @@ func agentRows(options DoctorOptions) []Row {
 			stale[state.Path] = true
 		}
 	}
-	plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, Plan: true})
+	plan := RunMachine(Options{Config: options.Config, Home: options.Home, SourceRepo: options.SourceRepo, ClaudeConfigDirs: options.ClaudeConfigDirs, CodexHomes: options.CodexHomes, Plan: true, skipRules: true})
 	for _, event := range plan.Events {
 		if (event.Verb == VerbChange || event.Verb == VerbRetire || event.Verb == VerbConflict) && !namesStale(event.Message, stale) {
 			if orphan, ok := markedPromptOrphan(event); ok {

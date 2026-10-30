@@ -40,7 +40,7 @@ Reconciliation preserves foreign files, roles, links and directory children. It 
 
 Managed directories and parents cannot redirect output through a symlink. An explicitly selected Claude configuration directory is resolved once. Keeper regions preserve their file mode and user-owned content. A keeper link is retained and its target edited only within the declared managed root. JSONC parsing accepts line/block comments and trailing commas while preserving user keys outside the owned schema, permission and MCP fields; malformed JSONC remains untouched.
 
-CLI writers sort and deduplicate canonical guard keys, hold their locks, consult version records, execute, then record every admitted attempt, including partial failures. Shared home command destinations have machine guards separate from project guards. Check and doctor consult those records without writing. Ordinary CLI writers wait; hooks bound each wait to 250 ms and answer BUSY as a non-blocking systemMessage.
+CLI writers sort and deduplicate canonical guard keys, hold their locks, consult version records, execute, then record every admitted attempt, including partial failures. Shared home command destinations have machine guards separate from project guards. Check and doctor consult those records without writing. Ordinary CLI writers wait; hooks bound each wait to 250 ms. A lock still held is `guard.ErrBusy` (exit code 75 from a CLI run): the Stop hook skips that engine's check, keeps the dirty flag set, writes a `lock-busy` info row and shows nothing; the next turn repeats the stages.
 
 The dirty flag remains durable while Stop stages run. A short dirty-store lock protects mark and successful cleanup; cleanup verifies the same inode, timestamp and size before removing it. A concurrent mark or process death therefore preserves dirtiness. Stop stage failure blocks once, with subsequent active Stop failures reporting a systemMessage. Root, state and output errors remain visible.
 
@@ -62,14 +62,16 @@ Canonical public terms are source, target, artifact, mirror, marker, project sco
 | config | Layers, provenance, typed target roster and schema |
 | source | Bounded reads, frontmatter, discovery, declarations and naming |
 | rewrite | Shared text transformations and literal rules |
+| jsonc | Comment-preserving reads and single-property edits of a JSONC object |
 | target | Registry and target interface |
 | target/codex, target/opencode | Native renderers and validators |
 | artifact | Artifact shapes and ownership-marker syntax |
 | engine | Shared rendering, validation and reconciliation pipeline |
 | reconcile | Filesystem plan, ownership, kept outputs and selective cleanup |
-| machine | Account targets and machine source mirrors through the pipeline; retirements and doctor --machine rows |
+| machine | Account targets and machine source mirrors through the pipeline; global always-on rules; retirements and doctor --machine rows |
 | cliargs | Flag sets, exit codes and usage every command shares; the extraction that keeps cli inside the size-cmd budget |
-| pluginlog | The plugin's bounded errors, warnings and info JSON-line logs |
+| pluginlog | Vendored copy of the shared plugin-log library: bounded level files, rotation, held rows |
+| runlog | The adapter onto pluginlog: where engine-sync's rows go and which rows a project command writes |
 | hook | Payload, scope, dirty store and lifecycle stages |
 | paths, atomicfile, guard | Path identity, bounded IO, publication and version guards |
 | diag | Renders compiler diagnostics as text and contract-compatible JSON |

@@ -3,7 +3,7 @@
 **Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
 
 [![CI](https://github.com/rezzminator/engine-sync/actions/workflows/release.yml/badge.svg?branch=develop)](https://github.com/rezzminator/engine-sync/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue)](./CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://docs.claude.com/en/docs/claude-code/plugins)
 [![Built with Professor](https://img.shields.io/badge/built%20with-Professor-8A2BE2)](https://github.com/rezzminator/professor)
@@ -27,7 +27,7 @@ Claude Code is the source: `CLAUDE.md`, `.claude/agents`, `.claude/commands`, `.
 | `version` | Print the binary version; `--version` is an alias. |
 | `help` | Print usage and registered targets; `-h` and `--help` are aliases. |
 
-Exit codes: 0 pass, 1 a finding or failure, 2 a usage error. The complete flag and JSON contract is [interface.md](docs/interface.md).
+Exit codes: 0 pass, 1 a finding or failure, 2 a usage error, 75 a write refused because another live engine-sync process holds the lock (rerun once it finishes). The complete flag and JSON contract is [interface.md](docs/interface.md).
 
 ## The plugin
 
@@ -41,7 +41,7 @@ Exit codes: 0 pass, 1 a finding or failure, 2 a usage error. The complete flag a
 
 ## Logs
 
-Errors, warnings and meaningful info are JSON rows in `errors.jsonl`, `warnings.jsonl` and `info.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise they use `~/.local/state/engine-sync/logs`. Capped files move to `.1`; a failed logging streak reports once on stderr without changing command results.
+Logs go through the shared plugin-log library, vendored at `internal/pluginlog` as a byte-identical copy. Rows are JSON lines in `errors.jsonl`, `warnings.jsonl`, `info.jsonl` and `debug.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise under `~/.local/state/engine-sync/logs`. A file past its cap moves to `.1`, keeping five generations (`.1`…`.5`), with a `log-capped` warning row. A row that cannot be written is held for the next write. A failing streak reports one line on stderr without changing command results.
 
 ## Standalone use
 
@@ -65,7 +65,7 @@ Configuration is one typed resolver over built-in defaults, machine policy, proj
 
 ```sh
 go vet ./... && go test ./...
-claude plugin validate --strict . && claude plugin validate --strict plugins/engine-sync
+claude plugin validate --strict plugins/engine-sync
 ```
 
 Built and maintained with [Professor](https://github.com/rezzminator/professor).

@@ -24,7 +24,6 @@ check:
 	go run honnef.co/go/tools/cmd/staticcheck@"$$version" ./...
 	scripts/check-tree_test.sh
 	go test ./...
-	claude plugin validate --strict .
 	claude plugin validate --strict plugins/engine-sync
 
 # LEAK_TERMS names the terms file (CI writes the secret to one); unset, scripts/leak-terms.txt.
