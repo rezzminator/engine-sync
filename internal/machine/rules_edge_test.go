@@ -117,3 +117,41 @@ func TestGlobalRulesUnreadableCommands(t *testing.T) {
 		t.Fatal("doctor has no ERROR row for the unreadable roster")
 	}
 }
+
+// A rule-control rule (visible-to, no paths) stays always-on, compiles without
+// its frontmatter, and doctor names the loops it over-reaches as a row, never
+// a failure: Codex and OpenCode have no per-loop delivery.
+func TestGlobalRulesVisibleTo(t *testing.T) {
+	home, codexHome := rulesFixture(t)
+	rules := filepath.Join(home, ".claude", "rules")
+	targeted := filepath.Join(rules, "main-only.md")
+	writeMachineFixture(t, targeted, "---\nvisible-to:\n  include: [main]\n  exclude: [\"reviewer-*\"]\n---\nMain only.\n")
+	scoped := filepath.Join(rules, "scoped-main.md")
+	writeMachineFixture(t, scoped, "---\npaths: [\"src/**\"]\nvisible-to: {include: [main]}\n---\nScoped main.\n")
+	report := runRules(t, home, codexHome, false, false)
+	if skipped := strings.Join(messages(report.Events, VerbSkip), "\n"); strings.Contains(skipped, "RULE-") {
+		t.Fatalf("a visible-to rule was skipped: %v", skipped)
+	}
+	want := "<!-- rule: ~/.claude/rules/main-only.md -->\nMain only.\n"
+	for _, path := range []string{filepath.Join(codexHome, "AGENTS.md"), compiledRulesPath(home)} {
+		got := readFixture(t, path)
+		if !strings.Contains(got, want) || strings.Contains(got, "visible-to") || strings.Contains(got, "include:") || strings.Contains(got, "Scoped main.") {
+			t.Fatalf("%s does not hold the targeted rule always-on with its frontmatter stripped:\n%s", path, got)
+		}
+	}
+	rows := rulesRowsOf(t, home, codexHome)
+	for _, row := range rows {
+		if row.Level == LevelFail {
+			t.Errorf("a visible-to rule failed doctor: %v", row)
+		}
+	}
+	if !hasRow(rows, LevelOK, "VISIBLE-TO "+targeted, "every Codex and OpenCode loop") {
+		t.Errorf("doctor does not name the visible-to gap: %v", rows)
+	}
+	if hasRow(rows, LevelOK, "VISIBLE-TO "+scoped) || !hasRow(rows, LevelWarn, "PATH-SCOPED "+scoped) {
+		t.Errorf("a path-scoped visible-to rule is not PATH-SCOPED alone: %v", rows)
+	}
+	if hasRow(rows, LevelOK, "VISIBLE-TO", filepath.Join(rules, "a.md")) {
+		t.Errorf("a rule with no visible-to is named: %v", rows)
+	}
+}

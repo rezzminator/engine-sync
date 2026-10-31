@@ -36,7 +36,10 @@ type globalRules struct {
 	// `<!-- rule: … -->` line, in sorted relative-path order; "" when none.
 	Body   string
 	Scoped []string // path-scoped rules: delivered by no channel yet
-	Broken []string // RULE-FRONTMATTER and RULE-FENCE rows: each rule skipped
+	// Targeted are always-on rules with a rule-control `visible-to:` key:
+	// compiled like any other, so they reach every Codex and OpenCode loop.
+	Targeted []string
+	Broken   []string // RULE-FRONTMATTER and RULE-FENCE rows: each rule skipped
 	// Warnings name the command links the /command roster skipped.
 	Warnings []string
 }
@@ -93,6 +96,9 @@ func loadGlobalRules(home, claudeDir string, policy config.Config) (globalRules,
 			// later run then refuses.
 			set.Broken = append(set.Broken, fmt.Sprintf("RULE-FENCE %s: the body holds the engine-sync rules fence line", path))
 			continue
+		}
+		if visibleTo := source.MapValue(front.Node, "visible-to"); visibleTo != nil && visibleTo.Tag != "!!null" {
+			set.Targeted = append(set.Targeted, path)
 		}
 		blocks = append(blocks, "<!-- rule: "+set.Label+"/"+filepath.ToSlash(rel)+" -->\n"+compiled+"\n")
 	}
@@ -320,6 +326,9 @@ func rulesRows(options DoctorOptions) []Row {
 	}
 	for _, scoped := range set.Scoped {
 		rows = append(rows, Row{Level: LevelWarn, Message: "global-rules PATH-SCOPED " + scoped + ` not delivered to Codex or OpenCode note="the path-scoped injector is not built"`})
+	}
+	for _, targeted := range set.Targeted {
+		rows = append(rows, Row{Level: LevelOK, Message: "global-rules VISIBLE-TO " + targeted + ` delivered to every Codex and OpenCode loop note="visible-to narrows a rule on Claude Code only (rule-control); Codex and OpenCode have no per-loop delivery"`})
 	}
 	if len(set.Body) > globalRulesBudget {
 		rows = append(rows, Row{Level: LevelWarn, Message: fmt.Sprintf("GLOBAL-BUDGET %d > %d bytes of always-on global rules, paid by every agent of every project", len(set.Body), globalRulesBudget)})

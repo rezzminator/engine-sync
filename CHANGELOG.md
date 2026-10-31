@@ -4,6 +4,10 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+### Added
+
+- A global rule carrying rule-control's `visible-to:` frontmatter key and no `paths:` stays always-on: `engine-sync global` compiles it into the Codex block and the OpenCode file with its frontmatter stripped, and `engine-sync doctor --machine` names it in a `global-rules VISIBLE-TO {path} delivered to every Codex and OpenCode loop` `ok` row, since neither engine can deliver a rule to some loops only.
+
 ## [0.6.0] - 2026-10-30
 
 ### Added
