@@ -5,7 +5,7 @@
 ## Install
 
 ```sh
-claude plugin marketplace add rezzminator/professor
+claude plugin marketplace add rezzminator/engine-sync
 claude plugin install engine-sync@professor
 ```
 

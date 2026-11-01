@@ -203,3 +203,23 @@ func TestCreatePublishesOnceAndPreservesExistingTarget(t *testing.T) {
 		})
 	}
 }
+
+// TestRenameReplacesItsDestination: a rename moves the file over one already there, which Move refuses.
+func TestRenameReplacesItsDestination(t *testing.T) {
+	directory := testjail.Scratch(t)
+	from, to := filepath.Join(directory, "from"), filepath.Join(directory, "to")
+	for path, content := range map[string]string{from: "new\n", to: "old\n"} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(to); string(raw) != "new\n" {
+		t.Fatalf("destination = %q, want %q", raw, "new\n")
+	}
+	if _, err := os.Lstat(from); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source after rename: %v, want not-exist", err)
+	}
+}

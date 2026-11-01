@@ -70,7 +70,7 @@ Canonical public terms are source, target, artifact, mirror, marker, project sco
 | reconcile | Filesystem plan, ownership, kept outputs and selective cleanup |
 | machine | Account targets and machine source mirrors through the pipeline; global always-on rules; retirements and doctor --machine rows |
 | cliargs | Flag sets, exit codes and usage every command shares; the extraction that keeps cli inside the size-cmd budget |
-| pluginlog | Vendored copy of the shared plugin-log library: bounded level files, rotation, held rows |
+| pluginlog | engine-sync's own logging module: bounded level files, rotation, held rows |
 | runlog | The adapter onto pluginlog: where engine-sync's rows go and which rows a project command writes |
 | hook | Payload, scope, dirty store and lifecycle stages |
 | paths, atomicfile, guard | Path identity, bounded IO, publication and version guards |
