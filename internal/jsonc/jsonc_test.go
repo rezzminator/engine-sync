@@ -14,38 +14,46 @@ const config = `{
 `
 
 func TestSetPropertyKeepsComments(t *testing.T) {
-	got, err := jsonc.SetProperty([]byte(config), "instructions", []byte(`["/a.md","/b.md"]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "{\n  // the operator's note\n  \"model\": \"x\", /* kept */\n  \"instructions\": [\"/a.md\",\"/b.md\"],\n}\n"
-	if string(got) != want {
-		t.Fatalf("set:\n%s\nwant:\n%s", got, want)
-	}
-	added, err := jsonc.SetProperty([]byte("{\n  // only a comment\n}\n"), "instructions", []byte(`["/b.md"]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "{\n  // only a comment\n\n  \"instructions\": [\"/b.md\"]\n}\n"; string(added) != want {
-		t.Fatalf("append:\n%s\nwant:\n%s", added, want)
-	}
-	if _, err := jsonc.DecodeObject(added); err != nil {
-		t.Fatalf("appended document does not parse: %v", err)
+	for _, row := range []struct{ name, raw, value, want string }{
+		{"replace", config, `["/a.md","/b.md"]`,
+			"{\n  // the operator's note\n  \"model\": \"x\", /* kept */\n  \"instructions\": [\"/a.md\",\"/b.md\"],\n}\n"},
+		{"append after a comment", "{\n  // only a comment\n}\n", `["/b.md"]`,
+			"{\n  // only a comment\n\n  \"instructions\": [\"/b.md\"]\n}\n"},
+		{"append after a string holding a comma", "{\n  \"model\": \"a, }b\" // tail\n}\n", `["/b.md"]`,
+			"{\n  \"model\": \"a, }b\", // tail\n\n  \"instructions\": [\"/b.md\"]\n}\n"},
+	} {
+		got, err := jsonc.SetProperty([]byte(row.raw), "instructions", []byte(row.value))
+		if err != nil {
+			t.Fatalf("%s: %v", row.name, err)
+		}
+		if string(got) != row.want {
+			t.Fatalf("%s:\n%q\nwant:\n%q", row.name, got, row.want)
+		}
+		if _, err := jsonc.DecodeObject(got); err != nil {
+			t.Fatalf("%s: the result does not parse: %v", row.name, err)
+		}
 	}
 }
 
 func TestRemovePropertyKeepsComments(t *testing.T) {
-	got, err := jsonc.RemoveProperty([]byte(config), "instructions")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "{\n  // the operator's note\n  \"model\": \"x\", /* kept */\n  \n}\n"
-	if string(got) != want {
-		t.Fatalf("remove:\n%q\nwant:\n%q", got, want)
-	}
-	document, err := jsonc.DecodeObject(got)
-	if err != nil || document["model"] != "x" || document["instructions"] != nil {
-		t.Fatalf("decode after remove: %v %v", document, err)
+	for _, row := range []struct{ name, raw, remove, want string }{
+		{"last with trailing comma", config, "instructions",
+			"{\n  // the operator's note\n  \"model\": \"x\", /* kept */\n  \n}\n"},
+		{"last without trailing comma", "{\n  \"a\": 1 /* one */, // two\n  \"b\": 2\n}\n", "b",
+			"{\n  \"a\": 1 /* one */ // two\n  \n}\n"},
+		{"first beside a string holding a comma", "{\n  \"a\": 1,\n  \"b\": \"x, }\"\n}\n", "a",
+			"{\n  \n  \"b\": \"x, }\"\n}\n"},
+	} {
+		got, err := jsonc.RemoveProperty([]byte(row.raw), row.remove)
+		if err != nil {
+			t.Fatalf("%s: %v", row.name, err)
+		}
+		if string(got) != row.want {
+			t.Fatalf("%s:\n%q\nwant:\n%q", row.name, got, row.want)
+		}
+		if _, err := jsonc.DecodeObject(got); err != nil {
+			t.Fatalf("%s: the result does not parse: %v", row.name, err)
+		}
 	}
 }
 
