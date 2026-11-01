@@ -154,6 +154,9 @@ func WriteScratch(directory, pattern string, content []byte) (path string, clean
 	return path, cleanup, nil
 }
 
+// Rename is the one door for moving a file aside over whatever sits at to, as a rotating log does.
+func Rename(from, to string) error { return os.Rename(from, to) }
+
 func Symlink(target, path string) error {
 	scratch := filepath.Join(
 		filepath.Dir(path),

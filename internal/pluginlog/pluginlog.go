@@ -1,9 +1,8 @@
-// Package pluginlog is the shared plugin-log library: level files under one directory per plugin, rows bounded and
+// Package pluginlog is the plugin-log library: level files under one directory per plugin, rows bounded and
 // keyed in one order, rotation past a cap, and rows held in memory across a failed write. It imports the standard
-// library only.
+// library and engine-sync's atomicfile door.
 //
-// This file is a vendored copy of the plugin-log canonical source, kept byte-identical in every plugin by a sync
-// check: change the canonical source, then re-vendor every copy.
+// This is engine-sync's own logging module; edit it here.
 package pluginlog
 
 import (
@@ -17,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rezzminator/engine-sync/internal/atomicfile"
 )
 
 const (
@@ -276,11 +277,11 @@ func rotate(path string) (bool, error) {
 	}
 	for n := Keep - 1; n >= 1; n-- {
 		from := fmt.Sprintf("%s.%d", path, n)
-		if err := os.Rename(from, fmt.Sprintf("%s.%d", path, n+1)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := atomicfile.Rename(from, fmt.Sprintf("%s.%d", path, n+1)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return false, fmt.Errorf("rotate %s: %w", from, err)
 		}
 	}
-	if err := os.Rename(path, path+".1"); err != nil {
+	if err := atomicfile.Rename(path, path+".1"); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Another writer moved it aside first.
 			return false, nil

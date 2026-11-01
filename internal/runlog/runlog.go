@@ -1,4 +1,4 @@
-// Package runlog is engine-sync's adapter onto the vendored plugin-log library: where its rows go and which rows a
+// Package runlog is engine-sync's adapter onto the plugin-log module: where its rows go and which rows a
 // project command writes.
 package runlog
 

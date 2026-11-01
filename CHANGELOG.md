@@ -2,7 +2,21 @@
 
 Every release of engine-sync. Versions follow [semantic versioning](https://semver.org); each release is the `main` commit tagged `v<version>`, with a GitHub release carrying the section below and the four platform binaries.
 
-## [Unreleased]
+## [0.7.0] - 2026-11-01
+
+### Added
+
+- A global rule carrying rule-control's `visible-to:` frontmatter key and no `paths:` stays always-on: `engine-sync global` compiles it into the Codex block and the OpenCode file with its frontmatter stripped, and `engine-sync doctor --machine` names it in a `global-rules VISIBLE-TO {path} delivered to every Codex and OpenCode loop` `ok` row, since neither engine can deliver a rule to some loops only.
+- Path-scoped global rules (a rule with `paths:` frontmatter) now reach Codex and OpenCode. Neither engine has a path trigger, so `engine-sync global` puts a read-on-match pointer in the rule's sorted place in the compiled rules: a `<!-- rule: {rules dir}/{relative path} (path-scoped) -->` line, then ``Before working on a file matching `{glob}`, read {rules dir}/{relative path} and follow it.`` The rule's body is not compiled. A rule with both `paths:` and `visible-to:` is a pointer and gets no `VISIBLE-TO` row.
+
+### Changed
+
+- `engine-sync doctor --machine` reports each path-scoped rule as an `ok` row, `global-rules PATH-SCOPED {path} delivered to Codex and OpenCode as a read-on-match pointer`, instead of a `not delivered` warning.
+- The `GLOBAL-BUDGET` warning fires past 9 KiB of always-on text instead of 8 KiB, leaving room for the path-scoped pointers.
+- This repository ships its own marketplace again, named `professor`: install with `claude plugin marketplace add rezzminator/engine-sync`, then `claude plugin install engine-sync@professor`.
+- `.jsonc` files, such as the OpenCode config whose `instructions` entry `global` edits, are read and edited through a maintained JSONC library instead of a hand-written parser; comments and every other entry still keep their bytes, including values holding a comma or a closing brace inside a string.
+- Logging is engine-sync's own module rather than a vendored copy of a shared library; files, rotation and held rows are unchanged.
+- Dependency updates: `gopkg.in/yaml.v3` 3.0.6 and the `golang.org/x` modules.
 
 ## [0.6.0] - 2026-10-30
 

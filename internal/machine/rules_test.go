@@ -64,6 +64,8 @@ func readFixture(t *testing.T, path string) string {
 func wantRulesBody() string {
 	return "<!-- rule: ~/.claude/rules/a.md -->\nAlways A.\n\n" +
 		"<!-- rule: ~/.claude/rules/b.md -->\nRun $tidy with model: gpt-5.\n\n" +
+		"<!-- rule: ~/.claude/rules/scoped.md (path-scoped) -->\n" +
+		"Before working on a file matching `src/**`, read ~/.claude/rules/scoped.md and follow it.\n\n" +
 		"<!-- rule: ~/.claude/rules/sub/c.md -->\nC nested.\n"
 }
 
@@ -89,14 +91,14 @@ func TestGlobalRulesCodexBlock(t *testing.T) {
 		t.Fatalf("an edited rule did not replace the block in place:\n%s", got)
 	}
 
-	for _, name := range []string{"a.md", "b.md", filepath.Join("sub", "c.md")} {
+	for _, name := range []string{"a.md", "b.md", filepath.Join("sub", "c.md"), "scoped.md"} {
 		if err := os.Remove(filepath.Join(home, ".claude", "rules", name)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	runRules(t, home, codexHome, false, false)
 	if got := readFixture(t, agents); got != codexKeeper {
-		t.Fatalf("no always-on rule left the block behind:\n%q\nwant:\n%q", got, codexKeeper)
+		t.Fatalf("no rule left the block behind:\n%q\nwant:\n%q", got, codexKeeper)
 	}
 }
 
@@ -167,15 +169,16 @@ func TestGlobalRulesDoctor(t *testing.T) {
 			t.Errorf("before install, no fail row naming %v: %v", want, rows)
 		}
 	}
-	if !hasRow(rows, LevelWarn, "PATH-SCOPED", filepath.Join(home, ".claude", "rules", "scoped.md")) {
-		t.Errorf("the path-scoped rule is not named as undelivered: %v", rows)
-	}
 
 	runRules(t, home, codexHome, false, false)
-	for _, row := range rulesRowsOf(t, home, codexHome) {
+	installed := rulesRowsOf(t, home, codexHome)
+	for _, row := range installed {
 		if row.Level == LevelFail {
 			t.Errorf("after install, a failing rules row: %v", row)
 		}
+	}
+	if !hasRow(installed, LevelOK, "PATH-SCOPED", filepath.Join(home, ".claude", "rules", "scoped.md"), "read-on-match pointer") {
+		t.Errorf("the path-scoped rule is not named as delivered by pointer: %v", installed)
 	}
 
 	writeMachineFixture(t, filepath.Join(home, ".claude", "rules", "a.md"), "Always A, edited.\n")

@@ -3,7 +3,7 @@
 **Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn**
 
 [![CI](https://github.com/rezzminator/engine-sync/actions/workflows/release.yml/badge.svg?branch=develop)](https://github.com/rezzminator/engine-sync/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.6.0-blue)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue)](./CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://docs.claude.com/en/docs/claude-code/plugins)
 [![Built with Professor](https://img.shields.io/badge/built%20with-Professor-8A2BE2)](https://github.com/rezzminator/professor)
@@ -41,7 +41,7 @@ Exit codes: 0 pass, 1 a finding or failure, 2 a usage error, 75 a write refused 
 
 ## Logs
 
-Logs go through the shared plugin-log library, vendored at `internal/pluginlog` as a byte-identical copy. Rows are JSON lines in `errors.jsonl`, `warnings.jsonl`, `info.jsonl` and `debug.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise under `~/.local/state/engine-sync/logs`. A file past its cap moves to `.1`, keeping five generations (`.1`…`.5`), with a `log-capped` warning row. A row that cannot be written is held for the next write. A failing streak reports one line on stderr without changing command results.
+Logs go through engine-sync's own logging module, `internal/pluginlog`. Rows are JSON lines in `errors.jsonl`, `warnings.jsonl`, `info.jsonl` and `debug.jsonl` under `$PLUGIN_LOG_DIR/engine-sync` when `PLUGIN_LOG_DIR` is set; otherwise under `~/.local/state/engine-sync/logs`. A file past its cap moves to `.1`, keeping five generations (`.1`…`.5`), with a `log-capped` warning row. A row that cannot be written is held for the next write. A failing streak reports one line on stderr without changing command results.
 
 ## Standalone use
 

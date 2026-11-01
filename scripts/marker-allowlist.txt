@@ -1,7 +1,8 @@
 # Exact compatibility evidence, gate plants, project orientation and public attribution.
 CHANGELOG.md	- The `engine-sync` binary, extracted from pfm's `codex` and `opencode` compilers with their history: `codex build|check|agents`, `opencode build|check|doctor`, `build`, `check` and `doctor` over both engines, `doctor --machine`, `global` for the machine-level Codex roles, commands and Claude agent links, and `hook claude mark|stop|start`. Output is byte-identical to pfm's.
+.claude-plugin/marketplace.json	  "name": "professor",
+CHANGELOG.md	- This repository ships its own marketplace again, named `professor`: install with `claude plugin marketplace add rezzminator/engine-sync`, then `claude plugin install engine-sync@professor`.
 CHANGELOG.md	- Installs as `engine-sync@professor` from the professor marketplace; this repository's own marketplace file is gone, and the release check no longer reads it.
-plugins/engine-sync/README.md	claude plugin marketplace add rezzminator/professor
 plugins/engine-sync/README.md	claude plugin install engine-sync@professor
 CLAUDE.md	- Git writes go through the `gitter` agent.
 CLAUDE.md	- Text the model reads (hook output, block reasons) stays unbranded; Professor's credit lives only in the READMEs and the `author` and `keywords` of the manifest.
