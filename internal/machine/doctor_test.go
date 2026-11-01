@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,22 +82,26 @@ func TestMachineDoctorRows(t *testing.T) {
 func TestMachineDoctorReportsDanglingSources(t *testing.T) {
 	home, repo := fixture(t)
 	path := filepath.Join(repo, "agents", "broken.md")
-	if err := os.Symlink(filepath.Join(repo, "missing.md"), path); err != nil {
+	missing := filepath.Join(repo, "missing.md")
+	if err := os.Symlink(missing, path); err != nil {
 		t.Fatal(err)
 	}
-	statuses := InspectRegistries(DoctorOptions{Home: home, SourceRepo: repo})
-	if len(statuses) != 1 || statuses[0].State != AgentsUnreadable || !strings.Contains(statuses[0].Error, path) {
-		t.Fatalf("dangling source rendered absent: %+v", statuses)
+	// The dangling source is one warn row; every registry is still inspected.
+	want := []Row{
+		{LevelWarn, "global-agents source=" + filepath.Join(repo, "agents") + " state=WARNING error=dangling source " + path + ": lstat " + missing + `: no such file or directory hint="restore or remove the named source"`},
+		{LevelFail, "global-agents store dir=" + filepath.Join(home, ".claude") + ` state=MISSING names=gamma,gamma-deep hint="run engine-sync global"`},
+		{LevelFail, "global-agents source=" + filepath.Join(home, ".codex", "agents") + ` state=MISSING names=gamma,gamma-deep hint="run engine-sync global"`},
+	}
+	got := []Row{}
+	for _, status := range InspectRegistries(DoctorOptions{Home: home, SourceRepo: repo}) {
+		got = append(got, Row{status.Level(), "global-agents " + status.Describe()})
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows\n got %#v\nwant %#v", got, want)
 	}
 	rows := Doctor(DoctorOptions{Home: home, SourceRepo: repo})
-	found := false
-	for _, row := range rows {
-		if row.Level == LevelFail && strings.Contains(row.Message, path) {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("doctor omitted source failure: %+v", rows)
+	if !slices.Contains(rows, want[0]) {
+		t.Fatalf("doctor omitted the dangling source row %q: %+v", want[0].Message, rows)
 	}
 }
 
@@ -121,13 +126,14 @@ func TestMachineDoctorStaleOnceAndNoScanWithoutConfig(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("rows naming %s = %d, want 1: %+v", stale, count, rows)
 	}
-	writeMachineFixture(t, filepath.Join(home, ".claude", "engine-sync.json"), `{"version":1,"machine":{"bogus":true}}`)
+	policy := filepath.Join(home, ".claude", "engine-sync.json")
+	writeMachineFixture(t, policy, `{"version":1,"machine":`)
 	var text []string
 	for _, row := range Doctor(DoctorOptions{Home: home, SourceRepo: repo}) {
 		text = append(text, row.Level+" "+row.Message)
 	}
 	all := strings.Join(text, "\n")
-	for _, want := range []string{"bogus", LevelFail + " global-agents states NOT SCANNED"} {
+	for _, want := range []string{LevelFail + " global-agents states: parse config " + policy + ": EOF", LevelFail + " global-agents states NOT SCANNED"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("doctor lacks %q:\n%s", want, all)
 		}

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/rezzminator/engine-sync/internal/artifact"
@@ -17,7 +16,6 @@ import (
 	reconciler "github.com/rezzminator/engine-sync/internal/reconcile"
 	"github.com/rezzminator/engine-sync/internal/source"
 	"github.com/rezzminator/engine-sync/internal/target/codex"
-	"go.yaml.in/yaml/v3"
 )
 
 // globalRulesBudget is the always-on set's size past which doctor warns: every
@@ -33,16 +31,7 @@ const openCodeInstructionsKey = "instructions"
 type globalRules struct {
 	Dir   string
 	Label string // the directory as the compiled text names it
-	// Body is every always-on rule, transformed, each under its
-	// `<!-- rule: … -->` line, in sorted relative-path order; "" when none.
-	Body string
-	// Scoped are path-scoped rules: Codex and OpenCode have no path trigger, so
-	// each is delivered as a pointer naming its paths and its file, read on match.
-	Scoped []string
-	// Targeted are always-on rules with a rule-control `visible-to:` key:
-	// compiled like any other, so they reach every Codex and OpenCode loop.
-	Targeted []string
-	Broken   []string // RULE-FRONTMATTER and RULE-FENCE rows: each rule skipped
+	codex.RuleSet
 	// Warnings name the command links the /command roster skipped.
 	Warnings []string
 }
@@ -60,15 +49,16 @@ func instructionReceiptPath(home string) string {
 }
 
 // loadGlobalRules reads every rule under {claudeDir}/rules. An absent
-// directory holds no rules; one that cannot be read, or a rule that cannot,
-// is an error, never an empty set.
+// directory holds no rules; one that cannot be read is an error, never an
+// empty set. A rule that cannot be read is a RULE-UNREADABLE row, skipped as
+// a rule that does not parse is, and every other rule still compiles.
 func loadGlobalRules(home, claudeDir string, policy config.Config) (globalRules, error) {
 	set := globalRules{Dir: filepath.Join(claudeDir, "rules")}
 	set.Label = set.Dir
 	if rel, err := filepath.Rel(home, set.Dir); err == nil && !strings.HasPrefix(rel, "..") {
 		set.Label = "~/" + filepath.ToSlash(rel)
 	}
-	rels, err := ruleFiles(set.Dir)
+	rules, err := source.Rules(set.Dir, paths.ReadRegular)
 	if err != nil {
 		return globalRules{}, err
 	}
@@ -77,112 +67,8 @@ func loadGlobalRules(home, claudeDir string, policy config.Config) (globalRules,
 		return globalRules{}, fmt.Errorf("read the /command roster for rules: %s", strings.Join(problems, "; "))
 	}
 	set.Warnings = warnings
-	var blocks []string
-	for _, rel := range rels {
-		path := filepath.Join(set.Dir, rel)
-		raw, err := paths.ReadRegular(path)
-		if err != nil {
-			return globalRules{}, fmt.Errorf("read rule %s: %w", path, err)
-		}
-		front, body, err := source.Parse(string(raw))
-		if err != nil {
-			set.Broken = append(set.Broken, fmt.Sprintf("RULE-FRONTMATTER %s: %v", path, err))
-			continue
-		}
-		if scope := source.MapValue(front.Node, "paths"); pathScoped(scope) {
-			set.Scoped = append(set.Scoped, path)
-			label := set.Label + "/" + filepath.ToSlash(rel)
-			blocks = append(blocks, "<!-- rule: "+label+" (path-scoped) -->\nBefore working on a file matching "+
-				scopeGlobs(scope)+", read "+label+" and follow it.\n")
-			continue
-		}
-		compiled := strings.TrimSpace(transform(body, path))
-		if strings.Contains(compiled, artifact.RulesBegin) || strings.Contains(compiled, artifact.RulesEnd) {
-			// Compiled, it would leave two fences in AGENTS.md, which every
-			// later run then refuses.
-			set.Broken = append(set.Broken, fmt.Sprintf("RULE-FENCE %s: the body holds the engine-sync rules fence line", path))
-			continue
-		}
-		if visibleTo := source.MapValue(front.Node, "visible-to"); visibleTo != nil && visibleTo.Tag != "!!null" {
-			set.Targeted = append(set.Targeted, path)
-		}
-		blocks = append(blocks, "<!-- rule: "+set.Label+"/"+filepath.ToSlash(rel)+" -->\n"+compiled+"\n")
-	}
-	set.Body = strings.Join(blocks, "\n")
+	set.RuleSet = codex.CompileRules(rules, set.Label, transform)
 	return set, nil
-}
-
-// scopeGlobs renders a `paths:` value, a list or one scalar, as backquoted globs.
-func scopeGlobs(value *yaml.Node) string {
-	globs := []string{value.Value}
-	if value.Kind == yaml.SequenceNode {
-		globs = globs[:0]
-		for _, item := range value.Content {
-			globs = append(globs, item.Value)
-		}
-	}
-	return "`" + strings.Join(globs, "`, `") + "`"
-}
-
-// pathScoped reports a `paths:` value naming at least one path.
-func pathScoped(value *yaml.Node) bool {
-	return value != nil && value.Tag != "!!null" && (len(value.Content) != 0 || strings.TrimSpace(value.Value) != "")
-}
-
-// ruleFiles lists every .md below dir, following links, as sorted relative
-// paths; an absent dir has none. A dangling link that is not a .md names no
-// rule and is passed over; one that is, or any other failure, is an error.
-func ruleFiles(dir string) ([]string, error) {
-	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	} else if err != nil {
-		return nil, fmt.Errorf("inspect rules %s: %w", dir, err)
-	}
-	var rels []string
-	visited := map[string]bool{}
-	var walk func(current, relative string) error
-	walk = func(current, relative string) error {
-		resolved, err := filepath.EvalSymlinks(current)
-		if err != nil {
-			return fmt.Errorf("resolve rules %s: %w", current, err)
-		}
-		if visited[resolved] {
-			return nil // a cycle: the directory is already being listed
-		}
-		visited[resolved] = true
-		defer delete(visited, resolved)
-		entries, err := os.ReadDir(current)
-		if err != nil {
-			return fmt.Errorf("read rules %s: %w", current, err)
-		}
-		for _, entry := range entries {
-			path, rel := filepath.Join(current, entry.Name()), filepath.Join(relative, entry.Name())
-			isRule := strings.HasSuffix(entry.Name(), ".md")
-			if !isRule && !entry.IsDir() && entry.Type()&fs.ModeSymlink == 0 {
-				continue
-			}
-			info, err := os.Stat(path)
-			if !isRule && errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return fmt.Errorf("inspect rule %s: %w", path, err)
-			}
-			if info.IsDir() {
-				if err := walk(path, rel); err != nil {
-					return err
-				}
-			} else if isRule {
-				rels = append(rels, rel)
-			}
-		}
-		return nil
-	}
-	if err := walk(dir, ""); err != nil {
-		return nil, err
-	}
-	sort.Slice(rels, func(i, j int) bool { return filepath.ToSlash(rels[i]) < filepath.ToSlash(rels[j]) })
-	return rels, nil
 }
 
 func (r *run) rulesClaudeDir() string {

@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -36,9 +37,11 @@ type Config struct {
 	Source       string            `json:"-"`
 	Legacy       bool              `json:"-"`
 	Sources      map[string]string `json:"-"`
-	Deprecations []string          `json:"-"`
-	Rewrites     []Rewrite         `json:"rewrites"`
-	CommandDirs  []string          `json:"commandDirs"`
+	// Warnings are what the loader ignored or changed, each naming its file:
+	// a deprecated spelling, an unknown key, an invalid list entry.
+	Warnings    []string  `json:"-"`
+	Rewrites    []Rewrite `json:"rewrites"`
+	CommandDirs []string  `json:"commandDirs"`
 }
 
 type Review struct {
@@ -200,18 +203,9 @@ func sourceForError(cfg Config, err error) string {
 	return cfg.Source
 }
 
+// readObject reads one config file's JSON object; found is false when the file
+// is absent. An absent version is version 1.
 func readObject(path string) (map[string]json.RawMessage, bool, error) {
-	object, found, err := readObjectWithoutVersion(path)
-	if err != nil || !found {
-		return object, found, err
-	}
-	if _, ok := object["version"]; !ok {
-		return nil, false, fmt.Errorf("config %s: version is required", path)
-	}
-	return object, true, nil
-}
-
-func readObjectWithoutVersion(path string) (map[string]json.RawMessage, bool, error) {
 	raw, err := readConfigFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
@@ -248,7 +242,10 @@ func markSources(cfg *Config, object map[string]json.RawMessage, prefix, source 
 	}
 }
 
-func validateObject(object map[string]json.RawMessage, shape reflect.Type, prefix string) error {
+// validateObject checks object against shape: a wrong type fails with its
+// key; an unknown key is warned and ignored, so a key a newer release reads
+// never refuses the whole file.
+func validateObject(object map[string]json.RawMessage, shape reflect.Type, prefix string, warn func(string)) error {
 	fields := map[string]reflect.Type{}
 	for i := 0; i < shape.NumField(); i++ {
 		f := shape.Field(i)
@@ -257,20 +254,22 @@ func validateObject(object map[string]json.RawMessage, shape reflect.Type, prefi
 			fields[key] = f.Type
 		}
 	}
-	for key, raw := range object {
+	for _, key := range slices.Sorted(maps.Keys(object)) {
+		raw := object[key]
 		label := prefix + key
 		t, ok := fields[key]
 		if !ok {
-			return fmt.Errorf("%s: unknown key", label)
+			warn(label + ": unknown key, ignored")
+			continue
 		}
-		if err := validateValue(raw, t, label); err != nil {
+		if err := validateValue(raw, t, label, warn); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateValue(raw json.RawMessage, shape reflect.Type, key string) error {
+func validateValue(raw json.RawMessage, shape reflect.Type, key string, warn func(string)) error {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return fmt.Errorf("%s: null is not a %s", key, shape)
 	}
@@ -278,7 +277,7 @@ func validateValue(raw json.RawMessage, shape reflect.Type, key string) error {
 		var object map[string]json.RawMessage
 		if json.Unmarshal(raw, &object) == nil && object != nil {
 			for name, value := range object {
-				if err := validateValue(value, reflect.TypeFor[PermissionValue](), key+"."+name); err != nil {
+				if err := validateValue(value, reflect.TypeFor[PermissionValue](), key+"."+name, warn); err != nil {
 					return err
 				}
 			}
@@ -292,20 +291,20 @@ func validateValue(raw json.RawMessage, shape reflect.Type, key string) error {
 	}
 	switch shape.Kind() {
 	case reflect.Pointer:
-		return validateValue(raw, shape.Elem(), key)
+		return validateValue(raw, shape.Elem(), key, warn)
 	case reflect.Struct:
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &object); err != nil {
 			return fmt.Errorf("%s: want object: %w", key, err)
 		}
-		return validateObject(object, shape, key+".")
+		return validateObject(object, shape, key+".", warn)
 	case reflect.Map:
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &object); err != nil {
 			return fmt.Errorf("%s: want object: %w", key, err)
 		}
 		for name, value := range object {
-			if err := validateValue(value, shape.Elem(), key+"."+name); err != nil {
+			if err := validateValue(value, shape.Elem(), key+"."+name, warn); err != nil {
 				return err
 			}
 		}
@@ -315,7 +314,7 @@ func validateValue(raw json.RawMessage, shape reflect.Type, key string) error {
 			return fmt.Errorf("%s: want array: %w", key, err)
 		}
 		for i, value := range list {
-			if err := validateValue(value, shape.Elem(), fmt.Sprintf("%s[%d]", key, i)); err != nil {
+			if err := validateValue(value, shape.Elem(), fmt.Sprintf("%s[%d]", key, i), warn); err != nil {
 				return err
 			}
 		}
@@ -364,9 +363,6 @@ func Validate(cfg Config) error {
 			}
 		}
 	}
-	if cfg.Machine.ManagedBy != "" && !managedByValue.MatchString(cfg.Machine.ManagedBy) {
-		return &Refusal{Msg: fmt.Sprintf("machine.managedBy: %q must match %s", cfg.Machine.ManagedBy, artifact.ManagedByPattern)}
-	}
 	if cfg.Targets != nil {
 		if err := cfg.Targets.validate(); err != nil {
 			return err
@@ -386,7 +382,7 @@ func Validate(cfg Config) error {
 	}
 	for key, values := range map[string][]string{"codex.neverRegister": cfg.Codex.NeverRegister, "machine.retiredAgents": cfg.Machine.RetiredAgents} {
 		for _, value := range values {
-			if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "/\\ \t\n") || value == "." || value == ".." {
+			if !validName(value) {
 				return fmt.Errorf("%s: invalid name %q", key, value)
 			}
 		}
@@ -396,11 +392,6 @@ func Validate(cfg Config) error {
 			if strings.TrimSpace(alias) == "" || strings.TrimSpace(model) == "" {
 				return fmt.Errorf("%s.%s: alias and model must be nonempty", key, alias)
 			}
-		}
-	}
-	for _, key := range cfg.Agents.PassthroughKeys {
-		if strings.TrimSpace(key) == "" || strings.ContainsAny(key, " \t\n:") {
-			return fmt.Errorf("agents.passthroughKeys: invalid key %q", key)
 		}
 	}
 	for _, section := range []struct {

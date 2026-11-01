@@ -3,6 +3,8 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/guard"
 	"github.com/rezzminator/engine-sync/internal/pluginlog"
@@ -12,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestMain(m *testing.M) { os.Exit(testjail.RunTests(m)) }
@@ -68,7 +71,7 @@ func TestReviewStopRetainsFlagDuringStages(t *testing.T) {
 }
 
 func TestHookPluginLogFailures(t *testing.T) {
-	for _, name := range []string{"mark-lock", "stop-stage", "start-stage"} {
+	for _, name := range []string{"mark-lock", "mark-policy", "stop-stage", "start-stage", "payload-read", "payload-decode"} {
 		t.Run(name, func(t *testing.T) {
 			home := testjail.Scratch(t)
 			root := filepath.Join(home, "project")
@@ -93,8 +96,43 @@ func TestHookPluginLogFailures(t *testing.T) {
 			var out, stderr bytes.Buffer
 			p := Payload{}
 			p.ToolInput.FilePath = filepath.Join(root, "CLAUDE.md")
-			event, where := "hook-step-failed", "internal/hook/hook.go#Stop"
+			// msg, when set, is the row's exact message.
+			event, where, msg := "hook-step-failed", "internal/hook/hook.go#Stop", ""
 			switch name {
+			case "mark-policy":
+				// A policy that fails to load costs the workbench marker, never silently.
+				where = "internal/hook/hook.go#Mark"
+				if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("Sample\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				physical, err := filepath.EvalSymlinks(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				msg = "fixture policy failure; project root found without the workbench marker: " + physical
+				get := e.Get
+				e.Get = func(k string) string {
+					if k == "CLAUDE_PROJECT_DIR" {
+						return ""
+					}
+					return get(k)
+				}
+				e.Policy = func(string, string, io.Writer) (*config.Config, error) {
+					return nil, errors.New("fixture policy failure")
+				}
+				if code := Mark(p, &stderr, e); code != 0 {
+					t.Fatal(code)
+				}
+			case "payload-read", "payload-decode":
+				event, where = "hook-payload-unreadable", "internal/hook/hook.go#ReadPayload"
+				stdin := io.Reader(strings.NewReader("malformed"))
+				msg = "decode the hook payload: invalid character 'm' looking for beginning of value"
+				if name == "payload-read" {
+					stdin, msg = iotest.ErrReader(errors.New("fixture read failure")), "read the hook payload: fixture read failure"
+				}
+				if got := ReadPayload(stdin, &stderr, e); got != (Payload{}) {
+					t.Fatalf("payload %+v, want empty", got)
+				}
 			case "mark-lock":
 				event, where = "hook-lock-failed", "internal/hook/hook.go#Mark"
 				if err := os.WriteFile(e.State(home), []byte("block"), 0600); err != nil {
@@ -129,12 +167,12 @@ func TestHookPluginLogFailures(t *testing.T) {
 				if err := json.Unmarshal(line, &row); err != nil {
 					t.Fatal(err)
 				}
-				if row["event"] == event && row["where"] == where && row["level"] == "error" {
+				if row["event"] == event && row["where"] == where && row["level"] == "error" && (msg == "" || row["msg"] == msg) {
 					found = true
 				}
 			}
 			if !found {
-				t.Fatalf("missing %s %s: %s", event, where, raw)
+				t.Fatalf("missing %s %s %q: %s", event, where, msg, raw)
 			}
 		})
 	}
@@ -286,5 +324,45 @@ func TestStopBusyBuildStaysOffScreen(t *testing.T) {
 				t.Errorf("a real failure beside a busy build must still block: %s", &out)
 			}
 		})
+	}
+}
+
+// A failing stage's output past detailLimit is cut on a rune boundary, and the
+// answer says how much was cut and where the rest is.
+func TestStopCutsLongStageOutputOnARuneBoundary(t *testing.T) {
+	home := testjail.Scratch(t)
+	root := filepath.Join(home, "project")
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".claude", "engine-sync.json"), []byte(`{"version":1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e := Context{Home: func() (string, error) { return home, nil }, Get: func(key string) string {
+		switch key {
+		case "CLAUDE_PROJECT_DIR":
+			return root
+		case "PLUGIN_LOG_DIR":
+			return filepath.Join(home, "logs")
+		}
+		return ""
+	}, State: func(string) string { return filepath.Join(home, "state") }, Policy: func(string, string, io.Writer) (*config.Config, error) { c := config.Default(); return &c, nil }, Writer: func() string { return "/fixture/bin/engine-sync" }, Engines: []string{"sample"}}
+	payload := Payload{}
+	payload.ToolInput.FilePath = filepath.Join(root, "CLAUDE.md")
+	var out, stderr bytes.Buffer
+	Mark(payload, &stderr, e)
+	// "sample build:\nx" is 15 bytes, so every two-byte "é" starts at an odd
+	// offset and byte 4000 falls inside one.
+	output := "x" + strings.Repeat("é", 3000)
+	Stop(Payload{}, &out, &stderr, e, func([]string) (int, string) { return 1, output })
+	var answer map[string]string
+	if err := json.Unmarshal(out.Bytes(), &answer); err != nil {
+		t.Fatalf("answer is not JSON: %v\n%s", err, out.String())
+	}
+	full := len("sample build:\n"+output+"\n") + len("sample check:\n"+output+"\n")
+	want := "sample build:\nx" + strings.Repeat("é", 1992) + fmt.Sprintf("\n[%d bytes cut; run '/fixture/bin/engine-sync' check . for the rest]", full-3999)
+	_, got, _ := strings.Cut(answer["reason"], "Output of the failing stage(s):\n")
+	if got != want {
+		t.Fatalf("detail = %q\nwant %q", got, want)
 	}
 }

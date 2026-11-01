@@ -11,6 +11,9 @@ const (
 	Invalid     State = "INVALID"
 	Dangling    State = "DANGLING"
 	Kept        State = "KEPT"
+	// OverBudget is a file written whole that its reader cuts, or one whose
+	// reader's limit could not be read.
+	OverBudget State = "OVER-BUDGET"
 )
 
 type Mode uint8

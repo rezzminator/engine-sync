@@ -38,7 +38,7 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 		flags.Usage()
 		return 2
 	}
-	options, err := globalOptions(e, *home, *sourceRepo, *sourceHome, claudeDirs, codexHomes, *noCodex)
+	options, err := globalOptions(e, stderr, *home, *sourceRepo, *sourceHome, claudeDirs, codexHomes, *noCodex)
 	if err == nil {
 		options.Config, err = e.policy("", options.Home, stderr)
 	}
@@ -77,14 +77,14 @@ func runGlobal(args []string, stdout, stderr io.Writer, e env) int {
 }
 
 func globalOptions(
-	e env, home, sourceRepo, sourceHome string, claudeDirs, codexHomes cliargs.RepeatString, noCodex bool,
+	e env, stderr io.Writer, home, sourceRepo, sourceHome string, claudeDirs, codexHomes cliargs.RepeatString, noCodex bool,
 ) (machine.Options, error) {
 	resolvedHome, err := absoluteHome(home, e)
 	if err != nil {
 		return machine.Options{}, fmt.Errorf("resolve home: %w", err)
 	}
 	options := machine.Options{Home: resolvedHome, SourceRepo: sourceRepo, ClaudeConfigDirs: claudeDirs, SourceHome: sourceHome}
-	policy, err := e.policy("", resolvedHome, io.Discard)
+	policy, err := e.policy("", resolvedHome, stderr)
 	if err != nil {
 		return machine.Options{}, err
 	}

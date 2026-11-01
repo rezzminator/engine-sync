@@ -11,7 +11,7 @@ import (
 func TestReviewFrontmatterForms(t *testing.T) {
 	for _, text := range []string{"---\r\ndescription: Reader\r\ntools: [Read, Write]\r\n---\r\nbody", "\ufeff--- \ndescription: Reader\ntools:\n  - 'Read'\n  - \"Write\"\n--- \nbody"} {
 		f, body, e := Parse(text)
-		if e != nil || f.Description != "Reader" || len(f.Tools) != 2 || f.Tools[1] != "Write" || body != "body" {
+		if e != nil || f.Fields["description"] != "Reader" || f.Fields["tools"] != "Read, Write" || body != "body" {
 			t.Fatalf("frontmatter %+v body %q error %v", f, body, e)
 		}
 	}
@@ -28,7 +28,7 @@ func TestUnmetNeverMeetsAnEmptyName(t *testing.T) {
 }
 
 // TestAgentSchemaRejectsEmptyRequiresAndModels: docs/agent.schema.json
-// refuses what ValidateAgent refuses — an empty or blank requires item and an
+// refuses what ValidateAgent names — an empty or blank requires item and an
 // empty or blank engine model — and admits a name.
 func TestAgentSchemaRejectsEmptyRequiresAndModels(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "agent.schema.json"))

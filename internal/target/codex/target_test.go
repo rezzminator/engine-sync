@@ -7,6 +7,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -84,11 +85,13 @@ func snapshotTestTree(t *testing.T, roots ...string) string {
 	return strings.Join(rows, "\n")
 }
 
-func TestLoadConfigRejectsUnknownFieldsAndBadVersion(t *testing.T) {
+func TestLoadConfigWarnsUnknownFieldsAndRejectsBadVersion(t *testing.T) {
 	root := testjail.Scratch(t)
-	writeCodexFixture(t, filepath.Join(root, ".claude", "codex-build.json"), `{"version":1,"mystery":true}`)
-	if _, err := config.LoadConfigLayers(root); err == nil || !strings.Contains(err.Error(), "unknown key") {
-		t.Fatalf("unknown field: got %v", err)
+	legacy := filepath.Join(root, ".claude", "codex-build.json")
+	writeCodexFixture(t, legacy, `{"version":1,"mystery":true}`)
+	want := []string{"config " + legacy + ": mystery: unknown key, ignored"}
+	if cfg, err := config.LoadConfigLayers(root); err != nil || !reflect.DeepEqual(cfg.Warnings, want) {
+		t.Fatalf("unknown field: warnings %q, err %v; want %q", cfg.Warnings, err, want)
 	}
 
 	writeCodexFixture(t, filepath.Join(root, ".claude", "codex-build.json"), `{"version":2}`)
@@ -144,6 +147,24 @@ func TestGlobalCommandsCanBeDisabledWithoutTouchingGlobalOutputs(t *testing.T) {
 	check, err = RunProject(Options{Root: root, Home: home, Mode: ModeCheck})
 	if err != nil || check.OK || !containsFinding(check.Problems, "UNPARSEABLE") {
 		t.Fatalf("malformed global TOML was not reported: result=%#v err=%v", check, err)
+	}
+}
+
+// A machine policy that does not resolve fails only the optional
+// global-commands step: the project result already written is kept.
+func TestCodexGlobalCommandsUnresolvedMachineKeepsTheProjectResult(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	writeCodexFixture(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
+	machine := filepath.Join(home, ".claude", "engine-sync.json")
+	writeCodexFixture(t, machine, `{bad`)
+	policy := config.Default()
+	result, err := RunProject(Options{Root: root, Home: home, Mode: ModeBuild, Config: &policy})
+	want := []string{"global commands: parse config " + machine + ": invalid character 'b' looking for beginning of value"}
+	if err != nil || result.OK || !reflect.DeepEqual(result.Problems, want) || result.Wrote != 1 {
+		t.Fatalf("result=%#v err=%v; want the project's one write kept and problems %q", result, err, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("project mirror missing: %v", err)
 	}
 }
 

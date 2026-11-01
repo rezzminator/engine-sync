@@ -176,19 +176,32 @@ func compileCommandFile(
 	rel = filepath.ToSlash(rel)
 	relSource := filepath.ToSlash(filepath.Join(label, rel))
 	content := string(raw)
-	front, body, parseErr := options.Source.Frontmatter(entry.Path)
-	fields := front.Fields
-	if parseErr != nil {
-		problem(claudesource.DescribeParseError(entry.Path, parseErr))
-		return
-	}
 	flat := flatName(filepath.ToSlash(entry.Rel))
 	if err := paths.ValidateName(flat); err != nil {
 		problem(fmt.Sprintf("%s: %v", entry.Path, err))
 		return
 	}
+	dst := filepath.Join(outputRoot, flat, "SKILL.md")
+	prompt := ""
+	if global {
+		dst = filepath.Join(outputBase, ".codex", "skills", flat, "SKILL.md")
+		prompt = filepath.Join(outputBase, ".codex", "prompts", flat+".md")
+	}
+	// The body and a loadable header both come from the parse: a source that
+	// does not parse keeps its installed twins until it builds again.
+	front, body, parseErr := options.Source.Frontmatter(entry.Path)
+	fields := front.Fields
+	if parseErr != nil {
+		problem(claudesource.DescribeParseError(entry.Path, parseErr))
+		if global {
+			add(keptArtifact(prompt, entry))
+		}
+		if !global || !retiredSkill(flat, options.RetiredFiles) {
+			add(keptArtifact(dst, entry))
+		}
+		return
+	}
 	fm := claudesource.HeaderLines(content)
-	_ = fields
 	// The incumbent compilers only rewrite command references in command
 	// frontmatter. Model names there are descriptive metadata, not executable
 	// model selections; rewriting them changes user-facing skill descriptions.
@@ -202,13 +215,11 @@ func compileCommandFile(
 		body,
 		options,
 	)
-	dst := filepath.Join(outputRoot, flat, "SKILL.md")
 	if global {
-		add(artifact.Artifact{Path: filepath.Join(outputBase, ".codex", "prompts", flat+".md"), Content: []byte(artifact.WithManagedBy(generated, options.ManagedBy)), Source: entry.Path, Syntax: artifact.YAMLFront})
+		add(artifact.Artifact{Path: prompt, Content: []byte(artifact.WithManagedBy(generated, options.ManagedBy)), Source: entry.Path, Syntax: artifact.YAMLFront})
 		if fields["disable-model-invocation"] == "true" || retiredSkill(flat, options.RetiredFiles) {
 			return
 		}
-		dst = filepath.Join(outputBase, ".codex", "skills", flat, "SKILL.md")
 	}
 	add(artifact.Artifact{Path: dst, Content: []byte(generated), Source: entry.Path, Syntax: artifact.YAMLFront})
 }

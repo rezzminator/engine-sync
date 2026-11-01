@@ -8,6 +8,8 @@ import (
 	"github.com/rezzminator/engine-sync/internal/artifact"
 	"github.com/rezzminator/engine-sync/internal/atomicfile"
 	"github.com/rezzminator/engine-sync/internal/paths"
+	"github.com/rezzminator/engine-sync/internal/pluginlog"
+	"github.com/rezzminator/engine-sync/internal/runlog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +98,8 @@ func wroteContent(path string, content []byte) bool {
 	return e == nil && string(raw) == digest(content)
 }
 
+// ownedLink claims a link by its receipt; with none, or one that does not
+// parse (warned in the plugin log), by the file it links to.
 func ownedLink(path, target string) (bool, error) {
 	p, e := receiptPath(path)
 	if e != nil {
@@ -110,7 +114,8 @@ func ownedLink(path, target string) (bool, error) {
 	}
 	var record struct{ Path, Target string }
 	if e = json.Unmarshal(raw, &record); e != nil {
-		return false, fmt.Errorf("parse link receipt %s: %w", p, e)
+		runlog.Record(nil, os.Stderr, pluginlog.Row{Level: "warning", Event: "link-receipt-unparseable", Msg: fmt.Sprintf("parse link receipt %s of %s: %v; claimed as a link with no receipt", p, path, e), Where: "internal/reconcile/safety.go#ownedLink"})
+		return linksGeneratedFile(path, target)
 	}
 	return record.Target == target, nil
 }

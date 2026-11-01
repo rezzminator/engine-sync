@@ -69,17 +69,33 @@ func TestAnOlderWriterIsRefusedAndTheRecordOnlyMovesForward(t *testing.T) {
 	}
 }
 
-func TestAnUnreadableRecordIsAnErrorNotAPass(t *testing.T) {
-	state, root := testjail.Scratch(t), "/repo"
+// A record that does not parse is named by Check; the guard warns of it, runs
+// the body as with no record, and the write replaces it.
+func TestAnUnparseableRecordIsWarnedAndReplaced(t *testing.T) {
+	state, root := testjail.Scratch(t), testjail.Scratch(t)
 	if err := Save(state, root, "0.1.0", "/bin/x"); err != nil {
 		t.Fatal(err)
 	}
-	path := state + "/writers/" + key(root) + ".json"
+	canonical, err := CanonicalRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := state + "/writers/" + key(canonical) + ".json"
 	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := Check(state, root, "0.1.0"); err == nil || !strings.Contains(err.Error(), "parse writer record") {
-		t.Fatalf("err=%v, want a parse failure", err)
+	want := "unparseable writer record " + path + ": unexpected end of JSON input; read as no record, the next write replaces it"
+	if err := Check(state, root, "0.1.0"); !errors.Is(err, ErrUnparseableRecord) || err.Error() != want {
+		t.Fatalf("err=%v, want %q", err, want)
+	}
+	var warned []string
+	ran := false
+	code, err := WithWriterGuard(state, []string{root}, "0.1.0", func() string { return "/bin/x" }, true, time.Second, func(msg string) { warned = append(warned, msg) }, func() int { ran = true; return 0 })
+	if code != 0 || err != nil || !ran || len(warned) != 1 || warned[0] != want {
+		t.Fatalf("guard code=%d err=%v ran=%v warned=%q; want the body run and one warning %q", code, err, ran, warned, want)
+	}
+	if err := Check(state, root, "0.0.1"); !errors.Is(err, ErrNewerWriter) {
+		t.Fatalf("the write did not replace the record: %v", err)
 	}
 }
 

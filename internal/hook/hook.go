@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type StageRunner func([]string) (int, string)
@@ -43,18 +44,24 @@ type Context struct {
 
 const detailLimit = 4000
 
-// ReadPayload decodes the hook payload; a missing or malformed one reads as
-// empty, which every hook treats as nothing to do.
-func ReadPayload(stdin io.Reader) Payload {
+// ReadPayload decodes the hook payload; a missing one reads as empty, which
+// every hook treats as nothing to do. One that cannot be read or decoded reads
+// as empty too, recorded as a hook-payload-unreadable fault.
+func ReadPayload(stdin io.Reader, stderr io.Writer, e Context) Payload {
 	var payload Payload
 	if stdin == nil {
 		return payload
 	}
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
-	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
+	if err != nil {
+		recordHook(e, stderr, "hook-payload-unreadable", "ReadPayload", "read the hook payload: "+err.Error(), nil)
+		return payload
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
 		return payload
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
+		recordHook(e, stderr, "hook-payload-unreadable", "ReadPayload", "decode the hook payload: "+err.Error(), nil)
 		return Payload{}
 	}
 	return payload
@@ -72,7 +79,7 @@ func IsClaudeSource(path, home string) bool {
 		strings.HasSuffix(slash, "/.mcp.json")
 }
 
-func resolveProjectRoot(e Context, dir string, session bool) (string, error) {
+func resolveProjectRoot(e Context, stderr io.Writer, step, dir string, session bool) (string, error) {
 	home, err := e.Home()
 	if err != nil {
 		return "", err
@@ -103,6 +110,9 @@ func resolveProjectRoot(e Context, dir string, session bool) (string, error) {
 	root, err := paths.DiscoverRoot(dir, home, marker)
 	if err != nil && policyErr != nil {
 		return "", errors.Join(policyErr, err)
+	}
+	if policyErr != nil {
+		recordHook(e, stderr, "hook-step-failed", step, policyErr.Error()+"; project root found without the workbench marker: "+root, nil)
 	}
 	return root, err
 }
@@ -192,7 +202,7 @@ func Mark(payload Payload, stderr io.Writer, e Context) int {
 	if !IsClaudeSource(path, home) {
 		return 0
 	}
-	root, rootErr := resolveProjectRoot(e, filepath.Dir(path), false)
+	root, rootErr := resolveProjectRoot(e, stderr, "Mark", filepath.Dir(path), false)
 	if noProjectRoot(rootErr) {
 		return 0
 	}
@@ -260,7 +270,7 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 		notice("hook-step-failed", "engine-sync hook claude stop: getwd: "+err.Error())
 		return 0
 	}
-	root, rootErr := resolveProjectRoot(e, cwd, true)
+	root, rootErr := resolveProjectRoot(e, stderr, "Stop", cwd, true)
 	if noProjectRoot(rootErr) {
 		return 0
 	}
@@ -348,7 +358,11 @@ func Stop(payload Payload, stdout, stderr io.Writer, e Context, runner StageRunn
 	stages := strings.Join(failed, ", ") + " (binary: " + e.Writer() + ")"
 	text := detail.String()
 	if len(text) > detailLimit {
-		text = text[:detailLimit]
+		cut := detailLimit
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = fmt.Sprintf("%s\n[%d bytes cut; run %s check . for the rest]", text[:cut], len(text)-cut, shellPath(e.Writer()))
 	}
 	var answer any
 	if payload.StopHookActive {
@@ -377,7 +391,7 @@ func Start(stderr io.Writer, e Context, runner StageRunner) int {
 		fmt.Fprintf(stderr, "engine-sync hook claude start: getwd: %v\n", err)
 		return 0
 	}
-	root, rootErr := resolveProjectRoot(e, cwd, true)
+	root, rootErr := resolveProjectRoot(e, stderr, "Start", cwd, true)
 	// No project skips only the project refresh; the machine refresh below
 	// does not depend on one.
 	if noProjectRoot(rootErr) {

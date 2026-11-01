@@ -41,15 +41,7 @@ func compileOpenCode(options Options) (Result, error) {
 	target := Target{}
 	r, ok := engine.Execute(*p, *options.Config, openCodeMode(options.Mode), target.Render, target.Roots, target.Validate)
 	if !p.Workbench && (*options.Config).Codex.GlobalCommands {
-		machine, e := config.Resolve("", options.Home, paths.Getenv)
-		if e != nil {
-			return Result{}, e
-		}
-		roster, e := config.ResolveTargets(paths.Getenv, options.Home, machine, config.Targets{})
-		if e != nil {
-			return Result{}, e
-		}
-		globals, pass := engine.Commands(options.Home, "", machine, *roster.CodexHomes, false, openCodeMode(options.Mode), target.Render, target.Roots, target.Validate)
+		globals, pass := engine.GlobalCommands(options.Home, openCodeMode(options.Mode), target.Render, target.Roots, target.Validate)
 		ok = ok && pass
 		r.Problems = append(r.Problems, globals.Problems...)
 		r.Warnings = append(r.Warnings, globals.Warnings...)
@@ -199,6 +191,7 @@ func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Arti
 	compileOpenCodeSkills(root, add, problem, skip, dangling, model)
 	compileConfigWithSource(model, root, add, problem, warn, cfg.OpenCode)
 	compileOpenCodeMirrors(root, model, cfg, add, problem, warn)
+	diagnostics = append(diagnostics, agentsDrift(p, cfg)...)
 
 	artifacts := make([]artifact.Artifact, 0, len(outputs))
 	for _, output := range outputs {

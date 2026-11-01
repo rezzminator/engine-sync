@@ -60,3 +60,7 @@ scripts/check-tree_regression_test.py	 put('scripts/baselines/spelling-professor
 scripts/check-tree_test.py	ids=['size-src','size-test','size-cmd','negation-dirs','doc-go','test-mirror','testjail','dup-functions','facade-write','facade-env','facade-exec','facade-marker','facade-frontmatter','spelling-professor','spelling-states','registry-parity','orientation-truth','publication']
 scripts/check-tree_test.py	  elif check=='spelling-professor':put('internal/unit/unit.go','package unit\nconst name = "professor"\n')
 internal/cli/doctor_test.go		vars := map[string]string{"HOME": home, "ENGINE_SYNC_WORKBENCH_MARKER": ".project/workbench.json"}
+scripts/check-tree.py	if unscanned:notes['spelling-professor']='— binary, not scanned: '+', '.join(unscanned)
+scripts/check-tree_test.py	  if check=='spelling-professor':
+scripts/check-tree_test.py	   put('internal/unit/unit.go','package unit\n');(root/'blob.bin').write_bytes(b'professor\0')
+scripts/check-tree_test.py	   assert out.returncode==0 and out.stdout.splitlines()==['CHECK spelling-professor PASS — binary, not scanned: blob.bin'],('binary skip unnamed',out.stdout,out.stderr)

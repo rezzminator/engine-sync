@@ -4,6 +4,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -37,22 +38,67 @@ func TestMachineSharedFilesAreNeverAgents(t *testing.T) {
 		"reader.md":       "---\nname: reader\ndescription: Read.\n---\nRead.\n",
 		"shared/layer.md": "---\nmodel: sonnet\n---\n",
 		"derived.md":      "---\nname: derived\nfrom: reader\nextends: [shared/layer.md]\n---\n",
+		// A declaration without name is named by its file base.
+		"bare.md": "---\nfrom: reader\n---\n",
 	} {
 		writeSourceFixture(t, filepath.Join(root, file), text)
 	}
 	model, err := LoadMachine(root, root, filepath.Join(root, "generated"))
-	if err != nil || len(model.Problems) != 0 || len(model.Agents) != 2 {
+	if err != nil || len(model.Problems) != 0 || len(model.Agents) != 3 {
 		t.Fatalf("model = %+v (%v)", model, err)
 	}
+	rendered := map[string]Agent{}
 	for _, agent := range model.Agents {
-		if agent.Name == "derived" {
-			if !agent.Generated || agent.Front.Model != "sonnet" {
-				t.Fatalf("derived = %+v", agent)
-			}
-			return
-		}
+		rendered[agent.Name] = agent
 	}
-	t.Fatal("derived agent not rendered")
+	if derived := rendered["derived"]; !derived.Generated || derived.Front.Model != "sonnet" {
+		t.Fatalf("derived = %+v", derived)
+	}
+	if bare := rendered["bare"]; !bare.Generated || bare.Front.Fields["name"] != "bare" || bare.Front.Fields["description"] != "Read." {
+		t.Fatalf("bare = %+v, want reader rendered under the name bare", bare)
+	}
+}
+
+// TestMachineUnreadableSourceIsAProblemOnly: a source that cannot be read,
+// and a shared subdirectory that cannot be listed, are each named; the
+// source keeps its installed copy, and every other agent still loads.
+func TestMachineUnreadableSourceIsAProblemOnly(t *testing.T) {
+	if testjail.RanUnprivileged(t) {
+		return
+	}
+	root := testjail.Scratch(t)
+	for name, content := range map[string]string{
+		"reader.md":        "---\nname: reader\ndescription: Read.\n---\nRead files.\n",
+		"derived.md":       "---\nname: derived\nfrom: reader\n---\n",
+		"locked/layer.md":  "---\nmodel: sonnet\n---\n",
+		"odd.md/README.md": "Not an agent.\n",
+	} {
+		writeSourceFixture(t, filepath.Join(root, name), content)
+	}
+	locked := filepath.Join(root, "locked")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	p, err := LoadMachine(root, root, filepath.Join(root, "generated"))
+	if err != nil {
+		t.Fatalf("LoadMachine = %v, want the unreadable sources named and the rest loaded", err)
+	}
+	odd := filepath.Join(root, "odd.md")
+	want := []string{
+		"read " + odd + ": read " + odd + ": not a regular file",
+		"VARIANT-INVALID read shared directory " + locked + ": open " + locked + ": permission denied",
+	}
+	if !slices.Equal(p.Problems, want) || !slices.Equal(p.Failed, []string{"odd"}) {
+		t.Fatalf("problems %q failed %q, want %q and [odd]", p.Problems, p.Failed, want)
+	}
+	var names []string
+	for _, agent := range p.Agents {
+		names = append(names, agent.Name)
+	}
+	if !slices.Equal(names, []string{"reader", "derived"}) {
+		t.Fatalf("agents %q, want reader and derived", names)
+	}
 }
 
 // TestMachineBrokenSharedFileIsAProblemOnly: a shared file whose header does

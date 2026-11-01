@@ -7,8 +7,17 @@ import (
 )
 
 // Run locks canonical roots in sorted order and records even partial writes.
-// Checks consult writer records without acquiring write locks.
-func WithWriterGuard(state string, roots []string, version string, writer func() string, writes bool, wait time.Duration, body func() int) (int, error) {
+// Checks consult writer records without acquiring write locks. A record that
+// does not parse is passed to warn and read as no record.
+func WithWriterGuard(state string, roots []string, version string, writer func() string, writes bool, wait time.Duration, warn func(string), body func() int) (int, error) {
+	check := func(key string) error {
+		err := Check(state, key, version)
+		if errors.Is(err, ErrUnparseableRecord) {
+			warn(err.Error())
+			return nil
+		}
+		return err
+	}
 	keys := make([]string, len(roots))
 	for i, root := range roots {
 		key, e := CanonicalRoot(root)
@@ -27,7 +36,7 @@ func WithWriterGuard(state string, roots []string, version string, writer func()
 	keys = unique
 	if !writes {
 		for _, key := range keys {
-			if err := Check(state, key, version); err != nil {
+			if err := check(key); err != nil {
 				return 1, err
 			}
 		}
@@ -49,7 +58,7 @@ func WithWriterGuard(state string, roots []string, version string, writer func()
 		releases = append(releases, release)
 	}
 	for _, key := range keys {
-		if err := Check(state, key, version); err != nil {
+		if err := check(key); err != nil {
 			return 1, errors.Join(err, releaseAll())
 		}
 	}

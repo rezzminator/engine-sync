@@ -10,7 +10,8 @@ import (
 )
 
 // machine.managedBy is the installer's name: the schema pattern, the loader
-// and the artifact helper share one rule.
+// and the artifact helper share one rule. A malformed one is ignored with a
+// warning: no managed-by line is written.
 func TestManagedByRule(t *testing.T) {
 	field, _ := reflect.TypeFor[Machine]().FieldByName("ManagedBy")
 	if got := field.Tag.Get("pattern"); got != artifact.ManagedByPattern {
@@ -24,8 +25,9 @@ func TestManagedByRule(t *testing.T) {
 		if ok && (e != nil || cfg.Machine.ManagedBy != value) {
 			t.Errorf("managedBy %q = %v %q, want accepted", value, e, cfg.Machine.ManagedBy)
 		}
-		if !ok && (e == nil || !IsRefusal(e) || !strings.Contains(e.Error(), "machine.managedBy") || !strings.Contains(e.Error(), path)) {
-			t.Errorf("managedBy %q = %v (refusal %v), want a refusal naming machine.managedBy and %s", value, e, IsRefusal(e), path)
+		want := []string{"config " + path + ": machine.managedBy: " + strconv.Quote(value) + " must match ^[a-z][a-z0-9-]{0,31}$; ignored, no managed-by line is written"}
+		if !ok && (e != nil || cfg.Machine.ManagedBy != "" || !reflect.DeepEqual(cfg.Warnings, want)) {
+			t.Errorf("managedBy %q = %v %q warnings %q, want ignored with %q", value, e, cfg.Machine.ManagedBy, cfg.Warnings, want)
 		}
 	}
 }

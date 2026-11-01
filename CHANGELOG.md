@@ -2,6 +2,32 @@
 
 Every release of engine-sync. Versions follow [semantic versioning](https://semver.org); each release is the `main` commit tagged `v<version>`, with a GitHub release carrying the section below and the four platform binaries.
 
+## [0.8.0] - 2026-11-01
+
+### Added
+
+- A project's own rules, `{project}/.claude/rules/**/*.md` of the root and of each child project, now reach Codex and OpenCode through that project's compiled `AGENTS.md`, after its `CLAUDE.md` body: an always-on rule inlined under `<!-- rule: .claude/rules/{relative path} -->` with the body transform `CLAUDE.md` gets, a path-scoped rule as the read-on-match pointer global rules use. A rule that cannot be read or whose frontmatter does not parse is a problem naming the file. A project with no rules compiles byte for byte as before.
+- `codex build` warns and `codex check` fails with `AGENTS-BUDGET {path}: its Codex chain is {total} > {limit} bytes (…)` when a compiled `AGENTS.md` and the project `AGENTS.md` files above it pass the `project_doc_max_bytes` Codex applies (the project's `.codex/config.toml`, else the strictest Codex home's, default 32768), so Codex never silently drops the end of the chain.
+
+### Changed
+
+- `opencode build`, `check` and `doctor` report an engine-sync-owned `AGENTS.md` that differs from its compiled bytes as `STALE {path}` (a build warning, a check and doctor problem), since OpenCode reads it; this also catches a `CLAUDE.md` edit not yet rebuilt.
+- A configuration problem that spoils only one entry is ignored with the warning `engine-sync: config {file}: {key}: …` on stderr and a `config-warning` plugin-log row, where it refused the run: an unknown key; `machine` or `targets` in a project file; an invalid entry of `codex.neverRegister`, `machine.retiredAgents`, `agents.passthroughKeys` or `targets.capabilities`; a malformed `machine.managedBy`, which then writes no `managed-by` line. An absent `version` reads as `1`. A removed key and an old config path are still refused, exit 2.
+- A `{{index .Models "alias"}}` naming an alias outside the engine's `modelMap` renders as the alias itself, with a warning naming it, where it failed the build; a Codex `effort` outside the table is omitted with a warning.
+- A machine agent declaration may leave out `name`: its kebab-case file base names it, and a `name` written must still equal that base.
+
+### Fixed
+
+- `build` refuses only the output a problem names (an invalid or unparseable artifact, a duplicate output, an unsafe destination, a `codex.rootAdapter` or project rule that fails to compile for `AGENTS.md`, an `.mcp.json` that does not parse for `.codex/config.toml`): a file already there stays in place with the warning `{source} did not build; output kept: {path}`, every other output is written, and the run still fails. A kept file is skipped by the `AGENTS-BUDGET` and `STALE` checks. Any other problem still stops `build` before it writes.
+- A rule that cannot be read is a `RULE-UNREADABLE {path}: {error}` problem, and in `doctor --machine` a `fail` row, while the other rules still compile. An unreadable, unparseable or fenced project rule refuses only that project's `AGENTS.md`, kept as it is, and an unreadable rules directory no longer stops the OpenCode build.
+- A `project_doc_max_bytes` that cannot be read leaves the budget unchecked: a warning in `codex build`, which still writes every `AGENTS.md`, and a failure in `codex check`.
+- With `codex.globalCommands`, a machine policy or targets that do not resolve, or a refused global root, is a `global commands: …` problem of the run, and the project is still built or checked.
+- `doctor --machine` reports an agent path it cannot inspect as an `UNREADABLE` `fail` row ending ` ({error})` and still classifies every other path; a source that is a dangling link is a `global-agents … state=WARNING` row, and the other sources still report.
+- An agent whose `requires` is not a list of capability names is an error, and its installed copies stay. A malformed MCP tool in an OpenCode agent's `tools` (not `mcp__{server}__{tool}`) stays denied, with a warning naming it.
+- A link receipt that does not parse claims its link only when the target carries a complete generated marker, with a `link-receipt-unparseable` warning row; a writer record that does not parse reads as no record, with a `writer-record-unparseable` warning, and the next write replaces it.
+- A hook payload that cannot be read or decoded reads as empty and writes a `hook-payload-unreadable` error row. A policy that fails to load while discovery still finds a root costs only the workbench marker: the hook goes on with that root and writes a `hook-step-failed` error row.
+- The Stop hook's block reason cuts the failing stages' output past 4000 bytes on a character boundary, ending `[{N} bytes cut; run '{binary}' check . for the rest]`.
+
 ## [0.7.0] - 2026-11-01
 
 ### Added

@@ -46,6 +46,19 @@ func DeclaredName(model *Project, path string) string {
 	return strings.TrimSuffix(filepath.Base(path), ".md")
 }
 
+// KeptRoleNames is every registered role name the twin of a project agent
+// source whose header does not parse may carry: RoleName of its file base and
+// of the `name:` line it still holds — the names the machine loader keeps.
+func KeptRoleNames(path string, raw []byte, project string, cfg config.Codex) []string {
+	var names []string
+	for _, base := range failedSourceNames(path, raw) {
+		if name, register, err := RoleName(base, project, cfg); err == nil && register {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // CommandName is the colon command name of a command file at rel (relative to
 // its commands directory): `.md` trimmed, path segments joined with `:`.
 func CommandName(rel string) string {

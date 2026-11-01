@@ -10,7 +10,7 @@ import (
 
 func TestRunRecordsPartialWritesAndDeduplicates(t *testing.T) {
 	root, state := testjail.Scratch(t), testjail.Scratch(t)
-	rc, err := WithWriterGuard(state, []string{root, filepath.Join(root, ".")}, "0.2.0-alpha", func() string { return "fixture" }, true, time.Second, func() int { return 1 })
+	rc, err := WithWriterGuard(state, []string{root, filepath.Join(root, ".")}, "0.2.0-alpha", func() string { return "fixture" }, true, time.Second, func(string) {}, func() int { return 1 })
 	if err != nil || rc != 1 {
 		t.Fatalf("%d %v", rc, err)
 	}

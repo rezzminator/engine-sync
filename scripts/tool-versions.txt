@@ -1,3 +1,4 @@
 staticcheck v0.8.1
 claude-code 2.1.296
 python3 3
+node 22

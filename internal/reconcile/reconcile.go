@@ -35,7 +35,8 @@ func Run(outputs []artifact.Artifact, mode Mode, roots []artifact.Root, ownershi
 	}
 	result := Result{Warnings: warnings, Problems: problems}
 	outputs = prepared
-	if unsafeRoot || mode == Build && len(problems) > 0 {
+	// Prepare refused each output it found a problem with; the rest are written.
+	if unsafeRoot {
 		return result
 	}
 	managed := make([]string, 0, len(roots))

@@ -57,6 +57,10 @@ with tempfile.TemporaryDirectory(prefix='tree-tests-',dir=base) as tmp:
    out=variant();assert out.returncode==0,('published verb home not exempt',out.stdout)
    put('internal/machine/GlobalVariants_test.go','package machine\n');put('testdata/projects/Variant-sample/a.txt','x\n')
    out=variant();assert out.returncode==1 and 'internal/machine/GlobalVariants_test.go' in out.stdout and 'testdata/projects/Variant-sample' in out.stdout and 'a.txt' not in out.stdout,('path names unseen',out.stdout)
+  if check=='spelling-professor':
+   put('internal/unit/unit.go','package unit\n');(root/'blob.bin').write_bytes(b'professor\0')
+   out=subprocess.run(['python3',str(script),'--root',str(root),'--only',check],env=env,text=True,capture_output=True)
+   assert out.returncode==0 and out.stdout.splitlines()==['CHECK spelling-professor PASS — binary, not scanned: blob.bin'],('binary skip unnamed',out.stdout,out.stderr)
   if check=='registry-parity':
    put('README.md','## Commands\n\n| `build` | Build |\n')
    def parity():return subprocess.run(['python3',str(script),'--root',str(root),'--only',check,'--binary',str(binary)],env=env,text=True,capture_output=True)

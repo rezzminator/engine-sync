@@ -15,13 +15,16 @@ func Prepare(outputs []artifact.Artifact, managed ...[]artifact.Root) ([]artifac
 	if len(managed) > 0 {
 		roots = managed[0]
 	}
-	seen := map[string]artifact.Artifact{}
+	// A refused output is kept in place: never written, never an orphan.
+	refuse := func(i int) { outputs[i].Kept = &artifact.SourceLink{Path: outputs[i].Source} }
+	seen := map[string]int{}
 	for i, a := range outputs {
 		if a.Kept != nil {
 			continue
 		}
 		if e := safeParents(a.Path, roots); e != nil {
 			problems = append(problems, e.Error())
+			refuse(i)
 			continue
 		}
 		if a.Kind != artifact.Link {
@@ -29,6 +32,7 @@ func Prepare(outputs []artifact.Artifact, managed ...[]artifact.Root) ([]artifac
 				target, e := filepath.EvalSymlinks(a.Path)
 				if e != nil {
 					problems = append(problems, "CONFLICT "+a.Path+": "+e.Error())
+					refuse(i)
 					continue
 				}
 				allowed := false
@@ -43,6 +47,7 @@ func Prepare(outputs []artifact.Artifact, managed ...[]artifact.Root) ([]artifac
 				}
 				if !allowed {
 					problems = append(problems, "CONFLICT "+a.Path+": symlink preserved outside managed root")
+					refuse(i)
 					continue
 				}
 				a.Path = target
@@ -50,21 +55,24 @@ func Prepare(outputs []artifact.Artifact, managed ...[]artifact.Root) ([]artifac
 			}
 		}
 		key := paths.FoldName(filepath.Clean(a.Path))
-		if prior, ok := seen[key]; ok && a.Kept == nil && prior.Kept == nil {
-			problems = append(problems, "CONFLICT duplicate output "+a.Path+" from "+prior.Source+" and "+a.Source)
+		if prior, ok := seen[key]; ok {
+			problems = append(problems, "CONFLICT duplicate output "+a.Path+" from "+outputs[prior].Source+" and "+a.Source)
+			refuse(prior)
+			refuse(i)
 		}
-		seen[key] = a
+		seen[key] = i
 	}
 	expanded, p := ExpandKept(outputs)
 	outputs = expanded
 	problems = append(problems, p...)
 	for i, a := range outputs {
-		if a.Merge == nil {
+		if a.Merge == nil || a.Kept != nil {
 			continue
 		}
 		raw, err := paths.ReadRegular(a.Path)
 		if err != nil && !os.IsNotExist(err) {
 			problems = append(problems, "read "+a.Path+": "+err.Error())
+			refuse(i)
 			continue
 		}
 		if a.Kind != artifact.Region && len(raw) > 0 && !artifact.Claims(string(raw)) {

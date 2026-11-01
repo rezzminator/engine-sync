@@ -18,6 +18,16 @@ func Execute(p source.Project, cfg config.Config, mode reconcile.Mode,
 	artifacts, diagnostics := render(p, cfg)
 	result := reconcile.Result{}
 	diagnostics = append(diagnostics, validate(artifacts)...)
+	rendered := map[string]bool{}
+	for _, a := range artifacts {
+		rendered[a.Path] = true
+	}
+	// A problem naming one output refuses that output, kept in place (one the
+	// render already kept stays kept).
+	// Any other problem may have spoiled outputs it does not name (a config
+	// rendered without its MCP servers, a source whose twin now looks
+	// orphaned), so it stops a build.
+	refused, stop := map[string]bool{}, false
 	named := map[string]bool{}
 	for _, d := range diagnostics {
 		// The source loader and the target reading the same file name one
@@ -41,10 +51,20 @@ func Execute(p source.Project, cfg config.Config, mode reconcile.Mode,
 				message += " — " + d.Remedy
 			}
 			result.Problems = append(result.Problems, message)
+			if d.Severity != diag.Warning && rendered[d.Path] {
+				refused[d.Path] = true
+			} else {
+				stop = true
+			}
 		}
 	}
-	if mode == reconcile.Build && len(result.Problems) > 0 {
+	if mode == reconcile.Build && stop {
 		return result, false
+	}
+	for i, a := range artifacts {
+		if refused[a.Path] && a.Kept == nil {
+			artifacts[i].Kept = &artifact.SourceLink{Path: a.Source}
+		}
 	}
 	managed := roots(p, cfg)
 	for i := range managed {

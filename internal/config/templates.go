@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"text/template"
 )
@@ -14,18 +15,23 @@ type TemplateData struct {
 	Models                     map[string]string
 }
 
-// strictIndex replaces the template builtin for the model map: an alias the
-// map lacks fails the render, naming it, never renders blank.
-func strictIndex(models map[string]string, alias string) (string, error) {
-	model, ok := models[alias]
-	if !ok {
-		return "", fmt.Errorf("model alias %q is not in the engine's modelMap", alias)
-	}
-	return model, nil
+func RenderTemplate(text string, data TemplateData) (string, error) {
+	return renderTemplateReporting(text, data, func(string) {})
 }
 
-func RenderTemplate(text string, data TemplateData) (string, error) {
-	t, e := template.New("adapter").Option("missingkey=error").Funcs(template.FuncMap{"index": strictIndex}).Parse(text)
+// renderTemplateReporting replaces the template builtin index for the model map: an
+// alias the map lacks renders as the alias itself and is passed to missing,
+// never blank and never a failed render.
+func renderTemplateReporting(text string, data TemplateData, missing func(alias string)) (string, error) {
+	index := func(models map[string]string, alias string) string {
+		model, ok := models[alias]
+		if !ok {
+			missing(alias)
+			return alias
+		}
+		return model
+	}
+	t, e := template.New("adapter").Option("missingkey=error").Funcs(template.FuncMap{"index": index}).Parse(text)
 	if e != nil {
 		return "", e
 	}
@@ -33,6 +39,14 @@ func RenderTemplate(text string, data TemplateData) (string, error) {
 	e = t.Execute(&out, data)
 	return out.String(), e
 }
+
+// addWarning records notice once.
+func addWarning(cfg *Config, notice string) {
+	if !slices.Contains(cfg.Warnings, notice) {
+		cfg.Warnings = append(cfg.Warnings, notice)
+	}
+}
+
 func prepareTemplates(cfg Config) (Config, error) {
 	rows := []struct {
 		key    string
@@ -42,16 +56,12 @@ func prepareTemplates(cfg Config) (Config, error) {
 	for _, row := range rows {
 		if row.key != "codex.rootAdapter" && strings.Contains(*row.text, "${name}") {
 			*row.text = strings.ReplaceAll(*row.text, "${name}", "{{.Name}}")
-			notice := row.key + ": ${name} is deprecated; use {{.Name}}"
-			seen := false
-			for _, n := range cfg.Deprecations {
-				seen = seen || n == notice
-			}
-			if !seen {
-				cfg.Deprecations = append(cfg.Deprecations, notice)
-			}
+			addWarning(&cfg, row.key+": ${name} is deprecated; use {{.Name}}")
 		}
-		if _, e := RenderTemplate(*row.text, TemplateData{Models: row.models}); e != nil {
+		missing := func(alias string) {
+			addWarning(&cfg, fmt.Sprintf("config %s: %s: model alias %q is not in the engine's modelMap; it renders as %q", cfg.Sources[row.key], row.key, alias, alias))
+		}
+		if _, e := renderTemplateReporting(*row.text, TemplateData{Models: row.models}, missing); e != nil {
 			return Config{}, fmt.Errorf("config %s: %s: %w", cfg.Sources[row.key], row.key, e)
 		}
 	}

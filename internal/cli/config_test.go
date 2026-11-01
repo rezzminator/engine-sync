@@ -10,16 +10,20 @@ import (
 )
 
 func TestUnifiedConfigEntryValidation(t *testing.T) {
-	for _, tc := range []struct{ name, data, key string }{
-		{"unknown", `{"version":1,"mystery":true}`, "mystery"},
-		{"wrong type", `{"version":1,"codex":{"globalCommands":"yes"}}`, "codex.globalCommands"},
-		{"nested unknown", `{"version":1,"opencode":{"mystery":true}}`, "opencode.mystery"},
-		{"nested type", `{"version":1,"opencode":{"permission":{"edit":42}}}`, "opencode.permission.edit"},
-		{"invalid action", `{"version":1,"opencode":{"permission":{"edit":{"src/**":"yes"}}}}`, "opencode.permission.edit"},
-		{"null", `{"version":1,"opencode":null}`, "opencode"},
-		{"unsafe path", `{"version":1,"workbenchMarker":"../escape"}`, "workbenchMarker"},
-		{"version", `{"version":2}`, "version"},
-		{"unreadable", "directory", "config"},
+	// An unknown key is warned and ignored (exit 0); every other entry error fails the run.
+	for _, tc := range []struct {
+		name, data, key string
+		code            int
+	}{
+		{"unknown", `{"version":1,"mystery":true}`, "mystery: unknown key, ignored", 0},
+		{"wrong type", `{"version":1,"codex":{"globalCommands":"yes"}}`, "codex.globalCommands", 1},
+		{"nested unknown", `{"version":1,"opencode":{"mystery":true}}`, "opencode.mystery: unknown key, ignored", 0},
+		{"nested type", `{"version":1,"opencode":{"permission":{"edit":42}}}`, "opencode.permission.edit", 1},
+		{"invalid action", `{"version":1,"opencode":{"permission":{"edit":{"src/**":"yes"}}}}`, "opencode.permission.edit", 1},
+		{"null", `{"version":1,"opencode":null}`, "opencode", 1},
+		{"unsafe path", `{"version":1,"workbenchMarker":"../escape"}`, "workbenchMarker", 1},
+		{"version", `{"version":2}`, "version", 1},
+		{"unreadable", "directory", "config", 1},
 	} {
 		for _, layer := range []string{"project", "machine"} {
 			t.Run(layer+"/"+tc.name, func(t *testing.T) {
@@ -54,7 +58,7 @@ func TestUnifiedConfigEntryValidation(t *testing.T) {
 					var out, errOut bytes.Buffer
 					code := dispatch(args, &out, &errOut, e)
 					text := out.String() + errOut.String()
-					wantCode := 1
+					wantCode := tc.code
 					if len(args) > 0 && args[0] == "hook" {
 						wantCode = 0
 					}
@@ -67,9 +71,9 @@ func TestUnifiedConfigEntryValidation(t *testing.T) {
 	}
 }
 
-// A configuration the loader refuses by rule — a removed key, a moved file, a
-// key the file may not hold, a value outside its pattern — exits 2 at every
-// door and names the key and the file; other config errors keep exit 1.
+// A configuration the loader refuses by rule — a removed key, a moved file —
+// exits 2 at every door and names the key and the file; other config errors
+// keep exit 1.
 func TestConfigRefusalsExitTwo(t *testing.T) {
 	const old = ".config/engine-sync/config.json"
 	for _, tc := range []struct {
@@ -77,14 +81,10 @@ func TestConfigRefusalsExitTwo(t *testing.T) {
 		args                    func(root string) []string
 		want                    []string
 	}{
-		{"bad managedBy", "machine", ".claude/engine-sync.json", `{"version":1,"machine":{"managedBy":"Pro fessor"}}`,
-			func(string) []string { return []string{"config", "show"} }, []string{"machine.managedBy", ".claude/engine-sync.json"}},
 		{"old config path", "machine", old, `{"version":1}`,
 			func(string) []string { return []string{"config", "show"} }, []string{old, "is no longer read", ".claude/engine-sync.json"}},
 		{"old targets path", "machine", ".config/engine-sync/targets.json", `{"codexHomes":[]}`,
 			func(string) []string { return []string{"global", "--plan"} }, []string{".config/engine-sync/targets.json", `under "targets"`, ".claude/engine-sync.json"}},
-		{"targets in the project file", "project", ".claude/engine-sync.json", `{"version":1,"targets":{}}`,
-			func(root string) []string { return []string{"config", "show", root} }, []string{"targets: unknown key", ".claude/engine-sync.json"}},
 		{"removed store key", "machine", ".claude/engine-sync.json", `{"version":1,"machine":{"generatedAgentsDir":".local/state/x"}}`,
 			func(string) []string { return []string{"doctor", "--machine"} }, []string{"machine.generatedAgentsDir is removed", ".claude/engine-sync.json"}},
 		{"removed legacy key", "machine", ".claude/engine-sync.json", `{"version":1,"machine":{"legacyCodexAgentsDir":".local/state/x"}}`,

@@ -10,7 +10,7 @@ func TestFrontmatterEngineOverridesAndScalarForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if front.Description != "Read a file and return a quote." || front.Model != "opus" || len(front.Tools) != 2 || front.Engines.Codex.Sandbox != "inherit" || front.Engines.OpenCode.Model != "selected" || body != "Body.\n" {
+	if front.Fields["description"] != "Read a file and return a quote." || front.Model != "opus" || front.Fields["tools"] != "Read, Bash" || front.Engines.Codex.Sandbox != "inherit" || front.Engines.OpenCode.Model != "selected" || body != "Body.\n" {
 		t.Fatalf("front=%#v body=%q", front, body)
 	}
 }

@@ -32,7 +32,7 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		if err := refuseRemoved(object); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", machinePath, err)
 		}
-		if err := validateObject(object, reflect.TypeFor[MachineFile](), ""); err != nil {
+		if err := validateObject(object, reflect.TypeFor[MachineFile](), "", fileWarn(&cfg, machinePath)); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", machinePath, err)
 		}
 		machine := MachineFile{CommandDirs: cfg.CommandDirs, Version: cfg.Version, Codex: cfg.Codex, OpenCode: cfg.OpenCode, WorkbenchMarker: cfg.WorkbenchMarker, MCP: cfg.MCP, Rewrites: cfg.Rewrites, Machine: cfg.Machine, Agents: cfg.Agents}
@@ -54,6 +54,7 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 			cfg.WorkbenchMarker = marker
 			cfg.Sources["workbenchMarker"] = "env ENGINE_SYNC_WORKBENCH_MARKER"
 		}
+		dropInvalid(&cfg)
 		if err := Validate(cfg); err != nil {
 			source := sourceForError(cfg, err)
 			if source == "" {
@@ -77,7 +78,7 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		for _, rel := range []string{LegacyRelPath, ".claude/opencode-build.json"} {
 			legacyPath := filepath.Join(root, rel)
 			if _, e := os.Lstat(legacyPath); e == nil {
-				cfg.Deprecations = append(cfg.Deprecations, legacyPath+" is ignored because "+path+" exists")
+				cfg.Warnings = append(cfg.Warnings, legacyPath+" is ignored because "+path+" exists")
 			} else if !os.IsNotExist(e) {
 				return Config{}, fmt.Errorf("inspect legacy config %s: %w", legacyPath, e)
 			}
@@ -87,10 +88,11 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		}
 		for _, key := range []string{"machine", "targets"} {
 			if _, ok := object[key]; ok {
-				return Config{}, &Refusal{Msg: fmt.Sprintf("config %s: %s: unknown key (it belongs in the global file %s)", path, key, MachinePath(home))}
+				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("config %s: %s: ignored; it belongs in the global file %s", path, key, MachinePath(home)))
+				delete(object, key)
 			}
 		}
-		if err := validateObject(object, reflect.TypeFor[Config](), ""); err != nil {
+		if err := validateObject(object, reflect.TypeFor[Config](), "", fileWarn(&cfg, path)); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", path, err)
 		}
 		raw, _ := json.Marshal(object)
@@ -110,19 +112,20 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 					delete(legacy, key)
 				}
 			}
-			version := legacy["version"]
-			cfg.Sources["version"] = path
-			delete(legacy, "version")
-			if err := validateValue(version, reflect.TypeFor[int](), "version"); err != nil {
-				return Config{}, fmt.Errorf("config %s: %w", path, err)
-			}
-			if err := json.Unmarshal(version, &cfg.Version); err != nil {
-				return Config{}, fmt.Errorf("config %s: version: %w", path, err)
+			if version, ok := legacy["version"]; ok {
+				cfg.Sources["version"] = path
+				delete(legacy, "version")
+				if err := validateValue(version, reflect.TypeFor[int](), "version", fileWarn(&cfg, path)); err != nil {
+					return Config{}, fmt.Errorf("config %s: %w", path, err)
+				}
+				if err := json.Unmarshal(version, &cfg.Version); err != nil {
+					return Config{}, fmt.Errorf("config %s: version: %w", path, err)
+				}
 			}
 			if err := refuseRemoved(legacy); err != nil {
 				return Config{}, fmt.Errorf("config %s: %w", path, err)
 			}
-			if err := validateObject(legacy, reflect.TypeFor[Codex](), ""); err != nil {
+			if err := validateObject(legacy, reflect.TypeFor[Codex](), "", fileWarn(&cfg, path)); err != nil {
 				return Config{}, fmt.Errorf("config %s: %w", path, err)
 			}
 			raw, _ := json.Marshal(legacy)
@@ -140,13 +143,13 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 			markSources(&cfg, legacy, "codex.", path)
 		}
 		path = filepath.Join(root, ".claude", "opencode-build.json")
-		if legacy, found, err := readObjectWithoutVersion(path); err != nil {
+		if legacy, found, err := readObject(path); err != nil {
 			return Config{}, err
 		} else if found {
 			var shape struct {
 				ModelMap map[string]string `json:"modelMap"`
 			}
-			if err := validateObject(legacy, reflect.TypeOf(shape), ""); err != nil {
+			if err := validateObject(legacy, reflect.TypeOf(shape), "", fileWarn(&cfg, path)); err != nil {
 				return Config{}, fmt.Errorf("config %s: %w", path, err)
 			}
 			shape.ModelMap = cfg.OpenCode.ModelMap
@@ -155,7 +158,7 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 				return Config{}, fmt.Errorf("config %s: modelMap: %w", path, err)
 			}
 			cfg.OpenCode.ModelMap = shape.ModelMap
-			cfg.Deprecations = append(cfg.Deprecations, path+" is deprecated; use "+filepath.Join(root, filepath.FromSlash(RelPath))+" opencode.modelMap")
+			cfg.Warnings = append(cfg.Warnings, path+" is deprecated; use "+filepath.Join(root, filepath.FromSlash(RelPath))+" opencode.modelMap")
 			markSources(&cfg, legacy, "opencode.", path)
 		}
 	}
@@ -163,10 +166,16 @@ func Resolve(root, home string, env func(string) string) (Config, error) {
 		cfg.WorkbenchMarker = marker
 		cfg.Sources["workbenchMarker"] = "env ENGINE_SYNC_WORKBENCH_MARKER"
 	}
+	dropInvalid(&cfg)
 	if err := Validate(cfg); err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", sourceForError(cfg, err), err)
 	}
 	return prepareTemplates(cfg)
+}
+
+// fileWarn records a warning about one config file's key.
+func fileWarn(cfg *Config, path string) func(string) {
+	return func(msg string) { cfg.Warnings = append(cfg.Warnings, "config "+path+": "+msg) }
 }
 
 // uniqueJSON rejects duplicates before decoding can discard their first value.

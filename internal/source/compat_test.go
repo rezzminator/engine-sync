@@ -47,7 +47,7 @@ func TestHeaderCompatibilityRetry(t *testing.T) {
 		})
 	}
 	front, _, err := Parse("---\ndescription: Review: run the checks\nengines:\n  codex:\n    model: gpt\n---\nbody")
-	if err != nil || front.Description != "Review: run the checks" || front.Engines.Codex == nil || front.Engines.Codex.Model != "gpt" {
+	if err != nil || front.Fields["description"] != "Review: run the checks" || front.Engines.Codex == nil || front.Engines.Codex.Model != "gpt" {
 		t.Fatalf("Parse = %+v, %v", front, err)
 	}
 	if _, _, err := Parse("---\ndescription: Reader\nbody"); !strings.HasPrefix(DescribeParseError("a.md", err), "FRONTMATTER-INVALID a.md:1 — ") {

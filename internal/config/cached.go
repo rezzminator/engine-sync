@@ -29,9 +29,9 @@ func ResolveCached(root, home string, get paths.Env, policies map[string]CachedR
 	if err != nil {
 		return nil, err
 	}
-	for _, notice := range cfg.Deprecations {
+	for _, notice := range cfg.Warnings {
 		if !notices[notice] {
-			runlog.Record(get, stderr, pluginlog.Row{Level: "warning", Event: "config-deprecated", Msg: notice, Where: "internal/config/cached.go#ResolveCached"})
+			runlog.Record(get, stderr, pluginlog.Row{Level: "warning", Event: "config-warning", Msg: notice, Where: "internal/config/cached.go#ResolveCached"})
 			fmt.Fprintln(stderr, "engine-sync: "+notice)
 			notices[notice] = true
 		}

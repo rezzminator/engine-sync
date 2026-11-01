@@ -39,6 +39,11 @@ var ErrNewerWriter = errors.New("NEWER-WRITER")
 // dead holder's lock, so a busy lock always has a live holder.
 var ErrBusy = errors.New("BUSY")
 
+// ErrUnparseableRecord is a writer record that does not parse: Check names
+// it; WithWriterGuard warns of it and reads it as no record, which the next
+// write replaces.
+var ErrUnparseableRecord = errors.New("unparseable writer record")
+
 // BusyCode is the exit code of a run refused by ErrBusy, the in-process and
 // cross-process channel a caller tells it apart by (EX_TEMPFAIL).
 const BusyCode = 75
@@ -127,7 +132,8 @@ func Lock(state, root string, wait ...time.Duration) (func() error, error) {
 
 // Check refuses a write by version mine when a newer version wrote root. No
 // record, or an unparseable version on either side, admits the write: only a
-// proven newer writer refuses. An unreadable record is an error, never a pass.
+// proven newer writer refuses. An unreadable record is an error, never a pass;
+// one that does not parse is ErrUnparseableRecord.
 func Check(state, root, mine string) error {
 	var e error
 	root, e = CanonicalRoot(root)
@@ -144,7 +150,7 @@ func Check(state, root, mine string) error {
 	}
 	var record Record
 	if err := json.Unmarshal(raw, &record); err != nil {
-		return fmt.Errorf("parse writer record %s: %w", path, err)
+		return fmt.Errorf("%w %s: %w; read as no record, the next write replaces it", ErrUnparseableRecord, path, err)
 	}
 	if Newer(record.Version, mine) {
 		return &NewerWriterError{Record: record, Mine: mine}

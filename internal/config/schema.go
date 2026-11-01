@@ -58,7 +58,6 @@ func schemaType(t reflect.Type) map[string]any {
 		}
 		out := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
 		if _, ok := props["version"]; ok {
-			out["required"] = []string{"version"}
 			props["version"] = map[string]any{"const": 1}
 		}
 		return out

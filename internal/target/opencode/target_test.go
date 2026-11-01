@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/artifact"
+	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -127,6 +128,24 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	doctor, err := Compile(Options{Root: root, Home: home, Mode: ModeDoctor})
 	if err != nil || !doctor.OK {
 		t.Fatalf("doctor result=%#v err=%v", doctor, err)
+	}
+}
+
+// A machine policy that does not resolve fails only the optional
+// global-commands step: the project result already written is kept.
+func TestOpenCodeGlobalCommandsUnresolvedMachineKeepsTheProjectResult(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	writeOpenCodeFixture(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
+	machine := filepath.Join(home, ".claude", "engine-sync.json")
+	writeOpenCodeFixture(t, machine, `{bad`)
+	policy := config.Default()
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild, Config: &policy})
+	want := []string{"global commands: parse config " + machine + ": invalid character 'b' looking for beginning of value"}
+	if err != nil || result.OK || !reflect.DeepEqual(result.Problems, want) || result.Wrote != 1 {
+		t.Fatalf("result=%#v err=%v; want the project's one write kept and problems %q", result, err, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".opencode", "opencode.jsonc")); err != nil {
+		t.Fatalf("project mirror missing: %v", err)
 	}
 }
 

@@ -4,7 +4,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/rezzminator/engine-sync/internal/artifact"
@@ -195,16 +197,23 @@ func TestGlobalRulesDoctor(t *testing.T) {
 	bad := filepath.Join(home, ".claude", "rules", "bad.md")
 	writeMachineFixture(t, bad, "---\npaths:\n  - a: [unclosed\n---\nBad body.\n")
 	writeMachineFixture(t, filepath.Join(home, ".claude", "rules", "big.md"), strings.Repeat("x", 9000)+"\n")
+	pipe := filepath.Join(home, ".claude", "rules", "pipe.md")
+	if err := syscall.Mkfifo(pipe, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	rows = rulesRowsOf(t, home, codexHome)
 	if !hasRow(rows, LevelFail, "RULE-FRONTMATTER "+bad+": ") {
 		t.Errorf("an unparseable rule is not RULE-FRONTMATTER: %v", rows)
+	}
+	if want := (Row{LevelFail, "RULE-UNREADABLE " + pipe + ": read " + pipe + ": not a regular file"}); !slices.Contains(rows, want) {
+		t.Errorf("an unreadable rule is not %q: %v", want.Message, rows)
 	}
 	if !hasRow(rows, LevelWarn, "GLOBAL-BUDGET ") {
 		t.Errorf("a set over 8 KiB has no GLOBAL-BUDGET row: %v", rows)
 	}
 	runRules(t, home, codexHome, false, false)
-	if strings.Contains(readFixture(t, agents), "Bad body.") {
-		t.Fatal("a rule whose frontmatter does not parse was compiled as always-on")
+	if got := readFixture(t, agents); strings.Contains(got, "Bad body.") || !strings.Contains(got, "Always A, edited.") {
+		t.Fatalf("a rule whose frontmatter does not parse was compiled as always-on, or a skipped rule cost the others:\n%s", got)
 	}
 }
 

@@ -67,18 +67,21 @@ for f in {parent for file in listed for parent in file.parents if root in parent
  if re.fullmatch(r'util.*|helpers|common|misc|shared',f.name):results['negation-dirs'].append(f.relative_to(root).as_posix())
 # Scan the tracked and untracked text surface; compatibility literals and
 # attribution have exact path-and-line exceptions, never directory exemptions.
+notes={};unscanned=[]
 standalone=re.compile(r'\b(?:professor|pfm|gitter|flight|fleet|framework)\b|dispatch prompt|workbench\.json|templates/global|First action: read the repository root',re.I)
 for f in listed:
  path=f.relative_to(root).as_posix()
  if path.startswith('testdata/projects/integration/') or path=='scripts/marker-allowlist.txt':continue
  try:
   raw=f.read_bytes()
-  if b'\0' in raw:continue
+  if b'\0' in raw:unscanned.append(path);continue
   content=raw.decode('utf-8')
  except (OSError,UnicodeError) as exc:error['spelling-professor']=str(exc);continue
  for line in content.splitlines():
   if standalone.search(line) and path+'\t'+line not in allow:
    results['spelling-professor'].append(path);break
+# A binary file cannot be read as lines: the verdict names it, never a silent pass.
+if unscanned:notes['spelling-professor']='— binary, not scanned: '+', '.join(unscanned)
 wrapper=root/'plugins/engine-sync/libexec/engine-sync'
 # One command table and one target registry feed dispatch, usage and the contract.
 main=root/'internal/cli/main.go'
@@ -206,9 +209,9 @@ for i in ids:
    elif i not in error and i not in gap:baseline.write_text(''.join(v+'\n' for v in sorted(current)))
   results[i]=sorted(new)
  if i in error:print(f'CHECK {i} ERROR {error[i]}');rc=2;ran['ERROR']+=1
- elif results[i]:print(f'CHECK {i} FAIL '+ '; '.join(results[i]));rc=max(rc,1);ran['FAIL']+=1
+ elif results[i]:print(f'CHECK {i} FAIL '+ '; '.join(results[i])+(' '+notes[i] if i in notes else ''));rc=max(rc,1);ran['FAIL']+=1
  elif i in gap:print(f'CHECK {i} GAP {gap[i]}')
- else:print(f'CHECK {i} PASS'+(' '+publication_note if i=='publication' else ''));ran['PASS']+=1
+ else:print(f'CHECK {i} PASS'+(' '+publication_note if i=='publication' else '')+(' '+notes[i] if i in notes else ''));ran['PASS']+=1
 # A gap is no pass and no red: it decides the exit code (3) only when every check that ran passed.
 # A gapped check that still ended in ERROR ran, so it is counted there and never also as not run.
 gap={i:why for i,why in gap.items() if i not in error}
