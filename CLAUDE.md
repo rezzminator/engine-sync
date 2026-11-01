@@ -39,12 +39,12 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 - Leak gate: `scripts/leak-check.sh`; in a worktree, `LEAK_TERMS={checkout}/scripts/leak-terms.txt scripts/leak-check.sh`.
 - Fence: a parent project's dev container that mounts this checkout may export that project's own terms as `LEAK_TERMS`; there, set it inline to `{checkout}/scripts/leak-terms.txt` for the tree and leak gates, else they scan against the wrong denylist.
 - Validate: `claude plugin validate --strict plugins/engine-sync`
-- Release check: `make release-check`, after `git fetch origin main`, runs every check the release pull request runs: `make check`, `make tree`, `make leak`, `make release-version`, `make release`; `make release` fails on `develop` between releases by design (undated heading, stale `SHA256SUMS`).
+- Release check: `make release-check`, after `git fetch origin main`, runs every check the release pull request runs: `make check` (the leak gate last), `make tree`, `make release-version`, `make release`; `make release` fails on `develop` between releases by design (undated heading, stale `SHA256SUMS`).
 - Scratch: `/tmp/engine-sync/{purpose}/`
 
 ## CI
 
-- `.github/workflows/release.yml` on every pull request to `main`, never on a push: `check` (gofmt, vet, pinned staticcheck, tree gates, tests, the plugin validate, the leak gate), `release-version` (the native release asset on each matrix runner prints the version) and `release` (the version moved past main's, `scripts/release-check.sh --release`, non-empty CHANGELOG notes), each a `make` target; merging it runs `publish`, which tags `v{version}` and publishes the four assets. Fork pull requests run the public gates; private leak terms are available only to trusted runs.
+- `.github/workflows/ci.yml` on every pull request to `main`, never on a push: `check` (gofmt, vet, pinned staticcheck, tree gates, tests, the plugin validate, the leak gate) on Linux and macOS, `release` on each of the four native runners (`release-version`: the native release asset prints the version) and, on one of them, `release` (the version moved past main's, `scripts/release-check.sh --release`, non-empty CHANGELOG notes), each a `make` target, and `ci`, green only when every one succeeded; merging it runs `.github/workflows/publish.yml`: `publish` tags `v{version}` and publishes the four assets, then `verify` checks them. A fork's pull request runs every public gate and fails at the leak gate, which has no terms; private leak terms reach only trusted runs.
 
 # Rules
 
@@ -59,7 +59,7 @@ engine-sync is the single writer of every Codex and OpenCode artifact derived fr
 
 - Git writes go through the `gitter` agent.
 - Work lands on `develop`; `develop` is protected by the ruleset `develop keeps its history`: never force-push or delete it.
-- `main` is protected by `main is release-only`: it moves only by merging the `develop` -> `main` pull request with a merge commit, after `check` and `release` pass; never a direct push, never an admin override.
+- `main` is protected by `main is release-only`: it moves only by merging the `develop` -> `main` pull request with a merge commit, after `ci` passes; never a direct push, never an admin override.
 - Every pull request merged into `main` publishes: its version moves past main's, and a pre-release version (`-dev.N`) is bumped to the real release version in that pull request.
 - Before opening it: `git fetch origin main`, then `make release-check` passes.
 - After the merge, the `publish` job tags `v{version}` on the merge commit and creates the GitHub release; nobody pushes a tag by hand.

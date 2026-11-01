@@ -1,21 +1,22 @@
-# The checks GitHub runs on a pull request to main (.github/workflows/release.yml),
+# The checks GitHub runs on a pull request to main (.github/workflows/ci.yml),
 # runnable here first: `make release-check` runs them all.
 GO_VERSION := $(shell awk '/^go /{print $$2}' go.mod)
 # go.mod's toolchain exactly, as setup-go gives CI; build-release.sh refuses any other.
 export GOTOOLCHAIN := go$(GO_VERSION)
 MANIFEST := plugins/engine-sync/.claude-plugin/plugin.json
 JSON_VERSION := grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/^"version"[[:space:]]*:[[:space:]]*"//; s/"$$//'
-# The runners of the release-version matrix, each with the `uname -s`/`uname -m` it builds natively.
+# The runners of ci.yml's release matrix, each with the `uname -s`/`uname -m` it builds natively.
 VERSION_LEGS := ubuntu-24.04=Linux/x86_64 ubuntu-24.04-arm=Linux/aarch64 macos-15=Darwin/arm64 macos-15-intel=Darwin/x86_64
 
 .PHONY: release-check check tree tree-public leak release-version release
 
-release-check: check tree leak release-version release
+release-check: check tree release-version release
 	@echo "NOT RUN LOCALLY: public compiler tree on fork pull requests — runs only on a fork's pull request, which gets no secrets; make tree ran every check it runs"
 	@native="$$(uname -s)/$$(uname -m)"; for leg in $(VERSION_LEGS); do \
 	  [ "$${leg#*=}" = "$$native" ] || echo "NOT RUN LOCALLY: release-version on $${leg%%=*} — needs a $${leg#*=} runner; this host builds $$native"; \
 	done
 
+# The whole local gate, the leak scan last: a run with no terms still reports every other check.
 check:
 	unformatted=$$(sh -c '"$$(go env GOROOT)/bin/gofmt" -l .'); \
 	[ -z "$$unformatted" ] || { printf 'gofmt: not formatted:\n%s\n' "$$unformatted"; exit 1; }
@@ -25,6 +26,7 @@ check:
 	scripts/check-tree_test.sh
 	go test ./...
 	claude plugin validate --strict plugins/engine-sync
+	$(MAKE) --no-print-directory leak
 
 # LEAK_TERMS names the terms file (CI writes the secret to one); unset, scripts/leak-terms.txt.
 tree:

@@ -1,0 +1,115 @@
+name: ci
+
+# The one check, on a pull request into main: `make check` with the tree and
+# leak gates on Linux and macOS in parallel, and `release`: the native release
+# asset run on each of the four platforms, and `make release`. Its `ci` job is
+# main's only required status check, so nothing merges or publishes until every
+# job here is green; publish.yml runs on the merge. No run starts on a push.
+# `make release-check` runs the same checks locally.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: the pinned tools
+        # scripts/tool-versions.txt is the one place both legs read them from; Go comes from go.mod.
+        run: |
+          set -euo pipefail
+          claude_code="$(awk '$1 == "claude-code" { print $2 }' scripts/tool-versions.txt)"
+          node="$(awk '$1 == "node" { print $2 }' scripts/tool-versions.txt)"
+          [ -n "$claude_code" ] || { echo "::error::scripts/tool-versions.txt pins no claude-code"; exit 1; }
+          [ -n "$node" ] || { echo "::error::scripts/tool-versions.txt pins no node"; exit 1; }
+          printf 'CLAUDE_CODE_VERSION=%s\nNODE_VERSION=%s\n' "$claude_code" "$node" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: install Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: leak scan, gofmt, vet, staticcheck, tree gate tests, test, validate the plugin
+        # The private leak terms reach only a pull request from this repository; a fork's gets
+        # no secrets, so its leak scan has no terms and fails rather than passing.
+        env:
+          LEAK_TERMS_CONTENT: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.LEAK_TERMS || '' }}
+        run: |
+          if [ -n "$LEAK_TERMS_CONTENT" ]; then
+            printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
+            export LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt"
+          fi
+          make check
+      - name: compiler tree
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          LEAK_TERMS_CONTENT: ${{ secrets.LEAK_TERMS }}
+          CHECK_TREE_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: |
+          printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
+          LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt" make tree
+      - name: public compiler tree on fork pull requests
+        # Runs after a red check too: a fork's check fails at its leak scan, which has no terms.
+        if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: make tree-public
+
+  # Each runner of the Makefile's VERSION_LEGS builds its native release asset
+  # and runs it to prove the version it prints; the release checks run once.
+  release:
+    name: release (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: execute native release asset and verify its version
+        run: make release-version
+      - name: the version moved past main's, every version place agrees, the committed sums match a fresh build, the changelog yields notes
+        if: matrix.runner == 'ubuntu-24.04'
+        run: make release
+
+  # main's only required status check. always(): a skipped or cancelled job
+  # counts as passed for a required check, so this job fails unless every
+  # job it needs succeeded; a matrix job's result is failure when any leg failed.
+  ci:
+    name: ci
+    needs: [check, release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<<"$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::not every CI job succeeded: $(tr '\n' ' ' <<<"$failed")"
+            exit 1
+          fi
+          echo "every CI job succeeded"
