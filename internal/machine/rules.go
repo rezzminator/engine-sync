@@ -21,8 +21,9 @@ import (
 )
 
 // globalRulesBudget is the always-on set's size past which doctor warns: every
-// agent of every project pays it.
-const globalRulesBudget = 8 << 10
+// agent of every project pays it. 9 KiB holds the always-on rules plus the
+// path-scoped rules' read-on-match pointers.
+const globalRulesBudget = 9 << 10
 
 // openCodeInstructionsKey is the global OpenCode config's array of extra
 // instruction files.
@@ -34,8 +35,10 @@ type globalRules struct {
 	Label string // the directory as the compiled text names it
 	// Body is every always-on rule, transformed, each under its
 	// `<!-- rule: … -->` line, in sorted relative-path order; "" when none.
-	Body   string
-	Scoped []string // path-scoped rules: delivered by no channel yet
+	Body string
+	// Scoped are path-scoped rules: Codex and OpenCode have no path trigger, so
+	// each is delivered as a pointer naming its paths and its file, read on match.
+	Scoped []string
 	// Targeted are always-on rules with a rule-control `visible-to:` key:
 	// compiled like any other, so they reach every Codex and OpenCode loop.
 	Targeted []string
@@ -86,8 +89,11 @@ func loadGlobalRules(home, claudeDir string, policy config.Config) (globalRules,
 			set.Broken = append(set.Broken, fmt.Sprintf("RULE-FRONTMATTER %s: %v", path, err))
 			continue
 		}
-		if pathScoped(source.MapValue(front.Node, "paths")) {
+		if scope := source.MapValue(front.Node, "paths"); pathScoped(scope) {
 			set.Scoped = append(set.Scoped, path)
+			label := set.Label + "/" + filepath.ToSlash(rel)
+			blocks = append(blocks, "<!-- rule: "+label+" (path-scoped) -->\nBefore working on a file matching "+
+				scopeGlobs(scope)+", read "+label+" and follow it.\n")
 			continue
 		}
 		compiled := strings.TrimSpace(transform(body, path))
@@ -104,6 +110,18 @@ func loadGlobalRules(home, claudeDir string, policy config.Config) (globalRules,
 	}
 	set.Body = strings.Join(blocks, "\n")
 	return set, nil
+}
+
+// scopeGlobs renders a `paths:` value, a list or one scalar, as backquoted globs.
+func scopeGlobs(value *yaml.Node) string {
+	globs := []string{value.Value}
+	if value.Kind == yaml.SequenceNode {
+		globs = globs[:0]
+		for _, item := range value.Content {
+			globs = append(globs, item.Value)
+		}
+	}
+	return "`" + strings.Join(globs, "`, `") + "`"
 }
 
 // pathScoped reports a `paths:` value naming at least one path.
@@ -325,7 +343,7 @@ func rulesRows(options DoctorOptions) []Row {
 		rows = append(rows, Row{Level: LevelWarn, Message: "global-rules /command roster: " + warning})
 	}
 	for _, scoped := range set.Scoped {
-		rows = append(rows, Row{Level: LevelWarn, Message: "global-rules PATH-SCOPED " + scoped + ` not delivered to Codex or OpenCode note="the path-scoped injector is not built"`})
+		rows = append(rows, Row{Level: LevelOK, Message: "global-rules PATH-SCOPED " + scoped + ` delivered to Codex and OpenCode as a read-on-match pointer note="neither engine has a path trigger; the loop reads the rule when it works on a matching file"`})
 	}
 	for _, targeted := range set.Targeted {
 		rows = append(rows, Row{Level: LevelOK, Message: "global-rules VISIBLE-TO " + targeted + ` delivered to every Codex and OpenCode loop note="visible-to narrows a rule on Claude Code only (rule-control); Codex and OpenCode have no per-loop delivery"`})

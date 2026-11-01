@@ -148,7 +148,7 @@ func TestGlobalRulesVisibleTo(t *testing.T) {
 	if !hasRow(rows, LevelOK, "VISIBLE-TO "+targeted, "every Codex and OpenCode loop") {
 		t.Errorf("doctor does not name the visible-to gap: %v", rows)
 	}
-	if hasRow(rows, LevelOK, "VISIBLE-TO "+scoped) || !hasRow(rows, LevelWarn, "PATH-SCOPED "+scoped) {
+	if hasRow(rows, LevelOK, "VISIBLE-TO "+scoped) || !hasRow(rows, LevelOK, "PATH-SCOPED "+scoped) {
 		t.Errorf("a path-scoped visible-to rule is not PATH-SCOPED alone: %v", rows)
 	}
 	if hasRow(rows, LevelOK, "VISIBLE-TO", filepath.Join(rules, "a.md")) {
