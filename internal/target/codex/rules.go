@@ -20,7 +20,7 @@ type RuleSet struct {
 	// Targeted are always-on rules with a rule-control `visible-to:` key:
 	// compiled like any other, so they reach every Codex and OpenCode loop.
 	Targeted []string
-	Broken   []string // RULE-FRONTMATTER and RULE-FENCE rows: each rule skipped
+	Broken   []string // RULE-UNREADABLE, RULE-FRONTMATTER and RULE-FENCE rows: each rule skipped
 }
 
 // CompileRules compiles rules, read from the directory label names in the
@@ -30,6 +30,10 @@ func CompileRules(rules []claudesource.Rule, label string, transform func(body, 
 	var set RuleSet
 	var blocks []string
 	for _, rule := range rules {
+		if rule.ReadErr != nil {
+			set.Broken = append(set.Broken, fmt.Sprintf("RULE-UNREADABLE %s: %v", rule.Path, rule.ReadErr))
+			continue
+		}
 		if rule.ParseErr != nil {
 			set.Broken = append(set.Broken, fmt.Sprintf("RULE-FRONTMATTER %s: %v", rule.Path, rule.ParseErr))
 			continue

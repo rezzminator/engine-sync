@@ -70,7 +70,7 @@ func compileOpenCodeAgents(
 				kept = append(kept, name)
 				continue
 			}
-			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, problem, warn, model, policy)
+			compileOpenCodeAgent(root, project, name, entry.Path, roster, modelMap, knownServers, add, problem, warn, model, policy)
 		}
 	}
 	for _, name := range kept {
@@ -81,7 +81,7 @@ func compileOpenCodeAgents(
 }
 
 func compileOpenCodeAgent(
-	root, name, path string,
+	root, project, name, path string,
 	roster map[string]string,
 	modelMap map[string]string,
 	knownServers []string,
@@ -99,7 +99,7 @@ func compileOpenCodeAgent(
 		skip("relative path of %s: %v", path, err)
 		return
 	}
-	_, err = model.Read(path)
+	raw, err := model.Read(path)
 	if err != nil {
 		skip("read %s: %v", path, err)
 		return
@@ -107,6 +107,10 @@ func compileOpenCodeAgent(
 	front, body, parseErr := model.Frontmatter(path)
 	if parseErr != nil {
 		skip("%s", claudesource.DescribeParseError(path, parseErr))
+		// It keeps its installed twin until it builds again.
+		for _, kept := range claudesource.KeptRoleNames(path, raw, project, policy.Codex) {
+			add(artifact.Artifact{Path: filepath.Join(root, ".opencode", "agent", kept+".md"), Kept: &artifact.SourceLink{Path: path}})
+		}
 		return
 	}
 	preamble, err := config.RenderTemplate(policy.OpenCode.AgentPreamble, config.TemplateData{Name: name, Engine: "OpenCode", Source: filepath.ToSlash(rel), Root: "AGENTS.md", Models: modelMap})
@@ -197,11 +201,7 @@ func renderOpenCodeAgent(
 		toolsContext := ctx
 		toolsContext.Kind = "agent-tools"
 		tools = rewrite.Configured(rewrites).Apply(tools, toolsContext)
-		toolsBlock, toolsWarnings, toolsErr := renderOpenCodeToolsBlock(spec.Path, tools, knownServers, policy.MCP)
-		if toolsErr != nil {
-			skip("tools %s: %v", spec.Path, toolsErr)
-			return
-		}
+		toolsBlock, toolsWarnings := renderOpenCodeToolsBlock(spec.Path, tools, knownServers, policy.MCP)
 		for _, toolsWarning := range toolsWarnings {
 			warn("%s", toolsWarning)
 		}

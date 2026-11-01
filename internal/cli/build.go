@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"github.com/rezzminator/engine-sync/internal/cliargs"
 	"github.com/rezzminator/engine-sync/internal/config"
@@ -59,30 +60,15 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	roots := []string{o.Root}
 	combined := diag.Report{OK: true}
 
+	// The global-commands step is optional: its failure (a machine policy or
+	// targets that do not resolve, a global root the writer guard refuses) is a
+	// problem of this run, never a reason to skip the project the user named.
+	var globalErr error
 	if !p.Workbench && cfg.Codex.GlobalCommands {
-		machinePolicy, loadErr := e.policy("", o.Home, stderr)
-		if loadErr != nil {
-			return cliargs.ReportFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
-		}
-		roster, loadErr := config.ResolveTargets(e.get, o.Home, *machinePolicy, config.Targets{})
-		if loadErr != nil {
-			return cliargs.ReportFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
-		}
-		_, loadErr = guarded(e, machine.GuardRoots(o.Home, *roster.CodexHomes, roster.ClaudeConfigDirs), mode == reconcile.Build, func() int {
-			for _, t := range targets {
-				r, pass := engine.Commands(o.Home, "", *machinePolicy, *roster.CodexHomes, false, mode, t.Render, t.Roots, t.Validate)
-				combined.Merge(r, pass)
-				if !asJSON {
-					diag.PrintLines(stderr, r.Problems, r.Warnings)
-				}
-			}
-			if !combined.OK {
-				return 1
-			}
-			return 0
-		})
-		if loadErr != nil {
-			return cliargs.ReportFailure("engine-sync "+action, asJSON, loadErr, stdout, stderr)
+		globalErr = machine.ProjectCommands(e.get, o.Home, mode, targets, e.policy,
+			func(r []string, w bool, body func() int) (int, error) { return guarded(e, r, w, body) }, &combined, stderr, asJSON)
+		if globalErr != nil && !asJSON {
+			fmt.Fprintln(stderr, "engine-sync "+action+": global commands: "+globalErr.Error())
 		}
 	}
 	if action == "check" || action == "doctor" {
@@ -117,15 +103,25 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		}
 		return 0
 	})
-	runlog.RecordOutcome(e.get, stderr, runlog.ProjectOutcome{Action: action, Code: code, Applied: mode == reconcile.Build, Warnings: combined.Warnings, Problems: combined.Problems, Error: err, Session: e.sessionID})
+	globalCode := 0
+	if globalErr != nil {
+		combined.Merge(reconcile.Result{Problems: []string{"global commands: " + globalErr.Error()}}, false)
+		if code == 0 && err == nil {
+			// The project passed: the exit is the global step's own, so a busy
+			// lock still reads as busy (75) and a refusal as a refusal (2).
+			globalCode = cliargs.FailureCode(globalErr)
+			code = globalCode
+		}
+	}
+	runlog.RecordOutcome(e.get, stderr, runlog.ProjectOutcome{Action: action, Code: code, Applied: mode == reconcile.Build, Warnings: combined.Warnings, Problems: combined.Problems, Error: errors.Join(err, globalErr), Session: e.sessionID})
 	if asJSON {
 		if mode == reconcile.Plan {
 			return diag.WritePlan(stdout, stderr, combined, combined.Actions, err, code)
 		}
 		if action == "doctor" {
-			return diag.WriteJSON(stdout, stderr, combined, err, config.Describe(*cfg))
+			return max(diag.WriteJSON(stdout, stderr, combined, err, config.Describe(*cfg)), globalCode)
 		}
-		return diag.WriteJSON(stdout, stderr, combined, err)
+		return max(diag.WriteJSON(stdout, stderr, combined, err), globalCode)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)

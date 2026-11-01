@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/engine-sync/internal/config"
@@ -14,7 +13,7 @@ import (
 
 // Each project's own .claude/rules load, keyed by the project, sorted by
 // path; a project without a rules directory has no key; a rule that cannot
-// be read is a named problem, never an empty set.
+// be read carries its error, its siblings still loaded, never an empty set.
 func TestLoadProjectReadsEachProjectsRules(t *testing.T) {
 	root := testjail.Scratch(t)
 	write := func(rel, content string) {
@@ -70,14 +69,13 @@ func TestLoadProjectReadsEachProjectsRules(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o644) })
 	p = source.LoadProject(root, filepath.Join(root, "home"), cfg)
-	prefix := "read rule " + unreadable + ": "
-	if len(p.Problems) != 1 || !strings.HasPrefix(p.Problems[0], prefix) {
-		t.Fatalf("problems = %q, want one starting %q", p.Problems, prefix)
+	got := p.Rules["."]
+	readErr := "open " + unreadable + ": permission denied"
+	if len(got) != 2 || got[1].ReadErr == nil || got[1].ReadErr.Error() != readErr ||
+		!reflect.DeepEqual(got[0], want["."][0]) || !reflect.DeepEqual(got[1], source.Rule{Path: unreadable, Rel: "z.md", ReadErr: got[1].ReadErr}) {
+		t.Fatalf("root rules beside an unreadable rule = %#v, want scoped.md whole and z.md with ReadErr %q", got, readErr)
 	}
-	if _, ok := p.Rules["."]; ok || len(p.Rules["app"]) != 1 {
-		t.Fatalf("rules beside an unreadable rule = %#v, want only app's", p.Rules)
-	}
-	if want := map[string]string{".": p.Problems[0]}; !reflect.DeepEqual(p.RulesFailed, want) {
-		t.Fatalf("rules failed = %q, want %q", p.RulesFailed, want)
+	if len(p.Problems) != 0 || len(p.RulesFailed) != 0 || len(p.Rules["app"]) != 1 {
+		t.Fatalf("problems=%q rules failed=%q app rules=%#v, want none, none and app's one", p.Problems, p.RulesFailed, p.Rules["app"])
 	}
 }

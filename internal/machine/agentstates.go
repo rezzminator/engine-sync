@@ -31,6 +31,9 @@ const (
 	// StateOrphan is a file engine-sync wrote, marked with the installer's
 	// managed-by line, that no source produces any more.
 	StateOrphan = string(reconciler.Orphan)
+	// StateUnreadable is a path that could not be inspected: "could not
+	// look", never MISSING's "nothing there"; every other path still classifies.
+	StateUnreadable = "UNREADABLE"
 )
 
 // The engines a machine-global agent reaches.
@@ -87,7 +90,8 @@ var errRenderFailures = errors.New("load or render agents")
 // Codex role file and per OpenCode agent file, then every STRAY in the Codex
 // and OpenCode registries. The Claude registry is shared with hand-installed
 // agents, so it reports no STRAY. An owned file at an undeclared name is
-// STALE: `engine-sync global` retires it.
+// STALE: `engine-sync global` retires it. A path that cannot be inspected is
+// UNREADABLE, and every other path still classifies.
 func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, codexHomes []string) ([]AgentState, error) {
 	if sourceRepo != "" {
 		abs, err := filepath.Abs(sourceRepo)
@@ -134,7 +138,8 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		for _, dir := range claudeConfigDirs {
 			path := filepath.Join(dir, "agents", filepath.Base(agent.mdSource))
 			if same, err := paths.SameEntry(path, agent.mdSource); err != nil {
-				return nil, fmt.Errorf("inspect global agent link %s: %w", path, err)
+				states = append(states, unreadableState(EngineClaude, agent.name, path, err))
+				continue
 			} else if same {
 				// The registry is the source directory itself.
 				states = append(states, AgentState{Engine: EngineClaude, Name: agent.name, Path: path, State: StateInstalled})
@@ -142,7 +147,8 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 			}
 			state, found, err := reconciler.ClassifyGlobalLink(path, agent.mdSource, filepath.Clean(sourceRoot), reconciler.GlobalLinkFile)
 			if err != nil {
-				return nil, fmt.Errorf("inspect global agent link %s: %w", path, err)
+				states = append(states, unreadableState(EngineClaude, agent.name, path, err))
+				continue
 			}
 			s := AgentState{Engine: EngineClaude, Name: agent.name, Path: path, Detail: found}
 			switch state {
@@ -151,9 +157,8 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 				if agent.mdContent != nil {
 					same, err := sameGlobalAgentFile(agent.mdSource, agent.mdContent)
 					if err != nil {
-						return nil, err
-					}
-					if !same {
+						s.State, s.Detail = StateUnreadable, err.Error()
+					} else if !same {
 						s.State, s.Detail = StateStale, "rendered variant "+agent.mdSource+" is not current"
 					}
 				}
@@ -174,7 +179,8 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 			declaredRoles[path] = true
 			state, found, err := reconciler.ClassifyGlobalRole(path, agent.tomlContent, ownedLinkDirs)
 			if err != nil {
-				return nil, fmt.Errorf("inspect global role %s: %w", path, err)
+				states = append(states, unreadableState(EngineCodex, agent.name, path, err))
+				continue
 			}
 			s := AgentState{Engine: EngineCodex, Name: agent.name, Path: path, Detail: found}
 			switch state {
@@ -191,11 +197,7 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		}
 	}
 	for _, codexHome := range codexHomes {
-		strays, err := registryStrays(EngineCodex, filepath.Join(codexHome, "agents"), ".toml", declaredRoles, ownedLinkDirs)
-		if err != nil {
-			return nil, err
-		}
-		states = append(states, strays...)
+		states = append(states, registryStrays(EngineCodex, filepath.Join(codexHome, "agents"), ".toml", declaredRoles, ownedLinkDirs)...)
 	}
 	filtered.Home = home
 	rendered, diagnostics := opencode.Target{}.Render(filtered, *cfg)
@@ -211,21 +213,24 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		if a.Kept != nil {
 			continue // an agent skipped for an error: its copy is kept as it is
 		}
+		name := strings.TrimSuffix(filepath.Base(a.Path), ".md")
 		state, err := classifyOwnedFile(a.Path, a.Content)
 		if err != nil {
-			return nil, err
+			states = append(states, unreadableState(EngineOpenCode, name, a.Path, err))
+			continue
 		}
-		states = append(states, AgentState{Engine: EngineOpenCode, Name: strings.TrimSuffix(filepath.Base(a.Path), ".md"), Path: a.Path, State: state})
+		states = append(states, AgentState{Engine: EngineOpenCode, Name: name, Path: a.Path, State: state})
 	}
 	if len(renderFailures) > 0 {
 		// The declared set is unknown, so no owned file is called STALE.
 		return states, fmt.Errorf("%w: %s", errRenderFailures, strings.Join(renderFailures, "; "))
 	}
-	strays, err := registryStrays(EngineOpenCode, opencode.MachineAgentsDir(home), ".md", declaredOpenCode, nil)
-	if err != nil {
-		return nil, err
-	}
-	return append(states, strays...), nil
+	return append(states, registryStrays(EngineOpenCode, opencode.MachineAgentsDir(home), ".md", declaredOpenCode, nil)...), nil
+}
+
+// unreadableState is one path that could not be inspected, err naming why.
+func unreadableState(engine, name, path string, err error) AgentState {
+	return AgentState{Engine: engine, Name: name, Path: path, State: StateUnreadable, Detail: err.Error()}
 }
 
 // classifyOwnedFile is one generated regular file's state: absent is
@@ -258,15 +263,16 @@ func classifyOwnedFile(path string, want []byte) (string, error) {
 // registryStrays walks one managed registry for files at undeclared names:
 // an owned one (a marker-carrying file, or a link into ownedLinkDirs) is
 // STALE, or an ORPHAN when its file carries a managed-by line; anything else
-// is a STRAY warning. An absent registry has none; an
-// unreadable one is an error, never an empty registry.
-func registryStrays(engine, registry, suffix string, declared map[string]bool, ownedLinkDirs []string) ([]AgentState, error) {
+// is a STRAY warning. An absent registry has none; an unreadable one is one
+// UNREADABLE state, never an empty registry, and an entry that cannot be
+// inspected is UNREADABLE while the others still classify.
+func registryStrays(engine, registry, suffix string, declared map[string]bool, ownedLinkDirs []string) []AgentState {
 	entries, err := os.ReadDir(registry)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("inspect %s registry %s: %w", engine, registry, err)
+		return []AgentState{unreadableState(engine, "registry", registry, err)}
 	}
 	var states []AgentState
 	for _, entry := range entries {
@@ -274,9 +280,11 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 		if !strings.HasSuffix(entry.Name(), suffix) || declared[path] {
 			continue
 		}
+		name := strings.TrimSuffix(entry.Name(), suffix)
 		info, err := os.Lstat(path)
 		if err != nil {
-			return nil, fmt.Errorf("inspect %s: %w", path, err)
+			states = append(states, unreadableState(engine, name, path, err))
+			continue
 		}
 		owned := false
 		managedBy := ""
@@ -284,7 +292,8 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 		case info.Mode()&os.ModeSymlink != 0:
 			target, err := os.Readlink(path)
 			if err != nil {
-				return nil, fmt.Errorf("read link %s: %w", path, err)
+				states = append(states, unreadableState(engine, name, path, err))
+				continue
 			}
 			if !filepath.IsAbs(target) {
 				target = filepath.Join(registry, target)
@@ -295,12 +304,13 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 		case info.Mode().IsRegular():
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return nil, fmt.Errorf("read %s: %w", path, err)
+				states = append(states, unreadableState(engine, name, path, err))
+				continue
 			}
 			owned = artifact.Claims(string(content))
 			managedBy, _ = artifact.ManagedBy(string(content))
 		}
-		s := AgentState{Engine: engine, Name: strings.TrimSuffix(entry.Name(), suffix), Path: path, State: StateStray}
+		s := AgentState{Engine: engine, Name: name, Path: path, State: StateStray}
 		switch {
 		case owned && managedBy != "":
 			s.State, s.Detail = StateOrphan, "managed-by "+managedBy
@@ -310,7 +320,7 @@ func registryStrays(engine, registry, suffix string, declared map[string]bool, o
 		states = append(states, s)
 	}
 	sort.SliceStable(states, func(i, j int) bool { return states[i].Path < states[j].Path })
-	return states, nil
+	return states
 }
 
 // CheckSourceDeclarations validates the machine-global agents a project carries
@@ -330,20 +340,21 @@ func CheckSourceDeclarations(root, home string, cfg config.Config) (problems, wa
 	agentsDir := filepath.Join(absRoot, filepath.FromSlash(cfg.Machine.SourceAgentsDir))
 	// The roster global installs into: a source inside any of its agents
 	// directories is the collision global names.
+	// A targets file that does not load is a problem, and the declarations
+	// are still validated against the policy's one config dir.
 	claudeConfigDirs := []string{cfg.ClaudeConfigDir}
 	targets, found, err := config.LoadTargets(paths.Getenv, home)
 	if err != nil {
-		return []string{err.Error()}, nil
-	}
-	if found && len(targets.ClaudeConfigDirs) != 0 {
+		problems = append(problems, err.Error())
+	} else if found && len(targets.ClaudeConfigDirs) != 0 {
 		claudeConfigDirs = targets.ClaudeConfigDirs
 	}
 	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, absRoot, cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
 	if err != nil {
-		return []string{err.Error()}, nil
+		return append(problems, err.Error()), nil
 	}
 	if !model.Declares {
-		return nil, nil
+		return problems, nil
 	}
 	problems = append(problems, model.Problems...)
 	for _, agent := range model.Agents {

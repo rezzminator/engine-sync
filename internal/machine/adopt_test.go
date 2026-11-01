@@ -3,11 +3,13 @@ package machine
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
 
 	"github.com/rezzminator/engine-sync/internal/artifact"
+	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 )
 
@@ -141,5 +143,42 @@ func TestAdoptOneSkipsAFileItCannotMove(t *testing.T) {
 	}
 	if all := strings.Join(text, "\n"); !strings.Contains(all, refused+" not adopted: ") || !strings.Contains(all, "adopted "+raced+" -> "+filepath.Join(adopted, "raced.1.md")) {
 		t.Fatalf("events = %s, want the refused file named and the raced one moved to the next suffix", all)
+	}
+}
+
+// TestAdoptableSkipsAShadowedFileItCannotInspect: a SHADOWED file gone or
+// unreadable between its classification and its adoption is named and left,
+// and every other SHADOWED file is still adopted.
+func TestAdoptableSkipsAShadowedFileItCannotInspect(t *testing.T) {
+	home, repo := fixture(t)
+	lost := filepath.Join(home, ".codex", "agents", "gamma.toml")
+	kept := filepath.Join(home, ".codex", "agents", "gamma-deep.toml")
+	writeMachineFixture(t, lost, "name = \"gamma\"\n")
+	writeMachineFixture(t, kept, "name = \"gamma-deep\"\n")
+	realLstat := lstatShadowed
+	t.Cleanup(func() { lstatShadowed = realLstat })
+	lstatShadowed = func(path string) (os.FileInfo, error) {
+		if path == lost {
+			return nil, &os.PathError{Op: "lstat", Path: path, Err: syscall.ENOENT}
+		}
+		return realLstat(path)
+	}
+	cfg, err := config.LoadConfigLayers("", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adoptDir := filepath.Join(home, "adopted")
+	r := &run{options: Options{Home: home, SourceRepo: repo}, policy: cfg}
+	got, err := r.adoptable(adoptDir)
+	if err != nil {
+		t.Fatalf("adoptable = %v, want the lost file named and the rest adopted", err)
+	}
+	want := []adoption{{from: kept, to: filepath.Join(adoptDir, ".codex", "agents", "gamma-deep.toml")}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("adoptions = %+v, want %+v", got, want)
+	}
+	skips := messages(r.report.Events, VerbSkip)
+	if wantSkip := []string{"SHADOWED " + lost + " not adopted: lstat " + lost + ": no such file or directory"}; !reflect.DeepEqual(skips, wantSkip) {
+		t.Fatalf("skips = %q, want %q", skips, wantSkip)
 	}
 }

@@ -91,15 +91,7 @@ func executeCodex(root, home string, policy config.Config, mode Mode, model *cla
 	target := Target{}
 	r, ok := engine.Execute(*model, policy, codexMode(mode), target.Render, target.Roots, target.Validate)
 	if !model.Workbench && (policy).Codex.GlobalCommands {
-		machine, e := config.Resolve("", home, paths.Getenv)
-		if e != nil {
-			return Result{}, e
-		}
-		roster, e := config.ResolveTargets(paths.Getenv, home, machine, config.Targets{})
-		if e != nil {
-			return Result{}, e
-		}
-		globals, pass := engine.Commands(home, "", machine, *roster.CodexHomes, false, codexMode(mode), target.Render, target.Roots, target.Validate)
+		globals, pass := engine.GlobalCommands(home, codexMode(mode), target.Render, target.Roots, target.Validate)
 		ok = ok && pass
 		r.Problems = append(r.Problems, globals.Problems...)
 		r.Warnings = append(r.Warnings, globals.Warnings...)
@@ -249,13 +241,15 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 	add := func(output artifact.Artifact) { outputs = append(outputs, output) }
 	warn := func(message string) { result.Warnings = append(result.Warnings, message) }
 	problem := func(message string) { result.Problems = append(result.Problems, message) }
+	keep := func(path, source, message string) { add(r.keep(path, source, message)) }
 	projects := r.projects
 
 	orientations := r.orientations()
 	outputs = append(outputs, orientations...)
 	budget, err := agentsBudget(root, p.Home, cfgAll, orientations)
 	if err != nil {
-		problem(err.Error())
+		// The budget unchecked is its own verdict: a build warning, a check failure.
+		budget = []diag.Diagnostic{{Severity: diag.Warning, State: reconciler.OverBudget, Message: err.Error()}}
 	}
 
 	compileAgents(root, projects, cfgAll, transform, add, problem, warn, result)
@@ -264,7 +258,7 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 
 	mcp, err := renderMCP(root, &p, "")
 	if err != nil {
-		problem(err.Error())
+		keep(filepath.Join(root, ".codex", "config.toml"), filepath.Join(root, ".mcp.json"), err.Error())
 	} else {
 		result.Warnings = append(result.Warnings, mcp.Notes...)
 		output := artifact.Artifact{Path: filepath.Join(root, ".codex", "config.toml"), Content: []byte(mcp.Content), Kind: artifact.Region, Source: filepath.Join(root, ".mcp.json"), Syntax: artifact.TOML, OptionalEmpty: true}
@@ -299,7 +293,7 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, State: state, Message: message, Remedy: "retire the stale link; `engine-sync global` prunes an orphaned global-command link automatically"})
 	}
 	for _, message := range result.Problems {
-		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Error, Message: message})
+		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Error, Path: r.kept[message], Message: message})
 	}
 	return artifacts, diagnostics
 }

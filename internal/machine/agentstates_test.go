@@ -4,6 +4,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/paths"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -43,8 +44,12 @@ func TestClassifyOwnedFile(t *testing.T) {
 // TestRegistryStrays: in a managed registry, an undeclared entry engine-sync
 // owns (its marker, or a link into an owned directory) is STALE, and anything
 // else at an undeclared name is a STRAY warning; declared paths and other
-// suffixes are not its business, and an absent registry has no strays.
+// suffixes are not its business, and an absent registry has no strays. An
+// entry it cannot read is UNREADABLE and the others still classify.
 func TestRegistryStrays(t *testing.T) {
+	if testjail.RanUnprivileged(t) {
+		return
+	}
 	root := testjail.Scratch(t)
 	registry, owned, foreign := filepath.Join(root, "agents"), filepath.Join(root, "owned"), filepath.Join(root, "foreign")
 	for _, dir := range []string{registry, owned, foreign} {
@@ -56,16 +61,18 @@ func TestRegistryStrays(t *testing.T) {
 	plantFile(t, filepath.Join(registry, "retired.toml"), []byte(artifact.Marker(artifact.TOML, "agents/retired.md")+"\nname = \"retired\"\n"))
 	plantFile(t, filepath.Join(registry, "stranger.toml"), []byte("name = \"stranger\"\n"))
 	plantFile(t, filepath.Join(registry, "notes.md"), []byte("not a role\n"))
+	locked := filepath.Join(registry, "locked.toml")
+	plantFile(t, locked, []byte("name = \"locked\"\n"))
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
 	for name, target := range map[string]string{"linked.toml": filepath.Join(owned, "linked.toml"), "theirs.toml": filepath.Join(foreign, "theirs.toml")} {
 		if err := os.Symlink(target, filepath.Join(registry, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, err := registryStrays(EngineCodex, registry, ".toml", map[string]bool{filepath.Join(registry, "declared.toml"): true}, []string{owned})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]string{"linked": StateStale, "retired": StateStale, "stranger": StateStray, "theirs": StateStray}
+	got := registryStrays(EngineCodex, registry, ".toml", map[string]bool{filepath.Join(registry, "declared.toml"): true}, []string{owned})
+	want := map[string]string{"linked": StateStale, "locked": StateUnreadable, "retired": StateStale, "stranger": StateStray, "theirs": StateStray}
 	if len(got) != len(want) {
 		t.Fatalf("strays = %+v, want %v", got, want)
 	}
@@ -73,9 +80,12 @@ func TestRegistryStrays(t *testing.T) {
 		if want[s.Name] != s.State || s.Engine != EngineCodex || s.Path != filepath.Join(registry, s.Name+".toml") {
 			t.Fatalf("stray %+v, want state %q", s, want[s.Name])
 		}
+		if s.Name == "locked" && s.Detail != "open "+locked+": permission denied" {
+			t.Fatalf("unreadable stray detail = %q, want %q", s.Detail, "open "+locked+": permission denied")
+		}
 	}
-	if absent, err := registryStrays(EngineCodex, filepath.Join(root, "absent"), ".toml", nil, nil); err != nil || absent != nil {
-		t.Fatalf("absent registry = %+v (%v), want none", absent, err)
+	if absent := registryStrays(EngineCodex, filepath.Join(root, "absent"), ".toml", nil, nil); absent != nil {
+		t.Fatalf("absent registry = %+v, want none", absent)
 	}
 }
 
@@ -175,19 +185,21 @@ func TestCheckSourceDeclarationsNamesASecondRegistryCollision(t *testing.T) {
 }
 
 // TestCheckReportsEveryAgentGlobalSkips: check runs global's per-agent
-// decision, so an agent only its OpenCode render refuses (a server-wide MCP
-// tools entry) fails check with the message global skips it with.
+// decision, so an agent global skips (a variant with no generated directory)
+// fails check with the message global skips it with.
 func TestCheckReportsEveryAgentGlobalSkips(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	dir := filepath.Join(root, "agents")
 	plantDir(t, dir)
-	plantFile(t, filepath.Join(dir, "lead.md"), []byte("---\nname: lead\ndescription: Leads.\ntools: Read, mcp__github\n---\nLead.\n"))
+	plantFile(t, filepath.Join(dir, "lead.md"), []byte("---\nname: lead\ndescription: Leads.\ntools: Read\n---\nLead.\n"))
 	plantFile(t, filepath.Join(dir, "lead-pro.md"), []byte("---\nname: lead-pro\nfrom: lead\ndescription: Leads more.\n---\n"))
 	cfg := config.Default()
 	cfg.Machine.SourceAgentsDir = "agents"
+	// The registry global links into is the test's own, never the working directory.
+	cfg.ClaudeConfigDir = filepath.Join(home, ".claude")
 	result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: root, Home: home, Config: &cfg})
 	if err != nil || len(result.Problems) == 0 {
-		t.Fatalf("global: problems %q (%v), want the OpenCode tools refusal", result.Problems, err)
+		t.Fatalf("global: problems %q (%v), want the variant's VARIANT-INVALID skip", result.Problems, err)
 	}
 	problems, _ := CheckSourceDeclarations(root, home, cfg)
 	joined := strings.Join(problems, "\n")
@@ -195,5 +207,158 @@ func TestCheckReportsEveryAgentGlobalSkips(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("check problems = %q, want global's skip %q", problems, want)
 		}
+	}
+}
+
+// TestAgentStatesKeepsEveryOtherStateOverAnUnreadablePath: a path that cannot
+// be inspected is one UNREADABLE state naming why, and every other agent of
+// every engine still classifies — never one error in place of them all.
+func TestAgentStatesKeepsEveryOtherStateOverAnUnreadablePath(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stage func(t *testing.T, home, repo string)
+		// unreadable is each path's wanted detail; extra the registry states.
+		unreadable func(home, repo string) map[string]string
+		extra      func(home, repo string) []AgentState
+	}{
+		{
+			name:  "claude registry is a file",
+			stage: func(t *testing.T, home, _ string) { replaceWithFile(t, filepath.Join(home, ".claude", "agents")) },
+			unreadable: func(home, _ string) map[string]string {
+				return map[string]string{
+					filepath.Join(home, ".claude", "agents", "gamma.md"):      notADirectory(filepath.Join(home, ".claude", "agents", "gamma.md")),
+					filepath.Join(home, ".claude", "agents", "gamma-deep.md"): notADirectory(filepath.Join(home, ".claude", "agents", "gamma-deep.md")),
+				}
+			},
+		},
+		{
+			name:  "codex registry is a file",
+			stage: func(t *testing.T, home, _ string) { replaceWithFile(t, filepath.Join(home, ".codex", "agents")) },
+			unreadable: func(home, _ string) map[string]string {
+				return map[string]string{
+					filepath.Join(home, ".codex", "agents", "gamma.toml"):      notADirectory(filepath.Join(home, ".codex", "agents", "gamma.toml")),
+					filepath.Join(home, ".codex", "agents", "gamma-deep.toml"): notADirectory(filepath.Join(home, ".codex", "agents", "gamma-deep.toml")),
+				}
+			},
+			extra: func(home, _ string) []AgentState {
+				registry := filepath.Join(home, ".codex", "agents")
+				return []AgentState{{Engine: EngineCodex, Name: "registry", Path: registry, State: StateUnreadable, Detail: "open " + registry + ": not a directory"}}
+			},
+		},
+		{
+			name: "opencode registry is a file",
+			stage: func(t *testing.T, home, _ string) {
+				replaceWithFile(t, filepath.Join(home, ".config", "opencode", "agents"))
+			},
+			unreadable: func(home, _ string) map[string]string {
+				return map[string]string{
+					filepath.Join(home, ".config", "opencode", "agents", "gamma.md"):      notADirectory(filepath.Join(home, ".config", "opencode", "agents", "gamma.md")),
+					filepath.Join(home, ".config", "opencode", "agents", "gamma-deep.md"): notADirectory(filepath.Join(home, ".config", "opencode", "agents", "gamma-deep.md")),
+				}
+			},
+			extra: func(home, _ string) []AgentState {
+				registry := filepath.Join(home, ".config", "opencode", "agents")
+				return []AgentState{{Engine: EngineOpenCode, Name: "registry", Path: registry, State: StateUnreadable, Detail: "open " + registry + ": not a directory"}}
+			},
+		},
+		{
+			name: "rendered variant is unreadable",
+			stage: func(t *testing.T, _, repo string) {
+				if err := os.Chmod(filepath.Join(repo, "generated", "agents", "gamma-deep.md"), 0); err != nil {
+					t.Fatal(err)
+				}
+			},
+			unreadable: func(home, repo string) map[string]string {
+				variant := filepath.Join(repo, "generated", "agents", "gamma-deep.md")
+				return map[string]string{
+					filepath.Join(home, ".claude", "agents", "gamma-deep.md"): "read global agent artifact " + variant + ": open " + variant + ": permission denied",
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if testjail.RanUnprivileged(t) {
+				return
+			}
+			home, repo := fixture(t)
+			if report := RunMachine(Options{Home: home, SourceRepo: repo}); report.Err != nil {
+				t.Fatal(report.Err)
+			}
+			tc.stage(t, home, repo)
+			cfg, err := config.LoadConfigLayers("", home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := AgentStates(home, repo, &cfg, nil, nil)
+			if err != nil {
+				t.Fatalf("AgentStates: %v", err)
+			}
+			want := []AgentState{
+				{Engine: EngineClaude, Name: "gamma", Path: filepath.Join(home, ".claude", "agents", "gamma.md")},
+				{Engine: EngineCodex, Name: "gamma", Path: filepath.Join(home, ".codex", "agents", "gamma.toml")},
+				{Engine: EngineClaude, Name: "gamma-deep", Path: filepath.Join(home, ".claude", "agents", "gamma-deep.md")},
+				{Engine: EngineCodex, Name: "gamma-deep", Path: filepath.Join(home, ".codex", "agents", "gamma-deep.toml")},
+				{Engine: EngineOpenCode, Name: "gamma", Path: filepath.Join(home, ".config", "opencode", "agents", "gamma.md")},
+				{Engine: EngineOpenCode, Name: "gamma-deep", Path: filepath.Join(home, ".config", "opencode", "agents", "gamma-deep.md")},
+			}
+			unreadable := tc.unreadable(home, repo)
+			for i := range want {
+				want[i].State = StateInstalled
+				if detail, ok := unreadable[want[i].Path]; ok {
+					want[i].State, want[i].Detail = StateUnreadable, detail
+				}
+			}
+			if tc.extra != nil {
+				// A registry's own state follows its agents' states.
+				extra := tc.extra(home, repo)
+				at := 4
+				if extra[0].Engine == EngineOpenCode {
+					at = len(want)
+				}
+				want = append(want[:at], append(extra, want[at:]...)...)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("states\n got %+v\nwant %+v", got, want)
+			}
+		})
+	}
+}
+
+// replaceWithFile puts a regular file where a directory was, so every path
+// below it fails to inspect with "not a directory".
+func replaceWithFile(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	plantFile(t, dir, []byte("not a directory\n"))
+}
+
+// notADirectory is reconcile's inspect error for a path under a regular file.
+func notADirectory(path string) string {
+	return "inspect " + path + ": lstat " + path + ": not a directory"
+}
+
+// TestCheckSourceDeclarationsValidatesPastATargetsError: a targets file that
+// does not load is one problem, and every declaration is still validated
+// against the policy's one config dir — never the targets error alone.
+func TestCheckSourceDeclarationsValidatesPastATargetsError(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	dir := filepath.Join(root, "agents")
+	plantDir(t, dir)
+	plantFile(t, filepath.Join(dir, "lead.md"), []byte("---\nname: lead\ndescription: Leads.\ntools: Read\nrequires: [gpu]\n---\nLead.\n"))
+	plantFile(t, filepath.Join(dir, "lead-pro.md"), []byte("---\nname: lead-pro\nfrom: lead\n---\n"))
+	targets := paths.EngineSyncConfig(home)
+	plantDir(t, filepath.Dir(targets))
+	plantFile(t, targets, []byte(`{"version":1,"targets":`))
+	cfg := config.Default()
+	cfg.Machine.SourceAgentsDir = "agents"
+	cfg.Machine.SourceGeneratedAgentsDir = "generated/agents"
+	problems, warnings := CheckSourceDeclarations(root, home, cfg)
+	if want := []string{"parse config " + targets + ": EOF"}; !reflect.DeepEqual(problems, want) {
+		t.Fatalf("problems = %q, want %q", problems, want)
+	}
+	if want := []string{"SKIPPED lead — requires gpu", "SKIPPED lead-pro — requires gpu"}; !reflect.DeepEqual(warnings, want) {
+		t.Fatalf("warnings = %q, want %q: the declarations were not validated", warnings, want)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestMachineRewriteAndTemplateLayers(t *testing.T) {
 		t.Fatal(e)
 	}
 	text, e := RenderTemplate(cfg.Codex.AgentPreamble, TemplateData{Name: "reader", Engine: "Codex", Source: "reader.md", Root: "AGENTS.md"})
-	if e != nil || text != "reader Codex reader.md AGENTS.md" || len(cfg.Deprecations) != 1 || len(cfg.Machine.Rewrites) != 1 || cfg.Codex.ModelMap["fast"] != "machine-model" {
+	if e != nil || text != "reader Codex reader.md AGENTS.md" || len(cfg.Warnings) != 1 || len(cfg.Machine.Rewrites) != 1 || cfg.Codex.ModelMap["fast"] != "machine-model" {
 		t.Fatalf("cfg=%#v text=%q err=%v", cfg, text, e)
 	}
 	if !strings.Contains(cfg.Sources["codex.agentPreamble"], "engine-sync.json") {
@@ -74,8 +75,8 @@ func TestLegacyOpenCodeFileIsDeprecated(t *testing.T) {
 	}
 	cfg, e := Resolve(root, home, func(string) string { return "" })
 	want := legacy + " is deprecated; use " + filepath.Join(root, RelPath) + " opencode.modelMap"
-	if e != nil || cfg.OpenCode.ModelMap["opus"] != "legacy-model" || len(cfg.Deprecations) != 1 || cfg.Deprecations[0] != want {
-		t.Fatalf("legacy OpenCode map = %q, deprecations %q, err %v; want %q", cfg.OpenCode.ModelMap, cfg.Deprecations, e, want)
+	if e != nil || cfg.OpenCode.ModelMap["opus"] != "legacy-model" || len(cfg.Warnings) != 1 || cfg.Warnings[0] != want {
+		t.Fatalf("legacy OpenCode map = %q, warnings %q, err %v; want %q", cfg.OpenCode.ModelMap, cfg.Warnings, e, want)
 	}
 }
 
@@ -205,8 +206,8 @@ func TestOldGlobalPathsAreRefusedLoudly(t *testing.T) {
 			}
 			putConfigFile(t, global, `{"version":1}`)
 			cfg, e := Resolve("", home, env)
-			if e != nil || len(cfg.Deprecations) != 0 {
-				t.Fatalf("with both files: %v %v, want the new file read and nothing said of the old", e, cfg.Deprecations)
+			if e != nil || len(cfg.Warnings) != 0 {
+				t.Fatalf("with both files: %v %v, want the new file read and nothing said of the old", e, cfg.Warnings)
 			}
 		})
 	}
@@ -224,15 +225,16 @@ func TestOldGlobalPathsAreRefusedLoudly(t *testing.T) {
 	})
 }
 
-func TestProjectFileRefusesGlobalOnlyKeys(t *testing.T) {
+func TestProjectFileIgnoresGlobalOnlyKeys(t *testing.T) {
 	for _, key := range []string{"targets", "machine"} {
 		t.Run(key, func(t *testing.T) {
 			home, root := testjail.Scratch(t), testjail.Scratch(t)
 			path := filepath.Join(root, RelPath)
-			putConfigFile(t, path, `{"version":1,"`+key+`":{}}`)
-			_, e := Resolve(root, home, func(string) string { return "" })
-			if e == nil || !IsRefusal(e) || !strings.Contains(e.Error(), path) || !strings.Contains(e.Error(), key+": unknown key") {
-				t.Fatalf("Resolve = %v (refusal %v), want a refusal naming %s and %s", e, IsRefusal(e), key, path)
+			putConfigFile(t, path, `{"version":1,"`+key+`":{"retiredAgents":["reader"]},"codex":{"suffixMode":"none"}}`)
+			cfg, e := Resolve(root, home, func(string) string { return "" })
+			want := []string{"config " + path + ": " + key + ": ignored; it belongs in the global file " + MachinePath(home)}
+			if e != nil || !reflect.DeepEqual(cfg.Warnings, want) || cfg.Codex.SuffixMode != "none" || len(cfg.Machine.RetiredAgents) != 0 || cfg.Targets != nil {
+				t.Fatalf("Resolve = %+v, %v; want the rest of the file read and warnings %q", cfg, e, want)
 			}
 		})
 	}

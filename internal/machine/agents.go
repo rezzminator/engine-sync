@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/target/opencode"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -233,7 +234,8 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		for _, config := range claudeConfigDirs {
 			same, e := paths.SameEntry(filepath.Join(config, "agents", filepath.Base(agent.mdSource)), agent.mdSource)
 			if e != nil {
-				return GlobalAgentsResult{}, e
+				result.Problems = append(result.Problems, e.Error())
+				continue
 			}
 			if same {
 				continue
@@ -250,11 +252,13 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 
 	// Phase 2a: classify every desired role file against what is actually on
 	// disk. A foreign file is a Problem and never an Action — it stays exactly
-	// as the operator left it.
+	// as the operator left it. A target that cannot be inspected is a Problem
+	// naming it, never absent, and every other role still classifies.
 	for _, role := range roles {
 		state, foundAt, err := reconciler.ClassifyGlobalRole(role.target, role.content, ownedLinkDirs)
 		if err != nil {
-			return GlobalAgentsResult{}, fmt.Errorf("inspect global role %s: %w", role.target, err)
+			result.Problems = append(result.Problems, err.Error())
+			continue
 		}
 		found := GlobalRoleInstalled{Path: role.target, State: state, Found: foundAt}
 		result.Roles = append(result.Roles, found)
@@ -269,12 +273,14 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 
 	// Phase 2b: classify every desired registry symlink against what is
-	// actually on disk. A stat failure other than "not found" bubbles up as
-	// a genuine error — an unreadable target is never reported as absent.
+	// actually on disk. A stat failure other than "not found" is a Problem
+	// naming the target — an unreadable target is never reported as absent —
+	// and every other link still classifies.
 	for _, link := range links {
 		state, found, err := reconciler.ClassifyGlobalLink(link.target, link.source, sourceRoot, reconciler.GlobalLinkFile)
 		if err != nil {
-			return GlobalAgentsResult{}, fmt.Errorf("inspect global agent artifact %s: %w", link.target, err)
+			result.Problems = append(result.Problems, err.Error())
+			continue
 		}
 		result.Installed = append(
 			result.Installed,
@@ -340,7 +346,9 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 				duplicate = true
 			}
 		}
-		if !rebuildable[problem] && !duplicate {
+		// The build refusing a target this run could not inspect names it in
+		// the same words as the classification above: one line.
+		if !rebuildable[problem] && !duplicate && !slices.Contains(result.Problems, problem) {
 			result.Problems = append(result.Problems, problem)
 		}
 	}

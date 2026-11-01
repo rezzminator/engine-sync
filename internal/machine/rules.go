@@ -49,8 +49,9 @@ func instructionReceiptPath(home string) string {
 }
 
 // loadGlobalRules reads every rule under {claudeDir}/rules. An absent
-// directory holds no rules; one that cannot be read, or a rule that cannot,
-// is an error, never an empty set.
+// directory holds no rules; one that cannot be read is an error, never an
+// empty set. A rule that cannot be read is a RULE-UNREADABLE row, skipped as
+// a rule that does not parse is, and every other rule still compiles.
 func loadGlobalRules(home, claudeDir string, policy config.Config) (globalRules, error) {
 	set := globalRules{Dir: filepath.Join(claudeDir, "rules")}
 	set.Label = set.Dir

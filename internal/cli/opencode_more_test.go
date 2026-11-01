@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
@@ -93,27 +94,32 @@ func TestOpenCodeDanglingCommandWarnsOnceInBuildAndIsAProblemInCheck(t *testing.
 	}
 }
 
-// A broken source skips that one entry the way a dangling one does: build
-// warns and writes every healthy output, check and doctor fail naming it.
+// A broken source fails build and check naming it. A malformed MCP tool is no
+// broken source: the role builds with the tool denied, and the warning names it.
 func TestOpenCodeBrokenSourceFailsBuildAndCheck(t *testing.T) {
 	const agent, agentOut = ".claude/agents/broken.md", ".opencode/agent/broken.md"
 	writes := func(content string) func(*testing.T, string) {
 		return func(t *testing.T, path string) { cliWriteTestFile(t, path, content) }
 	}
 	for _, door := range []struct {
-		name   string
-		source string
-		output string
-		plant  func(t *testing.T, path string)
+		name    string
+		source  string
+		output  string
+		plant   func(t *testing.T, path string)
+		warning string
 	}{
-		{"unreadable agent", agent, agentOut, plantCLIUnreadableSource},
-		{"malformed agent frontmatter", agent, agentOut, writes("---\ndescription: Broken role.\nWork.\n")},
-		{"malformed agent tools", agent, agentOut, writes("---\ndescription: B.\ntools: mcp__broken\n---\nWork.\n")},
+		{"unreadable agent", agent, agentOut, plantCLIUnreadableSource, ""},
+		{"malformed agent frontmatter", agent, agentOut, writes("---\ndescription: Broken role.\nWork.\n"), ""},
+		{
+			"malformed agent tools", agent, agentOut, writes("---\ndescription: B.\ntools: mcp__broken\n---\nWork.\n"),
+			`malformed MCP tool mcp__broken in %s — OpenCode MCP tool "mcp__broken" must be mcp__server__tool; it stays denied`,
+		},
 		{
 			"malformed command frontmatter",
 			".claude/commands/broken.md",
 			".opencode/command/broken.md",
 			writes("---\ndescription: Broken.\nReview.\n"),
+			"",
 		},
 	} {
 		for _, action := range []string{"build", "check"} {
@@ -140,6 +146,17 @@ func TestOpenCodeBrokenSourceFailsBuildAndCheck(t *testing.T) {
 					if strings.Contains(line, broken) {
 						named = line
 					}
+				}
+				if door.warning != "" {
+					// check runs on a tree never built, so its outputs are MISSING.
+					want, wantCode := "engine-sync opencode: warning: "+fmt.Sprintf(door.warning, broken), map[string]int{"build": 0, "check": 1}[action]
+					if code != wantCode || named != want {
+						t.Fatalf("%s: code=%d, want %d; named %q, want %q; stderr=%q", action, code, wantCode, named, want, stderr.String())
+					}
+					if _, err := os.Stat(filepath.Join(root, door.output)); action == "build" && err != nil {
+						t.Fatalf("build did not write %s: %v", door.output, err)
+					}
+					return
 				}
 				if code != 1 || named == "" || strings.Contains(named, "warning:") {
 					t.Fatalf("%s: code=%d stderr=%q", action, code, stderr.String())

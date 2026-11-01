@@ -58,7 +58,12 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 				p.Warnings = append(p.Warnings, fmt.Sprintf("dangling source %s: %v", path, err))
 				continue
 			}
-			return p, fmt.Errorf("read %s: %w", path, err)
+			// One unreadable source is skipped and named, its installed copy
+			// kept; the others still load.
+			p.Problems = append(p.Problems, fmt.Sprintf("read %s: %v", path, err))
+			brokenSources[strings.TrimSuffix(filepath.Base(path), ".md")] = true
+			p.Failed = append(p.Failed, failedSourceNames(path, nil)...)
+			continue
 		}
 		front, body, err := Parse(string(raw))
 		if err != nil {

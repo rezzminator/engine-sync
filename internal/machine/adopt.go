@@ -70,9 +70,11 @@ func (r *run) adoptable(adoptDir string) ([]adoption, error) {
 		if s.State != StateShadowed {
 			continue
 		}
-		info, err := os.Lstat(s.Path)
+		// A file gone or unreadable since it was classified costs only itself.
+		info, err := lstatShadowed(s.Path)
 		if err != nil {
-			return nil, fmt.Errorf("inspect %s to adopt: %w", s.Path, err)
+			r.skip("SHADOWED " + s.Path + " not adopted: " + err.Error())
+			continue
 		}
 		if !info.Mode().IsRegular() {
 			continue
@@ -180,6 +182,10 @@ func freeDestination(to string, taken map[string]bool) (string, error) {
 
 // moveFile is atomicfile.Move; a variable so a test can refuse a move.
 var moveFile = atomicfile.Move
+
+// lstatShadowed is os.Lstat; a variable so a test can lose a SHADOWED file
+// between its classification and its adoption.
+var lstatShadowed = os.Lstat
 
 // adoptOne moves one planned adoption aside. Ownership is checked again right
 // before the move: a file gone, no longer regular, or now carrying

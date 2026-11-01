@@ -44,18 +44,24 @@ func (t Targets) validate() error {
 
 // Capabilities is the host's capability set: every flag value plus the
 // global file's targets.capabilities list, deduplicated, in first-seen order. A
-// broken targets file is an error, never an empty set.
+// broken targets file is an error, never an empty set; an empty flag is
+// refused, and an empty name in the file is skipped (Resolve warns of it).
 func Capabilities(get paths.Env, home string, flags []string) ([]string, error) {
 	targets, _, err := LoadTargets(get, home)
 	if err != nil {
 		return nil, err
+	}
+	for _, name := range flags {
+		if strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("capability: empty name")
+		}
 	}
 	seen := map[string]bool{}
 	var out []string
 	for _, name := range append(append([]string{}, flags...), targets.Capabilities...) {
 		name = strings.TrimSpace(name)
 		if name == "" {
-			return nil, fmt.Errorf("capability: empty name")
+			continue
 		}
 		if !seen[name] {
 			seen[name] = true
@@ -95,7 +101,8 @@ func LoadTargets(get paths.Env, home string) (Targets, bool, error) {
 	if !ok {
 		return Targets{}, false, nil
 	}
-	if err := validateValue(raw, reflect.TypeFor[*Targets](), "targets"); err != nil {
+	// Resolve reads the same file and warns of its unknown keys.
+	if err := validateValue(raw, reflect.TypeFor[*Targets](), "targets", func(string) {}); err != nil {
 		return Targets{}, false, fmt.Errorf("config %s: %w", path, err)
 	}
 	var targets Targets

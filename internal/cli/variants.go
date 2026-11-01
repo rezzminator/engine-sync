@@ -38,7 +38,7 @@ func runVariants(args []string, stdout, stderr io.Writer, e env) int {
 	}
 	// The source repository resolves as `global` resolves it: the flag, else
 	// the global file's targets.sourceRepo, else the Claude config dir's agents.
-	options, err := globalOptions(e, resolvedHome, *sourceRepo, "", nil, nil, false)
+	options, err := globalOptions(e, stderr, resolvedHome, *sourceRepo, "", nil, nil, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "engine-sync variants pin: %v\n", err)
 		return 1

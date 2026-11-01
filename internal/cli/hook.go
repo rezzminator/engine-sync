@@ -30,7 +30,7 @@ func runHook(args []string, stdout, stderr io.Writer, e env) int {
 		fmt.Fprintln(stderr, "usage: engine-sync hook claude mark|stop|start")
 		return 2
 	}
-	payload := readHookPayload(e.stdin)
+	payload := readHookPayload(e.stdin, stderr, e)
 	e.sessionID = payload.SessionID
 	if args[1] == "mark" && payload.ToolInput.FilePath == "" {
 		return 0
@@ -68,7 +68,9 @@ func hookContext(e env) hook.Context {
 	}, Writer: writerPath}
 
 }
-func readHookPayload(r io.Reader) hookPayload        { return hook.ReadPayload(r) }
+func readHookPayload(r io.Reader, w io.Writer, e env) hookPayload {
+	return hook.ReadPayload(r, w, hookContext(e))
+}
 func hookMark(p hookPayload, w io.Writer, e env) int { return hook.Mark(p, w, hookContext(e)) }
 func hookStop(p hookPayload, o, w io.Writer, e env, r stageRunner) int {
 	return hook.Stop(p, o, w, hookContext(e), hook.StageRunner(r))

@@ -102,19 +102,22 @@ func readDeclarations(agentsDir, outputDir string, marker []string) (*declaratio
 		if filepath.Base(path) == "README.md" {
 			continue
 		}
+		name := strings.TrimSuffix(filepath.Base(path), ".md")
 		raw, err := paths.ReadRegular(path)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
+			// Unread, it may be a declaration or the base of one: it fails by
+			// name, and a declaration built on it fails on its base.
+			d.failures[name] = fmt.Errorf("read %s: %w", path, err)
+			continue
 		}
 		header, body, _, err := Split(string(raw))
 		var front *yaml.Node
 		if err == nil {
 			front, err = ParseHeader(header)
 		}
-		name := strings.TrimSuffix(filepath.Base(path), ".md")
 		if err != nil {
 			// Only a declaration fails the render; an original that does not
 			// parse is its loader's problem, and a declaration built on it
@@ -146,6 +149,13 @@ func readDeclarations(agentsDir, outputDir string, marker []string) (*declaratio
 func (d *declarationSet) readShared() error {
 	root := filepath.Clean(d.agentsDir)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil && path != root {
+			// One unreadable subdirectory costs its own shared files, never
+			// its siblings'; its key ends in / so it never names an agent.
+			rel, _ := filepath.Rel(root, path)
+			d.failures[filepath.ToSlash(rel)+"/"] = fmt.Errorf("read shared directory %s: %w", path, err)
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -212,7 +222,9 @@ func parseDeclaration(path string, raw []byte, front *yaml.Node, body string, sh
 			return fail("a shared file is not an agent: it carries no name and no from")
 		}
 	} else {
-		if name == nil || name.Kind != yaml.ScalarNode || name.Tag != "!!str" || name.Value != strings.TrimSuffix(filepath.Base(path), ".md") || !declarationName.MatchString(name.Value) {
+		// The file base names the agent; a name, when written, must agree.
+		base := strings.TrimSuffix(filepath.Base(path), ".md")
+		if !declarationName.MatchString(base) || name != nil && (name.Kind != yaml.ScalarNode || name.Tag != "!!str" || name.Value != base) {
 			return fail("name must equal the kebab-case file base")
 		}
 		n := MapValue(front, "from")
@@ -223,7 +235,7 @@ func parseDeclaration(path string, raw []byte, front *yaml.Node, body string, sh
 			return fail("from must name an agent")
 		}
 		l.from, l.hasFrom = n.Value, true
-		if name.Value == GeneralPurpose {
+		if base == GeneralPurpose {
 			return fail("general-purpose is the built-in, never a declaration")
 		}
 	}

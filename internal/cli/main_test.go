@@ -251,7 +251,9 @@ func TestMigrationClaimsBothEnginesAndMCPFence(t *testing.T) {
 	}
 }
 
-func TestProjectRejectsMachinePolicy(t *testing.T) {
+// A machine key in a project file is ignored with a warning naming the
+// global file; the project still builds.
+func TestProjectIgnoresMachinePolicy(t *testing.T) {
 	root, home := testjail.Scratch(t), testjail.Scratch(t)
 	putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
 	putProjectFile(t, root, ".claude/engine-sync.json", `{"version":1,"machine":{"retiredAgents":["old"]}}`)
@@ -262,8 +264,9 @@ func TestProjectRejectsMachinePolicy(t *testing.T) {
 		return ""
 	}}
 	var out, errOut bytes.Buffer
-	if code := dispatch([]string{"build", root}, &out, &errOut, e); code != 2 || !strings.Contains(errOut.String(), "machine") {
-		t.Fatalf("project global policy rc=%d: %s%s", code, &out, &errOut)
+	want := "engine-sync: config " + filepath.Join(root, ".claude", "engine-sync.json") + ": machine: ignored; it belongs in the global file " + filepath.Join(home, ".claude", "engine-sync.json") + "\n"
+	if code := dispatch([]string{"build", root}, &out, &errOut, e); code != 0 || errOut.String() != want {
+		t.Fatalf("project global policy rc=%d: %s%s; want rc 0 and stderr %q", code, &out, &errOut, want)
 	}
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Capture compiler-owned files and links using an explicitly selected producer."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -47,8 +48,13 @@ with tempfile.TemporaryDirectory(prefix='golden-', dir=scratch) as temporary:
             if path.is_symlink():
                 artifact = {'kind': 'link', 'target': normalize(os.readlink(path))}
             else:
-                lines = normalize(path.read_text()).splitlines(keepends=True)
-                artifact = {'kind': 'file', 'content': ''.join(lines), 'mode': path.stat().st_mode & 0o777}
+                mode = path.stat().st_mode & 0o777
+                try:
+                    lines = normalize(path.read_text()).splitlines(keepends=True)
+                    artifact = {'kind': 'file', 'content': ''.join(lines), 'mode': mode}
+                except UnicodeDecodeError:
+                    # Not text: its exact bytes, base64, as internal/cli/golden_test.go records them.
+                    artifact = {'kind': 'bytes', 'content': base64.b64encode(path.read_bytes()).decode(), 'mode': mode}
             artifacts[label + '/' + name] = artifact
     output = fixture / 'golden/artifacts.json'
     output.parent.mkdir(exist_ok=True)

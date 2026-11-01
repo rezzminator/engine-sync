@@ -3,6 +3,7 @@ package machine
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -72,13 +73,21 @@ func TestGlobalRulesDanglingLinks(t *testing.T) {
 	if got := readFixture(t, filepath.Join(codexHome, "AGENTS.md")); !strings.Contains(got, "Always A.") {
 		t.Fatalf("a dangling non-rule link stopped the rules:\n%s", got)
 	}
+	// A dangling rule is skipped and named; every other rule still compiles.
 	dangling := filepath.Join(rules, "lost.md")
 	if err := os.Symlink(filepath.Join(home, "gone.md"), dangling); err != nil {
 		t.Fatal(err)
 	}
-	report := RunMachine(Options{Home: home, CodexHomes: []string{codexHome}})
-	if report.Err == nil || !strings.Contains(report.Err.Error(), dangling) {
-		t.Fatalf("a dangling rule was not an error naming it: %v", report.Err)
+	report := runRules(t, home, codexHome, false, false)
+	want := "RULE-UNREADABLE " + dangling + ": lstat " + filepath.Join(home, "gone.md") + ": no such file or directory"
+	if skips := messages(report.Events, VerbSkip); !slices.Contains(skips, want+" — rule skipped") {
+		t.Fatalf("skips = %q, want %q", skips, want+" — rule skipped")
+	}
+	if got := readFixture(t, filepath.Join(codexHome, "AGENTS.md")); !strings.Contains(got, "Always A.") {
+		t.Fatalf("a dangling rule cost the other rules:\n%s", got)
+	}
+	if rows := rulesRowsOf(t, home, codexHome); !slices.Contains(rows, Row{LevelFail, want}) {
+		t.Fatalf("doctor has no %q row: %v", want, rows)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -58,7 +59,11 @@ func TestReviewReconcileSafety(t *testing.T) {
 				outputs = []artifact.Artifact{{Path: filepath.Join(root, "agents", "reader.toml"), Content: []byte(artifact.Marker(artifact.TOML, "x"))}}
 			case "duplicate outputs":
 				path := filepath.Join(root, "reader.toml")
-				outputs = []artifact.Artifact{{Path: path, Content: []byte(artifact.Marker(artifact.TOML, "one"))}, {Path: path, Content: []byte(artifact.Marker(artifact.TOML, "two"))}}
+				outputs = []artifact.Artifact{
+					{Path: path, Source: "one.md", Content: []byte(artifact.Marker(artifact.TOML, "one"))},
+					{Path: path, Source: "two.md", Content: []byte(artifact.Marker(artifact.TOML, "two"))},
+					{Path: filepath.Join(root, "writer.toml"), Source: "writer.md", Content: []byte(artifact.Marker(artifact.TOML, "writer"))},
+				}
 			case "nested roots":
 				roots = append(roots, artifact.Root{Path: filepath.Join(root, "inner")})
 				outputs = []artifact.Artifact{{Path: filepath.Join(root, "inner", "x.md"), Content: []byte(artifact.Marker(artifact.Markdown, "x"))}}
@@ -88,9 +93,17 @@ func TestReviewReconcileSafety(t *testing.T) {
 				if e != nil || info.Mode()&os.ModeSymlink == 0 || len(got.Problems) == 0 {
 					t.Fatalf("foreign keeper overwritten: %+v", got)
 				}
-			case "symlink parent", "duplicate outputs":
+			case "symlink parent":
 				if got.Wrote != 0 || len(got.Problems) == 0 {
 					t.Fatalf("unsafe writes: %+v", got)
+				}
+			case "duplicate outputs":
+				// Both claimants of one path are refused; the output beside them is written.
+				want := "CONFLICT duplicate output " + filepath.Join(root, "reader.toml") + " from one.md and two.md"
+				raw, e := os.ReadFile(filepath.Join(root, "writer.toml"))
+				_, refused := os.Lstat(filepath.Join(root, "reader.toml"))
+				if got.Wrote != 1 || e != nil || string(raw) != artifact.Marker(artifact.TOML, "writer") || !os.IsNotExist(refused) || strings.Join(got.Problems, "\n") != want {
+					t.Fatalf("wrote %d, writer.toml %q (%v), reader.toml %v; problems %q, want %q", got.Wrote, raw, e, refused, got.Problems, want)
 				}
 			case "nested roots":
 				if got.Deleted != 0 {
@@ -347,5 +360,42 @@ func TestAuditDeletionNamesOwnedLeaves(t *testing.T) {
 	}
 	if _, err := os.Stat(foreign); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A link receipt that does not parse claims the link as one with no receipt,
+// by the marker of the file it links to, and is warned in the plugin log.
+func TestUnparseableLinkReceiptFallsBackToTheMarker(t *testing.T) {
+	for target, want := range map[string]bool{"generated.md": true, "user.md": false} {
+		// The linked file lives outside the managed root, as a store's file does.
+		root, store, logs, state := testjail.Scratch(t), testjail.Scratch(t), testjail.Scratch(t), testjail.Scratch(t)
+		t.Setenv("PLUGIN_LOG_DIR", logs)
+		t.Setenv("ENGINE_SYNC_STATE", state)
+		body := "user\n"
+		if want {
+			body = artifact.Marker(artifact.Markdown, "agents/reader.md") + "\nbody\n"
+		}
+		target = filepath.Join(store, target)
+		if err := os.WriteFile(target, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(root, "link.md")
+		built := reconcile.Run([]artifact.Artifact{{Kind: artifact.Link, Path: link, Target: target}}, reconcile.Build, []artifact.Root{{Path: root, SourceRoots: []string{root}}})
+		receipts, err := filepath.Glob(filepath.Join(state, "links", "*.json"))
+		if len(built.Problems) != 0 || err != nil || len(receipts) != 1 {
+			t.Fatalf("link build: %+v receipts %q %v", built, receipts, err)
+		}
+		if err := os.WriteFile(receipts[0], []byte("{"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if owned, err := reconcile.Claimable(link, nil); owned != want || err != nil {
+			t.Fatalf("Claimable(%s -> %s) = %v, %v; want %v, nil", link, target, owned, err, want)
+		}
+		path := filepath.Join(logs, "engine-sync", "warnings.jsonl")
+		raw, err := os.ReadFile(path)
+		wantMsg := "parse link receipt " + receipts[0] + " of " + link + ": unexpected end of JSON input; claimed as a link with no receipt"
+		if err != nil || !strings.Contains(string(raw), `"msg":`+strconv.Quote(wantMsg)) {
+			t.Fatalf("warning row %q missing from %s: %s %v", wantMsg, path, raw, err)
+		}
 	}
 }

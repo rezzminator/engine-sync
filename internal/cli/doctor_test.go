@@ -81,7 +81,7 @@ func TestMachineDoctorJSONNamesPolicySourcesAndConfigFailures(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{`{"version":1,"workbenchMarker":".workspace/marker.json"}`, `{"version":1,"unknown":true}`} {
+	for _, raw := range []string{`{"version":1,"workbenchMarker":".workspace/marker.json"}`, `{"version":1,"workbenchMarker":true}`} {
 		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -101,8 +101,8 @@ func TestMachineDoctorJSONNamesPolicySourcesAndConfigFailures(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 			t.Fatalf("decode %q: %v", out.String(), err)
 		}
-		if strings.Contains(raw, "unknown") {
-			if code != 1 || result.OK || !strings.Contains(result.Error, path) || !strings.Contains(result.Error, "unknown") {
+		if strings.Contains(raw, "true") {
+			if code != 1 || result.OK || !strings.Contains(result.Error, path) || !strings.Contains(result.Error, "workbenchMarker") {
 				t.Fatalf("%d %+v", code, result)
 			}
 		} else {

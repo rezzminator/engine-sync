@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,54 @@ func TestPipelineNamesEachProblemOnce(t *testing.T) {
 	r, ok := Execute(source.Project{}, config.Default(), reconcile.Check, render, roots, validate)
 	if ok || len(r.Problems) != 1 || r.Problems[0] != named {
 		t.Fatalf("problems %q, want %q once", r.Problems, named)
+	}
+}
+
+// A problem naming one rendered output refuses that output, kept as it is, and
+// the build writes the rest; a problem naming no output stops the build.
+func TestPipelineBuildRefusesOnlyTheOutputAProblemNames(t *testing.T) {
+	for _, row := range []struct {
+		name   string
+		names  bool
+		writes bool
+	}{
+		{"problem names an output", true, true},
+		{"problem names no output", false, false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			root := testjail.Scratch(t)
+			good, bad := filepath.Join(root, "good.toml"), filepath.Join(root, "bad.toml")
+			goodBody := artifact.Marker(artifact.TOML, "good.md") + "\nname = \"good\"\n"
+			kept := artifact.Marker(artifact.TOML, "bad.md") + "\nname = \"bad\"\n"
+			if err := os.WriteFile(bad, []byte(kept), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			render := func(source.Project, config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
+				return []artifact.Artifact{
+					{Path: good, Source: "good.md", Content: []byte(goodBody)},
+					{Path: bad, Source: "bad.md", Content: []byte(artifact.Marker(artifact.TOML, "bad.md") + "\nname = \n")},
+				}, nil
+			}
+			named := ""
+			if row.names {
+				named = bad
+			}
+			problem := "UNPARSEABLE " + bad + ": expected value"
+			validate := func([]artifact.Artifact) []diag.Diagnostic {
+				return []diag.Diagnostic{{Severity: diag.Finding, State: reconcile.Unparseable, Path: named, Message: problem}}
+			}
+			roots := func(source.Project, config.Config) []artifact.Root { return []artifact.Root{{Path: root}} }
+			r, ok := Execute(source.Project{}, config.Default(), reconcile.Build, render, roots, validate)
+			wantWarnings, wantGood := "", ""
+			if row.writes {
+				wantWarnings, wantGood = "bad.md did not build; output kept: "+bad, goodBody
+			}
+			gotBad, _ := os.ReadFile(bad)
+			gotGood, _ := os.ReadFile(good)
+			if ok || strings.Join(r.Problems, "\n") != problem || strings.Join(r.Warnings, "\n") != wantWarnings || string(gotBad) != kept || string(gotGood) != wantGood {
+				t.Fatalf("ok %v, problems %q, warnings %q (want %q);\n%s: %q (want %q)\n%s: %q (want %q)",
+					ok, r.Problems, r.Warnings, wantWarnings, bad, gotBad, kept, good, gotGood, wantGood)
+			}
+		})
 	}
 }

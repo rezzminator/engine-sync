@@ -22,12 +22,15 @@ import (
 // scalars joined by ", ", a nested map absent. Node keeps the parsed mapping,
 // comments and key order included, for re-rendering a derived agent.
 type Frontmatter struct {
-	Description, Model, Effort string
-	Tools                      []string
-	Fields                     map[string]string
-	Node                       *yaml.Node
-	Requires                   []string
-	Engines                    Engines
+	// Effort is the effort key when it is in the closed table, else empty:
+	// ValidateAgent names a value outside it, and no engine receives one.
+	Model, Effort string
+	Fields        map[string]string
+	Node          *yaml.Node
+	// Requires is the capability names of a requires list; a requires that
+	// is not a list reads as none, ValidateAgent fails the agent for it.
+	Requires []string
+	Engines  Engines
 }
 
 // Engines is an agent's per-engine block. A nil engine pointer is an absent
@@ -159,11 +162,9 @@ func FromNode(node *yaml.Node) Frontmatter {
 			front.Fields[key] = text
 		}
 	}
-	front.Description, front.Model, front.Effort = front.Fields["description"], front.Fields["model"], front.Fields["effort"]
-	for _, tool := range strings.Split(front.Fields["tools"], ",") {
-		if tool = strings.TrimSpace(tool); tool != "" {
-			front.Tools = append(front.Tools, tool)
-		}
+	front.Model = front.Fields["model"]
+	if effort := MapValue(node, "effort"); effort != nil && slices.Contains(agentEfforts, effort.Value) {
+		front.Effort = effort.Value
 	}
 	if requires := MapValue(node, "requires"); requires != nil && requires.Kind == yaml.SequenceNode {
 		for _, item := range requires.Content {
@@ -261,8 +262,10 @@ var (
 )
 
 // ValidateAgent checks one agent's frontmatter against the agent contract:
-// problems fail the agent, warnings (UNKNOWN-KEY) do not. generated admits
-// the compiler-stamped role.
+// problems fail the agent, warnings do not — an UNKNOWN-KEY, an effort outside
+// the table (omitted). A requires that is not a list of capability names is a
+// problem, so the agent's installed copies stay. generated admits the
+// compiler-stamped role.
 func ValidateAgent(path string, front Frontmatter, passthrough []string, generated bool) (problems, warnings []string) {
 	node := front.Node
 	if node == nil {
@@ -281,15 +284,10 @@ func ValidateAgent(path string, front Frontmatter, passthrough []string, generat
 		case key == "role" && !generated:
 			problems = append(problems, fmt.Sprintf("%s: role is stamped by the compiler, never written in a source", path))
 		case key == "requires":
-			if value.Kind != yaml.SequenceNode {
+			if value.Kind != yaml.SequenceNode || slices.ContainsFunc(value.Content, func(item *yaml.Node) bool {
+				return item.Kind != yaml.ScalarNode || strings.TrimSpace(item.Value) == ""
+			}) {
 				problems = append(problems, fmt.Sprintf("%s: requires must be a list of capability names", path))
-				continue
-			}
-			for _, item := range value.Content {
-				if item.Kind != yaml.ScalarNode || strings.TrimSpace(item.Value) == "" {
-					problems = append(problems, fmt.Sprintf("%s: requires must be a list of capability names", path))
-					break
-				}
 			}
 		case key == "engines":
 			if _, errs := parseEngines(value); len(errs) > 0 {
@@ -299,7 +297,7 @@ func ValidateAgent(path string, front Frontmatter, passthrough []string, generat
 			}
 		case key == "effort":
 			if !slices.Contains(agentEfforts, value.Value) {
-				problems = append(problems, fmt.Sprintf("%s: invalid effort %q (want %s)", path, value.Value, strings.Join(agentEfforts, ", ")))
+				warnings = append(warnings, fmt.Sprintf("%s: invalid effort %q (want %s) — effort omitted", path, value.Value, strings.Join(agentEfforts, ", ")))
 			}
 		case slices.Contains(ClaudeNativeKeys, key), slices.Contains(OwnKeys, key), slices.Contains(passthrough, key):
 		default:

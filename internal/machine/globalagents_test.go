@@ -8,6 +8,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -769,6 +770,44 @@ func TestGlobalAgentsRefusesForeignCodexRoleFile(t *testing.T) {
 	}
 	if len(result.Problems) == 0 {
 		t.Fatalf("a foreign role file was silently accepted: problems = %#v", result.Problems)
+	}
+}
+
+// TestGlobalAgentsNamesAnUnreadableTargetAndInstallsTheRest: a desired role
+// or link whose path cannot be inspected is one problem naming it, never an
+// abort and never absent, and the other engine's install still lands.
+func TestGlobalAgentsNamesAnUnreadableTargetAndInstallsTheRest(t *testing.T) {
+	for _, tc := range []struct {
+		name, registry, target, installed string
+		// orphanWalk: the build's orphan walk of a managed registry names it too.
+		orphanWalk bool
+	}{
+		{name: "codex registry is a file", registry: ".codex/agents", target: ".codex/agents/alpha.toml", installed: ".claude/agents/alpha.md", orphanWalk: true},
+		{name: "claude registry is a file", registry: ".claude/agents", target: ".claude/agents/alpha.md", installed: ".codex/agents/alpha.toml"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := testjail.Scratch(t)
+			source := filepath.Join(home, "source-repo", "agents", "alpha.md")
+			writeAgentFixture(t, source, "---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+			writeAgentFixture(t, filepath.Join(home, filepath.FromSlash(tc.registry)), "not a directory\n")
+			result, err := runFixtureMachineAgents(GlobalAgentsOptions{SourceRepo: filepath.Join(home, "source-repo"), Home: home})
+			if err != nil {
+				t.Fatalf("RunGlobalAgents: %v, want the unreadable target named and the rest installed", err)
+			}
+			target, registry := filepath.Join(home, filepath.FromSlash(tc.target)), filepath.Join(home, filepath.FromSlash(tc.registry))
+			want := []string{"inspect " + target + ": lstat " + target + ": not a directory"}
+			if tc.orphanWalk {
+				want = append(want, "read managed directory "+registry+": open "+registry+": not a directory")
+			}
+			if !reflect.DeepEqual(result.Problems, want) {
+				t.Fatalf("problems = %q, want %q", result.Problems, want)
+			}
+			if installed := filepath.Join(home, filepath.FromSlash(tc.installed)); strings.HasSuffix(installed, ".md") {
+				assertGlobalSymlink(t, installed, source)
+			} else {
+				assertGlobalRoleFile(t, installed)
+			}
+		})
 	}
 }
 

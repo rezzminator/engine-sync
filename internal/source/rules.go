@@ -25,11 +25,14 @@ type Rule struct {
 	// ParseErr is a header that does not parse: the rule is reported, never
 	// compiled.
 	ParseErr error
+	// ReadErr is a rule that cannot be read: reported and skipped like
+	// ParseErr, its siblings still loaded.
+	ReadErr error
 }
 
 // Rules reads every rule below dir through read, in sorted relative-path
-// order. An absent dir holds no rules; a directory or rule that cannot be
-// read is an error, never an empty set.
+// order. An absent dir holds no rules; a directory that cannot be read is an
+// error, never an empty set; a rule that cannot be read carries its ReadErr.
 func Rules(dir string, read func(string) ([]byte, error)) ([]Rule, error) {
 	rels, err := ruleFiles(dir)
 	if err != nil {
@@ -38,11 +41,13 @@ func Rules(dir string, read func(string) ([]byte, error)) ([]Rule, error) {
 	rules := make([]Rule, 0, len(rels))
 	for _, rel := range rels {
 		path := filepath.Join(dir, rel)
+		rule := Rule{Path: path, Rel: filepath.ToSlash(rel)}
 		raw, err := read(path)
 		if err != nil {
-			return nil, fmt.Errorf("read rule %s: %w", path, err)
+			rule.ReadErr = err
+			rules = append(rules, rule)
+			continue
 		}
-		rule := Rule{Path: path, Rel: filepath.ToSlash(rel)}
 		front, body, err := Parse(string(raw))
 		if err != nil {
 			rule.ParseErr = err
@@ -77,7 +82,8 @@ func scopeGlobs(value *yaml.Node) []string {
 
 // ruleFiles lists every .md below dir, following links, as sorted relative
 // paths; an absent dir has none. A dangling link that is not a .md names no
-// rule and is passed over; one that is, or any other failure, is an error.
+// rule and is passed over; a .md that cannot be inspected is listed, for its
+// read to name it; any other failure is an error.
 func ruleFiles(dir string) ([]string, error) {
 	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -109,6 +115,10 @@ func ruleFiles(dir string) ([]string, error) {
 			}
 			info, err := os.Stat(path)
 			if !isRule && errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if isRule && err != nil {
+				rels = append(rels, rel)
 				continue
 			}
 			if err != nil {

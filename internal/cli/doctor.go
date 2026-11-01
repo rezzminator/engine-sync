@@ -45,7 +45,7 @@ func runMachineDoctor(args []string, stdout, stderr io.Writer, e env) int {
 	if *claudeConfig != "" {
 		cds = append(cds, *claudeConfig)
 	}
-	options, err := globalOptions(e, resolvedHome, *sourceRepo, "", cds, codexHomes, false)
+	options, err := globalOptions(e, stderr, resolvedHome, *sourceRepo, "", cds, codexHomes, false)
 	if err != nil {
 		return cliargs.ReportFailure("engine-sync doctor", *asJSON, err, stdout, stderr)
 	}

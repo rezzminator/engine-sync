@@ -34,6 +34,9 @@ const (
 	AgentsSymlink    AgentsState = "SYMLINK"
 	AgentsMismatch   AgentsState = "MISMATCH"
 	AgentsBroken     AgentsState = "BROKEN"
+	// AgentsWarning: a source the loader passed over, a dangling link among
+	// them; every other source is still inspected.
+	AgentsWarning AgentsState = "WARNING"
 	// AgentsOrphan: a rendered agent in the generated directory whose
 	// declaration source is gone.
 	AgentsOrphan AgentsState = AgentsState(reconciler.Orphan)
@@ -111,6 +114,8 @@ func (status AgentsStatus) Describe() string {
 	case AgentsOrphan:
 		return line + ` note="each named file was rendered from a declaration that no longer exists"` +
 			` hint="restore its declaration, or delete it (engine-sync global retires it)"`
+	case AgentsWarning:
+		return line + ` hint="restore or remove the named source"`
 	default:
 		return line + ` hint="run engine-sync global"`
 	}
@@ -274,20 +279,22 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	if err != nil {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
 	}
-	if len(model.Warnings) != 0 {
-		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: strings.Join(model.Warnings, "; ")}}
+	// A source the loader passed over is one warn row; the rest still inspect.
+	var warnings []AgentsStatus
+	for _, warning := range model.Warnings {
+		warnings = append(warnings, AgentsStatus{Dir: agentsDir, State: AgentsWarning, Error: warning})
 	}
 	orphans, err := generatedOrphans(model)
 	if err != nil {
-		return []AgentsStatus{{Dir: model.GeneratedDir, State: AgentsUnreadable, Error: err.Error()}}
+		return append(warnings, AgentsStatus{Dir: model.GeneratedDir, State: AgentsUnreadable, Error: err.Error()})
 	}
 	// A broken agent is global's to skip, never the directory's to fail: it
 	// is one BROKEN row naming it, and every healthy agent is still inspected.
 	model, _ = filterMachineAgents(model, cfg.Capabilities)
 	model = skipBrokenAgents(model, cfg)
-	var broken []AgentsStatus
+	broken := warnings
 	if len(model.Problems) != 0 || len(model.Failed) != 0 {
-		broken = []AgentsStatus{{Dir: agentsDir, State: AgentsBroken, Names: model.Failed, Error: strings.Join(model.Problems, "; ")}}
+		broken = append(broken, AgentsStatus{Dir: agentsDir, State: AgentsBroken, Names: model.Failed, Error: strings.Join(model.Problems, "; ")})
 	}
 	if len(orphans) != 0 {
 		broken = append(broken, AgentsStatus{Dir: model.GeneratedDir, State: AgentsOrphan, Names: orphans})

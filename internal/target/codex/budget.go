@@ -23,7 +23,9 @@ const projectDocMaxBytes = 32 << 10
 // agentsBudget names every compiled AGENTS.md whose chain, it and the
 // AGENTS.md of each project above it, passes the project's
 // project_doc_max_bytes: a warning in a build, which writes it whole, and a
-// failure in check, never a cut. An unreadable limit is an error.
+// failure in check, never a cut. An unreadable limit is an error. A chain
+// through a kept AGENTS.md, whose bytes this build did not make, is not
+// measured.
 func agentsBudget(root, home string, cfg config.Config, orientations []artifact.Artifact) ([]diag.Diagnostic, error) {
 	if len(orientations) == 0 {
 		return nil, nil
@@ -35,16 +37,17 @@ func agentsBudget(root, home string, cfg config.Config, orientations []artifact.
 	dir := func(a artifact.Artifact) string { return filepath.Dir(a.Path) }
 	var diagnostics []diag.Diagnostic
 	for _, document := range orientations {
-		total, parts := 0, []string{}
+		total, parts, kept := 0, []string{}, false
 		for _, ancestor := range orientations {
 			if rel, err := filepath.Rel(dir(ancestor), dir(document)); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				continue
 			}
+			kept = kept || ancestor.Kept != nil
 			total += len(ancestor.Content)
 			name, _ := filepath.Rel(root, ancestor.Path)
 			parts = append(parts, fmt.Sprintf("%s %d", filepath.ToSlash(name), len(ancestor.Content)))
 		}
-		if total <= limit {
+		if kept || total <= limit {
 			continue
 		}
 		diagnostics = append(diagnostics, diag.Diagnostic{

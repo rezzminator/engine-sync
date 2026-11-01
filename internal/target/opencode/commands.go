@@ -91,10 +91,18 @@ func compileOpenCodeCommands(
 			}
 			continue
 		}
+		flat := openCodeFlatName(entry.Rel)
+		if err := paths.ValidateName(flat); err != nil {
+			problem("%s: %v", entry.Path, err)
+			continue
+		}
+		output := filepath.Join(outputRoot, flat+".md")
 		front, body, parseErr := model.Frontmatter(file)
 		fields := front.Fields
 		if parseErr != nil {
 			problem("%s", claudesource.DescribeParseError(file, parseErr))
+			// A source that does not parse keeps its installed twin until it builds again.
+			add(artifact.Artifact{Path: output, Kept: &artifact.SourceLink{Path: file}})
 			continue
 		}
 		policy := config.Default()
@@ -103,17 +111,12 @@ func compileOpenCodeCommands(
 		}
 		chain := append(rewrite.Builtins(), rewrite.Configured(policy.Rewrites)...)
 		ctx := rewrite.Context{Engine: "opencode", Kind: "command", Source: file, Roster: roster}
-		flat := openCodeFlatName(entry.Rel)
-		if err := paths.ValidateName(flat); err != nil {
-			problem("%s: %v", entry.Path, err)
-			continue
-		}
 		relSource := filepath.ToSlash(filepath.Join(sourceLabel, entry.Rel))
 		content := artifact.WithManagedBy("---\n"+artifact.Marker(artifact.YAMLFront,
 			relSource,
 		)+"\ndescription: "+quoteOpenCodeYAML(
 			chain.Apply(strings.TrimSpace(fields["description"]), ctx),
 		)+"\n---\n"+chain.Apply(body, ctx), managedBy)
-		add(artifact.Artifact{Path: filepath.Join(outputRoot, flat+".md"), Content: []byte(content), Source: entry.Path, Syntax: artifact.YAMLFront})
+		add(artifact.Artifact{Path: output, Content: []byte(content), Source: entry.Path, Syntax: artifact.YAMLFront})
 	}
 }

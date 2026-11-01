@@ -18,6 +18,7 @@ func TestOpenCodeAgentRelativePathFailureIsAProblemAndSkipsTheAgent(t *testing.T
 	added := 0
 	compileOpenCodeAgent(
 		root,
+		".",
 		"worker",
 		filepath.Join("relative", "worker.md"),
 		nil,

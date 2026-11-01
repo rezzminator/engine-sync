@@ -20,7 +20,7 @@ func TestTrackedSchemaMatchesLoader(t *testing.T) {
 }
 
 // TestSchemaPassthroughKeysMatchTheLoader: the schema's passthrough-key
-// pattern admits exactly the keys Validate accepts, at both layers.
+// pattern admits exactly the keys the loader keeps, at both layers.
 func TestSchemaPassthroughKeysMatchTheLoader(t *testing.T) {
 	var schema struct {
 		Properties map[string]json.RawMessage
@@ -45,7 +45,8 @@ func TestSchemaPassthroughKeysMatchTheLoader(t *testing.T) {
 		for _, key := range []string{"x-key", "color", "", "  ", "a b", "a:b", "a\tb", "a\nb", "\u0085", "\ufeff", "\u3000"} {
 			cfg := Default()
 			cfg.Agents.PassthroughKeys = []string{key}
-			if schemaOK, loaderOK := pattern.MatchString(key), Validate(cfg) == nil; schemaOK != loaderOK {
+			dropInvalid(&cfg)
+			if schemaOK, loaderOK := pattern.MatchString(key), len(cfg.Agents.PassthroughKeys) == 1; schemaOK != loaderOK {
 				t.Errorf("%s: key %q schema=%v loader=%v", layer, key, schemaOK, loaderOK)
 			}
 		}

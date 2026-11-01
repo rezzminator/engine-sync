@@ -94,9 +94,9 @@ func knownMCPServers(model *claudesource.Project, root string, policies ...confi
 // every builtin outside the list is denied, every known MCP server is denied
 // unless a mcp__<server>__* wildcard grants it, and each listed tool of a known
 // server is granted after its server's deny. A tool it cannot map — a retired
-// or unknown server, a Claude tool with no OpenCode equivalent — stays denied
-// and is named in a warning against source.
-func renderOpenCodeToolsBlock(source, allowList string, known []string, policies ...config.MCP) (string, []string, error) {
+// or unknown server, a Claude tool with no OpenCode equivalent, an MCP name
+// that does not parse — stays denied and is named in a warning against source.
+func renderOpenCodeToolsBlock(source, allowList string, known []string, policies ...config.MCP) (string, []string) {
 	policy := selectedMCP(policies)
 	knownServer := map[string]bool{}
 	for _, server := range known {
@@ -130,7 +130,8 @@ func renderOpenCodeToolsBlock(source, allowList string, known []string, policies
 		}
 		server, tool, err := engine.OpenCodeMCPToolParts(parseName)
 		if err != nil {
-			return "", nil, err
+			warnings = append(warnings, fmt.Sprintf("malformed MCP tool %s in %s — %v; it stays denied", claudeTool, source, err))
+			continue
 		}
 		if !knownServer[server] {
 			unmapped[server] = true
@@ -197,7 +198,7 @@ func renderOpenCodeToolsBlock(source, allowList string, known []string, policies
 			fmt.Fprintf(&content, "  %s: true\n", id)
 		}
 	}
-	return content.String(), warnings, nil
+	return content.String(), warnings
 }
 
 func selectedMCP(policies []config.MCP) config.MCP {

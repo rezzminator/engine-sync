@@ -74,8 +74,8 @@ func TestOpenCodeFlagsAStaleAGENTS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Rules that cannot be read are their read problem, never a STALE
-	// compiled without them.
+	// Rules that cannot be read leave their AGENTS.md unchecked, named, never
+	// a STALE compiled without them, and stop no OpenCode output.
 	if !testjail.RanUnprivileged(t) {
 		rules := filepath.Dir(rule)
 		if err := os.Chmod(rules, 0); err != nil {
@@ -86,8 +86,8 @@ func TestOpenCodeFlagsAStaleAGENTS(t *testing.T) {
 		if err := os.Chmod(rules, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if want := []string{"read rules " + rules + ": open " + rules + ": permission denied"}; err != nil || result.OK || !reflect.DeepEqual(result.Problems, want) {
-			t.Fatalf("check over unreadable rules: OK=%v problems=%q err=%v, want %q", result.OK, result.Problems, err, want)
+		if want := []string{"AGENTS.md unchecked: it does not compile: read rules " + rules + ": open " + rules + ": permission denied"}; err != nil || !result.OK || len(result.Problems) != 0 || !reflect.DeepEqual(result.Warnings, want) {
+			t.Fatalf("check over unreadable rules: OK=%v problems=%q warnings=%q err=%v, want OK with warnings %q", result.OK, result.Problems, result.Warnings, err, want)
 		}
 	}
 

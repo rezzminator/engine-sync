@@ -27,6 +27,7 @@ var Version = "0.8.0-alpha"
 type env struct {
 	lockWait  time.Duration
 	get       paths.Env
+	stderr    io.Writer
 	stdin     io.Reader
 	sessionID string
 	notices   map[string]bool
@@ -43,6 +44,7 @@ func Main(args []string, stdout, stderr io.Writer, stdin io.Reader, release stri
 }
 
 func dispatch(args []string, stdout, stderr io.Writer, e env) int {
+	e.stderr = stderr
 	if e.notices == nil {
 		e.notices = map[string]bool{}
 	}
@@ -160,5 +162,9 @@ func guarded(e env, roots []string, writes bool, body func() int) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	return guard.WithWriterGuard(e.state(home), roots, Version, writerPath, writes, e.lockWait, body)
+	warn := func(msg string) {
+		runlog.Record(e.get, e.stderr, pluginlog.Row{Level: "warning", Event: "writer-record-unparseable", Msg: msg, Where: "internal/guard/run.go#WithWriterGuard"})
+		fmt.Fprintln(e.stderr, "warning:", msg)
+	}
+	return guard.WithWriterGuard(e.state(home), roots, Version, writerPath, writes, e.lockWait, warn, body)
 }

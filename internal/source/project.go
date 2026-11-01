@@ -74,7 +74,8 @@ type Project struct {
 	// entry; a project with none has no key.
 	Rules map[string][]Rule
 	// RulesFailed names, keyed the same, the problem that kept a project's
-	// rules from loading: its AGENTS.md cannot compile without them.
+	// rules from loading: its AGENTS.md cannot compile without them, and the
+	// Codex render reports it there, costing that AGENTS.md alone.
 	RulesFailed        map[string]string
 	Problems, Warnings []string
 	// Failed names each machine agent skipped for an error: its installed
@@ -124,7 +125,6 @@ func LoadProject(root, home string, cfg config.Config) Project {
 			}
 		}
 		if rules, err := Rules(filepath.Join(child, ".claude", "rules"), p.Read); err != nil {
-			p.Problems = append(p.Problems, err.Error())
 			if p.RulesFailed == nil {
 				p.RulesFailed = map[string]string{}
 			}

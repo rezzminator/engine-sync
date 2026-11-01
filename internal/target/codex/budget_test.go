@@ -70,21 +70,42 @@ func TestAGENTSChainBudget(t *testing.T) {
 		}
 	})
 
+	// A kept AGENTS.md is not this build's bytes: no chain through it is
+	// measured, while the problem that kept it fails the run.
+	t.Run("a chain through a kept AGENTS.md is not measured", func(t *testing.T) {
+		root, home := projectRulesFixture(t)
+		writeCodexFixture(t, filepath.Join(root, ".claude", "engine-sync.json"), `{"version":1,"codex":{"globalCommands":false,"modelMap":{"sonnet":"gpt-5"},"rootAdapter":"{{if .Engine}}{{.Bogus}}{{end}}"}}`)
+		writeCodexFixture(t, filepath.Join(root, ".codex", "config.toml"), "project_doc_max_bytes = 1\n")
+		built, err := Build(Options{Root: root, Home: home})
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		if built.OK || !containsPrefix(built.Problems, "render codex.rootAdapter for ") || len(built.Warnings) != 0 {
+			t.Fatalf("build: OK=%v problems=%q warnings=%q, want a rootAdapter problem and no warning", built.OK, built.Problems, built.Warnings)
+		}
+	})
+
+	// A limit that cannot be read leaves the budget unchecked, named: the
+	// build writes every AGENTS.md whole and warns, the check fails.
 	for _, tc := range []struct{ name, value, want string }{
-		{"an unparseable limit is an error", "\"big\"", "AGENTS-BUDGET read project_doc_max_bytes from %s: "},
-		{"a limit below zero is an error", "-1", "AGENTS-BUDGET project_doc_max_bytes in %s is -1: it must be 0 or more"},
+		{"an unparseable limit is unchecked", "\"big\"", "AGENTS-BUDGET read project_doc_max_bytes from %s: toml: line 1 (last key \"project_doc_max_bytes\"): incompatible types: TOML value has type string; destination has type integer"},
+		{"a limit below zero is unchecked", "-1", "AGENTS-BUDGET project_doc_max_bytes in %s is -1: it must be 0 or more"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, home := projectRulesFixture(t)
 			config := filepath.Join(root, ".codex", "config.toml")
 			writeCodexFixture(t, config, "project_doc_max_bytes = "+tc.value+"\n")
-			result, err := Build(Options{Root: root, Home: home})
-			if err != nil {
-				t.Fatalf("build: %v", err)
+			want := []string{fmt.Sprintf(tc.want, config)}
+			built, err := Build(Options{Root: root, Home: home})
+			if err != nil || !built.OK || !sameRows(built.Warnings, want) {
+				t.Fatalf("build: OK=%v warnings=%q problems=%q err=%v, want OK with warnings %q", built.OK, built.Warnings, built.Problems, err, want)
 			}
-			prefix := fmt.Sprintf(tc.want, config)
-			if result.OK || !containsPrefix(result.Problems, prefix) {
-				t.Fatalf("build: OK=%v problems=%q, want one starting %q", result.OK, result.Problems, prefix)
+			if got := string(readCodexFixture(t, filepath.Join(root, "AGENTS.md"))); got != wantRootAGENTS {
+				t.Fatalf("AGENTS.md beside an unread limit:\n%s\nwant:\n%s", got, wantRootAGENTS)
+			}
+			checked, err := CheckProject(Options{Root: root, Home: home})
+			if err != nil || checked.OK || !sameRows(checked.Problems, want) {
+				t.Fatalf("check: OK=%v problems=%q err=%v, want problems %q", checked.OK, checked.Problems, err, want)
 			}
 		})
 	}

@@ -44,6 +44,9 @@ func agentsDrift(p claudesource.Project, cfg config.Config) []diag.Diagnostic {
 		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Message: fmt.Sprintf("AGENTS.md unchecked: it does not compile: %s", strings.Join(problems, "; ")), Remedy: "run engine-sync codex check"})
 	}
 	for _, want := range orientations {
+		if want.Kept != nil {
+			continue // it did not compile: the problems above name it
+		}
 		have, err := paths.ReadRegular(want.Path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue

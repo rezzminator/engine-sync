@@ -65,7 +65,7 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, e env) int {
 		fmt.Fprintln(stderr, err)
 		return cliargs.FailureCode(err)
 	}
-	options, err := globalOptions(e, resolvedHome, *sourceRepo, "", nil, nil, false)
+	options, err := globalOptions(e, stderr, resolvedHome, *sourceRepo, "", nil, nil, false)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return cliargs.FailureCode(err)

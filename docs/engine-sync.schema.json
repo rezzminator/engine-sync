@@ -199,9 +199,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "version"
-      ],
       "type": "object"
     }
   },
@@ -498,9 +495,6 @@
       "type": "string"
     }
   },
-  "required": [
-    "version"
-  ],
   "title": "engine-sync settings",
   "type": "object"
 }

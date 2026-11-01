@@ -3,7 +3,9 @@ package opencode
 import (
 	"github.com/rezzminator/engine-sync/internal/config"
 	"github.com/rezzminator/engine-sync/internal/testjail"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -19,10 +21,7 @@ const openCodeBuiltinDenialsForReadOnly = "tools:\n" +
 	"  task: false\n  todowrite: false\n  webfetch: false\n  websearch: false\n  write: false\n"
 
 func TestRenderOpenCodeToolsBlockDisablesToolsOutsideClaudeAllowList(t *testing.T) {
-	got, _, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", nil)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
+	got, _ := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", nil)
 	for _, denied := range []string{
 		"apply_patch", "edit", "execute", "glob", "grep", "invalid", "lsp", "plan_exit", "question",
 		"skill", "todowrite", "webfetch", "websearch", "write",
@@ -40,10 +39,7 @@ func TestRenderOpenCodeToolsBlockDisablesToolsOutsideClaudeAllowList(t *testing.
 
 func TestRenderOpenCodeToolsBlockLetsWriteAndEditReachApplyPatch(t *testing.T) {
 	for _, allowList := range []string{"Write", "Edit"} {
-		got, _, err := renderOpenCodeToolsBlock("worker.md", allowList, nil)
-		if err != nil {
-			t.Fatalf("render %s: %v", allowList, err)
-		}
+		got, _ := renderOpenCodeToolsBlock("worker.md", allowList, nil)
 		if strings.Contains(got, "  apply_patch: false\n") {
 			t.Fatalf("%s did not allow OpenCode's model editing tool:\n%s", allowList, got)
 		}
@@ -51,10 +47,10 @@ func TestRenderOpenCodeToolsBlockLetsWriteAndEditReachApplyPatch(t *testing.T) {
 }
 
 func TestRenderOpenCodeToolsBlockWithoutMCPEntriesDeniesEveryKnownServer(t *testing.T) {
-	got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "chat", "docs"})
+	got, warnings := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "chat", "docs"})
 	want := openCodeBuiltinDenialsForReadBashAgent + "  chat_*: false\n  docs_*: false\n  local_*: false\n"
-	if err != nil || got != want || len(warnings) != 0 {
-		t.Fatalf("tools block = %q, %v, warnings %q; want %q", got, err, warnings, want)
+	if got != want || len(warnings) != 0 {
+		t.Fatalf("tools block = %q, warnings %q; want %q", got, warnings, want)
 	}
 }
 
@@ -99,12 +95,11 @@ func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, known)
-			if err != nil || got != openCodeBuiltinDenialsForReadOnly+tc.mcpLines || len(warnings) != 0 {
+			got, warnings := renderOpenCodeToolsBlock("worker.md", tc.allowList, known)
+			if got != openCodeBuiltinDenialsForReadOnly+tc.mcpLines || len(warnings) != 0 {
 				t.Fatalf(
-					"tools block = %q, %v, warnings %q; want %q",
+					"tools block = %q, warnings %q; want %q",
 					got,
-					err,
 					warnings,
 					openCodeBuiltinDenialsForReadOnly+tc.mcpLines,
 				)
@@ -144,12 +139,18 @@ func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
 			servers:   "  hub_*: false\n",
 			warning:   "unmapped Claude tool NotebookEdit in worker.md — no OpenCode equivalent; it stays denied",
 		},
+		{
+			name:      "malformed MCP tool",
+			allowList: "Read, mcp__broken",
+			servers:   "  hub_*: false\n",
+			warning:   `malformed MCP tool mcp__broken in worker.md — OpenCode MCP tool "mcp__broken" must be mcp__server__tool; it stays denied`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"hub"}, config.MCP{Renamed: map[string]string{"legacy": "hub", "archive": "hub"}})
+			got, warnings := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"hub"}, config.MCP{Renamed: map[string]string{"legacy": "hub", "archive": "hub"}})
 			want := openCodeBuiltinDenialsForReadOnly + tc.servers
-			if err != nil || got != want {
-				t.Fatalf("tools block = %q, %v; want %q", got, err, want)
+			if got != want {
+				t.Fatalf("tools block = %q; want %q", got, want)
 			}
 			if len(warnings) != 1 || warnings[0] != tc.warning {
 				t.Fatalf("warnings = %q, want [%q]", warnings, tc.warning)
@@ -159,31 +160,33 @@ func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
 }
 
 func TestRenderOpenCodeToolsBlockKeepsARetiredNameThatIsAProjectServer(t *testing.T) {
-	got, warnings, err := renderOpenCodeToolsBlock(
+	got, warnings := renderOpenCodeToolsBlock(
 		"worker.md",
 		"Read, mcp__archive__read",
 		[]string{"archive", "hub"},
 		config.MCP{Renamed: map[string]string{"archive": "hub"}},
 	)
-	if err != nil || len(warnings) != 0 || !strings.Contains(got, "  archive_*: false\n  archive_read: true\n") {
-		t.Fatalf("tools block = %q, %v, warnings %q; want the project archive server granted", got, err, warnings)
+	if len(warnings) != 0 || !strings.Contains(got, "  archive_*: false\n  archive_read: true\n") {
+		t.Fatalf("tools block = %q, warnings %q; want the project archive server granted", got, warnings)
 	}
 }
 
-func TestCompileFailsOnMalformedMCPToolNamingAgentAndEntry(t *testing.T) {
+func TestCompileDeniesAMalformedMCPToolAndKeepsTheAgent(t *testing.T) {
 	root := testjail.Scratch(t)
 	agent := filepath.Join(root, ".claude", "agents", "broken.md")
 	writeOpenCodeFixture(t, agent, "---\ndescription: Broken role.\ntools: Read, mcp__broken\n---\nWork.\n")
 
-	result, err := Compile(Options{Root: root, Home: filepath.Join(root, "home"), Mode: ModeCheck})
-	if err == nil && result.OK {
-		t.Fatalf("compile succeeded with a malformed MCP tool: %#v", result)
+	result, err := Compile(Options{Root: root, Home: filepath.Join(root, "home"), Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("compile = %#v, %v; want the agent built", result, err)
 	}
-	report := strings.Join(result.Problems, "\n")
-	if err != nil {
-		report += "\n" + err.Error()
+	warning := "malformed MCP tool mcp__broken in " + agent + ` — OpenCode MCP tool "mcp__broken" must be mcp__server__tool; it stays denied`
+	if !slices.Contains(result.Warnings, warning) {
+		t.Fatalf("warnings %q, want %q", result.Warnings, warning)
 	}
-	if !strings.Contains(report, agent) || !strings.Contains(report, `"mcp__broken"`) {
-		t.Fatalf("compile report does not name %s and mcp__broken: %s", agent, report)
+	twin := filepath.Join(root, ".opencode", "agent", "broken.md")
+	raw, err := os.ReadFile(twin)
+	if err != nil || !strings.Contains(string(raw), "\n"+openCodeBuiltinDenialsForReadOnly+"---\n") {
+		t.Fatalf("%s = %q (%v), want the read-only tools block and nothing granted", twin, raw, err)
 	}
 }

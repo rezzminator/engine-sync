@@ -50,7 +50,7 @@ func compileAgents(
 				add(keptArtifact(filepath.Join(root, ".codex", "agents", name+".toml"), entry))
 				continue
 			}
-			_, err = options.Source.Read(entry.Path)
+			raw, err := options.Source.Read(entry.Path)
 			if err != nil {
 				problem(fmt.Sprintf("read %s: %v", entry.Path, err))
 				continue
@@ -59,6 +59,10 @@ func compileAgents(
 			front, body, parseErr := options.Source.Frontmatter(entry.Path)
 			if parseErr != nil {
 				problem(claudesource.DescribeParseError(entry.Path, parseErr))
+				// It keeps its installed twin until it builds again.
+				for _, kept := range claudesource.KeptRoleNames(entry.Path, raw, project, cfg) {
+					add(keptArtifact(filepath.Join(root, ".codex", "agents", kept+".toml"), entry))
+				}
 				continue
 			}
 			problems, warnings := claudesource.ValidateAgent(entry.Path, front, all.Agents.PassthroughKeys, false)
@@ -145,7 +149,8 @@ func renderRole(spec roleSpec, front claudesource.Frontmatter, modelMap map[stri
 // Model: engines.codex.model (a codex.modelMap key is mapped, any other value
 // is verbatim), then modelMap[model]; an unmapped alias is omitted with a
 // warning, and Claude's "inherit" is no model line (the session's model).
-// Effort: engines.codex.effort, then effort; max reaches Codex as xhigh.
+// Effort: engines.codex.effort, then effort; max reaches Codex as xhigh, and
+// a value outside the table is omitted.
 // Sandbox: engines.codex.sandbox (inherit is no line), else read-only when
 // the tools line grants no write tool.
 func codexRoleSettings(front claudesource.Frontmatter, modelMap map[string]string, source string) (codexRole, string, error) {
@@ -171,13 +176,8 @@ func codexRoleSettings(front claudesource.Frontmatter, modelMap map[string]strin
 	if pin := strings.TrimSpace(settings.Effort); pin != "" {
 		role.Effort = pin
 	}
-	if role.Effort != "" {
-		mapped, ok := codeReviewEfforts[role.Effort]
-		if !ok {
-			return codexRole{}, "", fmt.Errorf("%s: invalid effort %q", source, role.Effort)
-		}
-		role.Effort = mapped
-	}
+	// An effort outside the table maps to no line; ValidateAgent names it.
+	role.Effort = codeReviewEfforts[role.Effort]
 	switch sandbox := strings.TrimSpace(settings.Sandbox); sandbox {
 	case "inherit":
 	case "":

@@ -46,10 +46,22 @@ type projectRender struct {
 	projects  []string
 	roster    map[string]string
 	transform TransformOptions
+	// kept names, by problem, the output it costs: that output stays as it is.
+	kept map[string]string
+}
+
+// keep reports messages as problems of the output at path, built from
+// source: a problem there keeps that output as it is and costs only it.
+func (r *projectRender) keep(path, source string, messages ...string) artifact.Artifact {
+	for _, message := range messages {
+		r.result.Problems = append(r.result.Problems, message)
+		r.kept[message] = path
+	}
+	return artifact.Artifact{Path: path, Kept: &artifact.SourceLink{Path: source}}
 }
 
 func newProjectRender(p *claudesource.Project, cfgAll config.Config) *projectRender {
-	r := &projectRender{root: p.Root, cfg: cfgAll.Codex}
+	r := &projectRender{root: p.Root, cfg: cfgAll.Codex, kept: map[string]string{}}
 	if p.Workbench {
 		r.cfg.GlobalCommands = false
 	}
@@ -71,27 +83,26 @@ func newProjectRender(p *claudesource.Project, cfgAll config.Config) *projectRen
 }
 
 // orientations compiles each project's AGENTS.md: its CLAUDE.md, then its own
-// .claude/rules, then, at the root, codex.rootAdapter.
+// .claude/rules, then, at the root, codex.rootAdapter. One whose rules or
+// adapter fail is kept as it is, its problems naming it.
 func (r *projectRender) orientations() []artifact.Artifact {
 	problem := func(message string) { r.result.Problems = append(r.result.Problems, message) }
 	agentsDocumentTransform := r.transform
 	agentsDocumentTransform.ReplaceClaudeFile = true
 	var outputs []artifact.Artifact
 	for _, project := range r.projects {
-		src := filepath.Join(r.root, project, "CLAUDE.md")
+		src, path := filepath.Join(r.root, project, "CLAUDE.md"), filepath.Join(r.root, project, "AGENTS.md")
 		content, ok := compileSourceMarkdown(src, agentsDocumentTransform, problem)
 		if !ok {
 			continue
 		}
 		if failed, ok := r.result.Source.RulesFailed[project]; ok {
-			problem(failed) // the source's own words: reported once
+			outputs = append(outputs, r.keep(path, src, failed))
 			continue
 		}
 		rules := CompileRules(r.result.Source.Rules[project], filepath.ToSlash(filepath.Join(project, ".claude", "rules")), ruleTransformWith(r.transform))
 		if len(rules.Broken) != 0 {
-			for _, broken := range rules.Broken {
-				problem(broken)
-			}
+			outputs = append(outputs, r.keep(path, src, rules.Broken...))
 			continue
 		}
 		if rules.Body != "" {
@@ -103,14 +114,14 @@ func (r *projectRender) orientations() []artifact.Artifact {
 		if project == "." {
 			adapter, err := config.RenderTemplate(r.cfg.RootAdapter, config.TemplateData{Engine: "Codex", Source: "CLAUDE.md", Root: "AGENTS.md", Models: r.cfg.ModelMap})
 			if err != nil {
-				problem(fmt.Sprintf("render codex.rootAdapter for %s: %v", src, err))
+				outputs = append(outputs, r.keep(path, src, fmt.Sprintf("render codex.rootAdapter for %s: %v", src, err)))
 				continue
 			}
 			content += adapter
 		}
 		rel, _ := filepath.Rel(r.root, src)
 		outputs = append(outputs, artifact.Artifact{
-			Path:    filepath.Join(r.root, project, "AGENTS.md"),
+			Path:    path,
 			Content: []byte(generatedHeader(filepath.ToSlash(rel)) + "\n" + content), Source: src, Syntax: artifact.Markdown,
 		})
 	}

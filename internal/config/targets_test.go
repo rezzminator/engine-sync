@@ -4,6 +4,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/testjail"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -57,12 +58,19 @@ func TestTargetsWithoutCodexHomesKeepsTheDefaultHomes(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"version":1,"targets":{"capabilities":["gpt-agents"]}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":1,"targets":{"capabilities":["gpt-agents"," "]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got, found, err := LoadTargets(get, home)
-	if err != nil || !found || got.CodexHomes != nil || len(got.Capabilities) != 1 {
+	if err != nil || !found || got.CodexHomes != nil || len(got.Capabilities) != 2 {
 		t.Fatalf("LoadTargets = %+v, %v, %v; want the capabilities-only file", got, found, err)
+	}
+	// An empty name in the file is skipped (Resolve warns of it); an empty flag is refused.
+	if names, err := Capabilities(get, home, []string{"flagged"}); err != nil || !reflect.DeepEqual(names, []string{"flagged", "gpt-agents"}) {
+		t.Fatalf("Capabilities = %q, %v; want [flagged gpt-agents]", names, err)
+	}
+	if names, err := Capabilities(get, home, []string{" "}); err == nil || err.Error() != "capability: empty name" {
+		t.Fatalf("Capabilities(empty flag) = %q, %v; want the refusal capability: empty name", names, err)
 	}
 	result, err := ResolveTargets(get, home, Default(), Targets{})
 	if err != nil || len(*result.CodexHomes) != 1 || (*result.CodexHomes)[0] != filepath.Join(home, ".codex") {
