@@ -199,6 +199,7 @@ func (Target) Render(p claudesource.Project, cfg config.Config) ([]artifact.Arti
 	compileOpenCodeSkills(root, add, problem, skip, dangling, model)
 	compileConfigWithSource(model, root, add, problem, warn, cfg.OpenCode)
 	compileOpenCodeMirrors(root, model, cfg, add, problem, warn)
+	diagnostics = append(diagnostics, agentsDrift(p, cfg)...)
 
 	artifacts := make([]artifact.Artifact, 0, len(outputs))
 	for _, output := range outputs {

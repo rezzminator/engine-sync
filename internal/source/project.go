@@ -70,7 +70,13 @@ type Project struct {
 	Children                     []Project
 	Unresolved                   []Unresolved
 	Projects                     []string
-	Problems, Warnings           []string
+	// Rules holds each project's own .claude/rules, keyed by its Projects
+	// entry; a project with none has no key.
+	Rules map[string][]Rule
+	// RulesFailed names, keyed the same, the problem that kept a project's
+	// rules from loading: its AGENTS.md cannot compile without them.
+	RulesFailed        map[string]string
+	Problems, Warnings []string
 	// Failed names each machine agent skipped for an error: its installed
 	// copies are kept, never retired, until it builds again.
 	Failed []string
@@ -116,6 +122,18 @@ func LoadProject(root, home string, cfg config.Config) Project {
 				}
 				p.Agents = append(p.Agents, Agent{Name: strings.TrimSuffix(filepath.Base(e.Path), ".md"), Path: e.Path, Front: front, Body: body})
 			}
+		}
+		if rules, err := Rules(filepath.Join(child, ".claude", "rules"), p.Read); err != nil {
+			p.Problems = append(p.Problems, err.Error())
+			if p.RulesFailed == nil {
+				p.RulesFailed = map[string]string{}
+			}
+			p.RulesFailed[relative] = err.Error()
+		} else if len(rules) != 0 {
+			if p.Rules == nil {
+				p.Rules = map[string][]Rule{}
+			}
+			p.Rules[relative] = rules
 		}
 		if relative != "." {
 			p.Children = append(p.Children, Project{Root: child, Scope: ProjectScope})

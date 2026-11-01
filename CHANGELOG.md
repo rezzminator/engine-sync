@@ -2,6 +2,17 @@
 
 Every release of engine-sync. Versions follow [semantic versioning](https://semver.org); each release is the `main` commit tagged `v<version>`, with a GitHub release carrying the section below and the four platform binaries.
 
+## [Unreleased]
+
+### Added
+
+- A project's own rules, `{project}/.claude/rules/**/*.md` of the root and of each child project, now reach Codex and OpenCode through that project's compiled `AGENTS.md`, after its `CLAUDE.md` body: an always-on rule inlined under `<!-- rule: .claude/rules/{relative path} -->` with the body transform `CLAUDE.md` gets, a path-scoped rule as the read-on-match pointer global rules use. A rule that cannot be read or whose frontmatter does not parse is a problem naming the file. A project with no rules compiles byte for byte as before.
+- `codex build` warns and `codex check` fails with `AGENTS-BUDGET {path}: its Codex chain is {total} > {limit} bytes (…)` when a compiled `AGENTS.md` and the project `AGENTS.md` files above it pass the `project_doc_max_bytes` Codex applies (the project's `.codex/config.toml`, else the strictest Codex home's, default 32768), so Codex never silently drops the end of the chain.
+
+### Changed
+
+- `opencode build`, `check` and `doctor` report an engine-sync-owned `AGENTS.md` that differs from its compiled bytes as `STALE {path}` (a build warning, a check and doctor problem), since OpenCode reads it; this also catches a `CLAUDE.md` edit not yet rebuilt.
+
 ## [0.7.0] - 2026-11-01
 
 ### Added

@@ -242,58 +242,25 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 	if p.Scope == claudesource.MachineScope {
 		return renderCodexMachine(p, cfgAll)
 	}
-	root, cfg := p.Root, cfgAll.Codex
-	if p.Workbench {
-		cfg.GlobalCommands = false
-	}
-	result := Result{Warnings: []string{}, Problems: []string{}, Dangling: []string{}, Source: &p}
+	r := newProjectRender(&p, cfgAll)
+	root, cfg, roster, transform := r.root, r.cfg, r.roster, r.transform
+	result := &r.result
 	outputs := make([]artifact.Artifact, 0)
 	add := func(output artifact.Artifact) { outputs = append(outputs, output) }
 	warn := func(message string) { result.Warnings = append(result.Warnings, message) }
 	problem := func(message string) { result.Problems = append(result.Problems, message) }
+	projects := r.projects
 
-	projects := discoverProjects(root, cfg, &result, cfgAll.WorkbenchMarker)
-	roster := discoverCommandRoster(root, cfg, &result)
-	for _, rel := range cfgAll.CommandDirs {
-		for name, value := range discoverCommandRosterIn(filepath.Join(root, rel), cfg.ExcludeDirs, &result) {
-			roster[name] = value
-		}
-	}
-	if p.SourceCommandDir != "" {
-		for name, value := range discoverCommandRosterIn(p.SourceCommandDir, nil, &result) {
-			roster[name] = value
-		}
-	}
-	transform := TransformOptions{Review: cfg.Review, ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, Rewrites: cfgAll.Rewrites}
-	agentsDocumentTransform := transform
-	agentsDocumentTransform.ReplaceClaudeFile = true
-
-	for _, project := range projects {
-		src := filepath.Join(root, project, "CLAUDE.md")
-		content, ok := compileSourceMarkdown(src, agentsDocumentTransform, problem)
-		if !ok {
-			continue
-		}
-		if project == "." {
-			adapter, err := config.RenderTemplate(cfg.RootAdapter, config.TemplateData{Engine: "Codex", Source: "CLAUDE.md", Root: "AGENTS.md", Models: cfg.ModelMap})
-			if err != nil {
-				problem(fmt.Sprintf("render codex.rootAdapter for %s: %v", src, err))
-				continue
-			}
-			content += adapter
-		}
-		rel, _ := filepath.Rel(root, src)
-		add(
-			artifact.Artifact{
-				Path:    filepath.Join(root, project, "AGENTS.md"),
-				Content: []byte(generatedHeader(filepath.ToSlash(rel)) + "\n" + content), Source: src, Syntax: artifact.Markdown,
-			},
-		)
+	orientations := r.orientations()
+	outputs = append(outputs, orientations...)
+	budget, err := agentsBudget(root, p.Home, cfgAll, orientations)
+	if err != nil {
+		problem(err.Error())
 	}
 
-	compileAgents(root, projects, cfgAll, transform, add, problem, warn, &result)
-	compileRepoCommands(root, cfg, transform, roster, add, problem, warn, &result)
-	compileRepoSkills(root, add, problem, &result)
+	compileAgents(root, projects, cfgAll, transform, add, problem, warn, result)
+	compileRepoCommands(root, cfg, transform, roster, add, problem, warn, result)
+	compileRepoSkills(root, add, problem, result)
 
 	mcp, err := renderMCP(root, &p, "")
 	if err != nil {
@@ -319,7 +286,7 @@ func (Target) Render(p claudesource.Project, cfgAll config.Config) ([]artifact.A
 	for _, output := range outputs {
 		artifacts = append(artifacts, codexArtifact(output))
 	}
-	var diagnostics []diag.Diagnostic
+	diagnostics := budget
 	dangling := map[string]bool{}
 	for _, message := range result.Dangling {
 		dangling[message] = true

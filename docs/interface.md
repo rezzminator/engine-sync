@@ -11,6 +11,7 @@ A caller execs the binary; it never imports implementation packages or writes co
 - [Declarations](#declarations)
 - [Global commands](#global-commands)
 - [Global rules](#global-rules)
+- [Project rules](#project-rules)
 - [Machine targets](#machine-targets)
 - [Generated ownership](#generated-ownership)
 - [Claude hooks](#claude-hooks)
@@ -257,6 +258,16 @@ The compiled body is each always-on rule under its `<!-- rule: {rules dir}/{rela
 No always-on rule, and `--uninstall`, remove the owned block (and an `AGENTS.md` it alone filled), the compiled file and the owned `instructions` entry, nothing else. `--plan` names each planned write and writes nothing.
 
 `doctor --machine` adds `global-rules` rows: `global-rules source={dir} always-on bytes={n}` (`ok`); one `RULE-FRONTMATTER {path}: {error}` or `RULE-FENCE {path}: …` `fail` row per skipped rule; a `global-rules /command roster: …` `warn` row per command link the roster skipped; `global-rules PATH-SCOPED {path} delivered to Codex and OpenCode as a read-on-match pointer` (`ok`); `global-rules VISIBLE-TO {path} delivered to every Codex and OpenCode loop` (`ok`) per always-on rule carrying a `visible-to:` key, which narrows a rule's loops on Claude Code only (the rule-control plugin) — the rule compiles like any other, its frontmatter stripped; `GLOBAL-BUDGET {bytes} > 9216 …` (`warn`) when the always-on body passes 9 KiB; then `global-rules codex {AGENTS.md} state=…`, `global-rules opencode {compiled file} state=…` and `global-rules opencode instructions entry {config} state=…`, each `ok`, `MISSING` or `STALE`, the Codex row also `SHADOWED` when an `AGENTS.override.md` in that home wins. A rules directory, command roster, file or config that cannot be read is a `global-rules ERROR …` `fail` row, never zero rules.
+
+## Project rules
+
+Each project, the root and every child project that gets its own `AGENTS.md`, reads its own rules directory `{project}/.claude/rules`: every `*.md` below it, links followed, in sorted relative-path order. Its rules compile through the door § Global rules uses, labelled by the directory's root-relative path (`.claude/rules`, `api/.claude/rules`): an always-on rule is its transformed body under `<!-- rule: {label}/{relative path} -->`; a path-scoped rule is the read-on-match pointer `<!-- rule: {label}/{relative path} (path-scoped) -->`, then ``Before working on a file matching `{glob}`, read {label}/{relative path} and follow it.``; a rule with `visible-to:` and no `paths:` stays always-on. The compiled rules, joined by a blank line, follow the project's compiled `CLAUDE.md` body after a blank line and precede `codex.rootAdapter`, so a project with no rules compiles byte for byte as before. OpenCode reads the same `AGENTS.md` and gets no file of its own.
+
+An absent rules directory holds no rules. A rules directory or rule that cannot be read is a `read rules {dir}: …` or `read rule {path}: …` problem, a rule whose frontmatter does not parse a `RULE-FRONTMATTER {path}: {error}` problem, and a rule whose body holds a § Global rules fence line a `RULE-FENCE {path}: …` problem; each fails the run, which then writes nothing, and never reads as no rules.
+
+`codex check` names an `AGENTS.md` whose rules changed since the last build as `STALE {path}`. `opencode build`, `check` and `doctor` compare each engine-sync-owned `AGENTS.md` with its compiled bytes: one that differs is `STALE {path}` with the remedy `OpenCode reads it; run engine-sync codex build`, a warning in a build and a problem in check and doctor; a hand-written or absent `AGENTS.md` gets no row, and one that does not compile is the warning `AGENTS.md unchecked: it does not compile: …`, every other `AGENTS.md` still compared.
+
+Codex reads the `AGENTS.md` chain, repository root down to the working directory, up to `project_doc_max_bytes` and drops the rest. Each compiled `AGENTS.md` whose chain, it and every project `AGENTS.md` above it, passes the `project_doc_max_bytes` Codex applies — the project's `.codex/config.toml`, which wins, else the strictest of the Codex homes' `config.toml` (§ Machine targets), a home without the key at the default 32768; `0` turns the check off, as it turns Codex's project docs off is `AGENTS-BUDGET {path}: its Codex chain is {total} > {limit} bytes ({file} {bytes} + …); Codex reads none past the limit` with the remedy ``shorten CLAUDE.md or an always-on project rule, give a rule `paths:`, or raise project_doc_max_bytes in .codex/config.toml``: a warning in `codex build`, which writes the file whole, and a failure in `codex check`, never a cut. A `config.toml` that cannot be read or parsed is the problem `AGENTS-BUDGET read project_doc_max_bytes from {path}: …`, a limit below 0 `AGENTS-BUDGET project_doc_max_bytes in {path} is {n}: it must be 0 or more`, and Codex homes that cannot be resolved `AGENTS-BUDGET resolve the Codex homes: …`.
 
 ## Machine targets
 

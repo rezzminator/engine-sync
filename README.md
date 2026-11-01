@@ -8,7 +8,7 @@
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://docs.claude.com/en/docs/claude-code/plugins)
 [![Built with Professor](https://img.shields.io/badge/built%20with-Professor-8A2BE2)](https://github.com/rezzminator/professor)
 
-Claude Code is the source: `CLAUDE.md`, `.claude/agents`, `.claude/commands`, `.claude/skills`, `.mcp.json`. engine-sync compiles them into what Codex reads (`AGENTS.md`, `.codex/`, role TOMLs in each Codex home) and what OpenCode reads (`.opencode/`), and is the single writer of every one of those files. Codex and OpenCode install nothing.
+Claude Code is the source: `CLAUDE.md`, `.claude/agents`, `.claude/commands`, `.claude/skills`, `.claude/rules`, `.mcp.json`. engine-sync compiles them into what Codex reads (`AGENTS.md`, `.codex/`, role TOMLs in each Codex home) and what OpenCode reads (`.opencode/`), and is the single writer of every one of those files. Codex and OpenCode install nothing.
 
 ## Commands
 
