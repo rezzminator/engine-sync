@@ -25,8 +25,8 @@ func read(t *testing.T, path string) string {
 
 func TestDirResolvesOverrideThenHomeThenOff(t *testing.T) {
 	for _, c := range []struct{ override, home, want string }{
-		{"/logs/", "/home/u", "/logs/p"},
-		{"", "/home/u/", "/home/u/.local/state/p/logs"},
+		{"/logs/", "/home/x/", "/logs/p"},
+		{"", "/home/x/", "/home/x/.local/state/p/logs"},
 		{"", "", ""},
 	} {
 		if got := pluginlog.Dir(c.override, c.home, "p"); got != c.want {
