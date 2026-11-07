@@ -104,7 +104,7 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
 	}
 	agentsDir := source.AgentsDirectory(home, sourceRepo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, sourceRepo, *cfg), machineOptions(cfg, claudeConfigDirs))
 	if err != nil {
 		return nil, fmt.Errorf("load machine agents from %s: %w", agentsDir, err)
 	}
@@ -135,7 +135,7 @@ func AgentStates(home, sourceRepo string, cfg *config.Config, claudeConfigDirs, 
 		}
 	}
 	for _, agent := range compiled {
-		for _, dir := range claudeConfigDirs {
+		for _, dir := range agent.claudeDirs(claudeConfigDirs) {
 			path := filepath.Join(dir, "agents", filepath.Base(agent.mdSource))
 			if same, err := paths.SameEntry(path, agent.mdSource); err != nil {
 				states = append(states, unreadableState(EngineClaude, agent.name, path, err))
@@ -393,4 +393,19 @@ func (r *run) retireOwnedEntries(dir, reason string) error {
 		}
 	}
 	return nil
+}
+
+// machineOptions is what every machine-agent load of cfg passes
+// source.LoadMachine.
+func machineOptions(cfg *config.Config, claudeConfigDirs []string) source.MachineOptions {
+	return source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs, Plugins: cfg.Machine.Plugins}
+}
+
+// claudeDirs is the Claude config dirs of dirs owed a registry link to the
+// agent: none for a plugin agent, which Claude loads natively.
+func (agent compiledAgent) claudeDirs(dirs []string) []string {
+	if agent.plugin {
+		return nil
+	}
+	return dirs
 }

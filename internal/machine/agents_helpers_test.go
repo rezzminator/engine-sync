@@ -74,5 +74,5 @@ func renderFixtureMachineAgent(path, raw, dir string, configs ...config.Config) 
 	if len(configs) == 0 {
 		configs = []config.Config{fixtureMachinePolicy()}
 	}
-	return codex.RenderMachineAgent(path, raw, dir, configs...)
+	return codex.RenderMachineAgent(source.Agent{Path: path, Raw: []byte(raw)}, dir, nil, configs...)
 }

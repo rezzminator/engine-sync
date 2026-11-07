@@ -22,7 +22,7 @@ func (r *run) globalCommands() error {
 	if r.options.Uninstall && len(homes) == 0 {
 		homes = []string{filepath.Join(r.options.Home, ".codex")}
 	}
-	commands := codex.GlobalCommandsOptions{Config: &r.policy, Home: r.options.Home, SourceHome: sourceHome, Uninstall: r.options.Uninstall, CodexHomes: homes, Mode: codex.ModeCheck}
+	commands := codex.GlobalCommandsOptions{Config: &r.policy, Home: r.options.Home, SourceHome: sourceHome, Uninstall: r.options.Uninstall, CodexHomes: homes, ClaudeConfigDirs: r.claudeConfigDirs(), Mode: codex.ModeCheck}
 	plan, err := codex.RunGlobalCommands(commands)
 	if err != nil {
 		return fmt.Errorf("plan Codex global commands: %w", err)
@@ -84,7 +84,7 @@ func (r *run) openCodeCommands() error {
 	if r.options.Plan {
 		mode = reconciler.Plan
 	}
-	result, ok := engine.Commands(r.options.Home, r.options.SourceHome, r.policy, r.codexHomes(), r.options.Uninstall, mode, t.Render, t.Roots, t.Validate)
+	result, ok := engine.Commands(r.options.Home, r.options.SourceHome, r.policy, r.codexHomes(), r.claudeConfigDirs(), r.options.Uninstall, mode, t.Render, t.Roots, t.Validate)
 	for _, a := range result.Actions {
 		r.add(VerbChange, a.Kind+" "+a.Path, "")
 	}

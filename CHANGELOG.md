@@ -2,6 +2,14 @@
 
 Every release of engine-sync. Versions follow [semantic versioning](https://semver.org); each release is the `main` commit tagged `v<version>`, with a GitHub release carrying the section below and the four platform binaries.
 
+## [Unreleased]
+
+### Added
+
+- `machine.plugins` (a list of Claude plugin names, `^[a-z0-9][a-z0-9-]*$`, no duplicates; any other entry is refused) makes `global` compile each named plugin's `agents/*.md`, `commands/**/*.md` and `skills/*/SKILL.md` into Codex and OpenCode twins named after the Claude id with `:` as `-` (`flights:lander` becomes `flights-lander`), from the root each Claude config dir's `enabledPlugins`, directory marketplace listing or `installed_plugins.json` `installPath` resolves. Markers credit `plugin:{plugin}/{path}`; Claude gets no link, since it loads plugin agents itself. `doctor --machine` counts plugin twins in the Codex and OpenCode rows only.
+- In every compiled body and frontmatter value, a compiled plugin agent's id `{plugin}:{name}` becomes its twin name, word-bounded (`p:a` never touches `p:a-b` or `p:a.md`), and `${CLAUDE_PLUGIN_ROOT}` becomes the plugin's resolved root. A machine agent, command or skill that names a plugin agent changes its compiled bytes accordingly.
+- A plugin no Claude config dir enables, or that no record resolves, is a warning naming the files read; a record that exists but cannot be read or parsed, a root that is not a directory, or a plugin `agents` directory that cannot be listed, is a problem (a warning in a config dir read after the one that resolved the plugin) that keeps every installed `{plugin}-…` twin as it is, keeps every `{plugin}:…` reference compiling to its twin name, and is a `BROKEN` `doctor --machine` row naming `plugin:{plugin}`. A plugin agent whose twin name is a machine agent's is a problem naming both; the machine agent keeps the name, even when its own source did not build. A plugin agent that does not read or parse keeps its installed twins, and its id still compiles to its twin name.
+
 ## [0.8.0] - 2026-11-01
 
 ### Added

@@ -13,7 +13,7 @@ import (
 func TestCommandsUsesMachineSnapshot(t *testing.T) {
 	home := testjail.Scratch(t)
 	called := false
-	_, ok := Commands(home, "", config.Default(), []string{}, false, reconcile.Plan, func(p source.Project, c config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
+	_, ok := Commands(home, "", config.Default(), []string{}, nil, false, reconcile.Plan, func(p source.Project, c config.Config) ([]artifact.Artifact, []diag.Diagnostic) {
 		called = true
 		if p.Scope != source.MachineScope || !p.MachineCommands || p.SourceHome != home {
 			t.Fatalf("wrong source: %#v", p)

@@ -42,6 +42,9 @@ func machineRoots(p source.Project, cfg config.Config) []artifact.Root {
 	// Each Claude registry link is its own root, so its claim test keeps these
 	// sources with no Codex home, without walking the rest of the registry.
 	for _, a := range p.Agents {
+		if a.Plugin != nil {
+			continue
+		}
 		for _, dir := range p.ClaudeConfigDirs {
 			path := filepath.Join(dir, "agents", filepath.Base(a.Path))
 			roots = append(roots, artifact.Root{Path: path, SourceRoots: sources, ValidateOnly: true})
@@ -90,6 +93,16 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 				}
 			}
 		}
+		for _, failure := range p.PluginFailures {
+			kept := ""
+			for _, home := range p.CodexHomes {
+				for _, kind := range []string{"skills", "prompts"} {
+					outputs = append(outputs, failure.Kept(filepath.Join(home, kind)))
+					kept = outputs[len(outputs)-1].Path
+				}
+			}
+			diagnostics = append(diagnostics, diag.PluginFailed(failure, kept))
+		}
 		for _, s := range result.Dangling {
 			found := false
 			for i := range diagnostics {
@@ -112,6 +125,15 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 	}
 	for _, s := range p.Warnings {
 		diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Warning, Message: s})
+	}
+	for _, failure := range p.PluginFailures {
+		// A plugin whose records could not be read keeps every twin it owns.
+		kept := ""
+		for _, home := range p.CodexHomes {
+			outputs = append(outputs, failure.Kept(filepath.Join(home, "agents")))
+			kept = outputs[len(outputs)-1].Path
+		}
+		diagnostics = append(diagnostics, diag.PluginFailed(failure, kept))
 	}
 	for _, name := range p.Failed {
 		// An agent skipped for an error keeps its installed role and generated agent.
@@ -143,7 +165,7 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 			continue
 		}
 		if !a.Front.Engines.CodexOff() {
-			name, text, warning, err := renderGlobalAgentTOML(a.Path, string(a.Raw), p.AgentSourceDir, cfg)
+			name, text, warning, err := renderGlobalAgentTOML(a, p.AgentSourceDir, p.AgentRoster, cfg)
 			if err != nil {
 				diagnostics = append(diagnostics, diag.Diagnostic{Severity: diag.Error, Path: a.Path, Message: err.Error()})
 				continue
@@ -157,6 +179,9 @@ func renderCodexMachine(p source.Project, cfg config.Config) ([]artifact.Artifac
 		}
 		if a.Generated {
 			outputs = append(outputs, artifact.Artifact{Path: a.Path, Content: a.Raw, Source: filepath.Join(p.AgentSourceDir, a.Name+".md"), Syntax: artifact.YAMLFront})
+		}
+		if a.Plugin != nil {
+			continue // Claude loads a plugin agent natively: no registry link
 		}
 		links, e := claudeRegistryLinks(p, a.Path)
 		if e != nil {

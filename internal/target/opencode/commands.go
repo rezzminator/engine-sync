@@ -77,46 +77,75 @@ func compileOpenCodeCommands(
 			Kept: &artifact.SourceLink{Path: path, Target: target},
 		})
 	}
-	for _, entry := range discoverOpenCodeMarkdown(sourceRoot, problem, keepDangling, model) {
-		file := entry.Path
-		if entry.SkillDir {
-			file = filepath.Join(entry.Path, "SKILL.md")
-		}
-		_, err := model.Read(file)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				dangling(file, err)
-			} else {
-				problem("read %s: %v", file, err)
-			}
-			continue
-		}
-		flat := openCodeFlatName(entry.Rel)
-		if err := paths.ValidateName(flat); err != nil {
-			problem("%s: %v", entry.Path, err)
-			continue
-		}
-		output := filepath.Join(outputRoot, flat+".md")
-		front, body, parseErr := model.Frontmatter(file)
-		fields := front.Fields
-		if parseErr != nil {
-			problem("%s", claudesource.DescribeParseError(file, parseErr))
-			// A source that does not parse keeps its installed twin until it builds again.
-			add(artifact.Artifact{Path: output, Kept: &artifact.SourceLink{Path: file}})
-			continue
-		}
-		policy := config.Default()
-		if len(policies) > 0 {
-			policy = policies[0]
-		}
-		chain := append(rewrite.Builtins(), rewrite.Configured(policy.Rewrites)...)
-		ctx := rewrite.Context{Engine: "opencode", Kind: "command", Source: file, Roster: roster}
-		relSource := filepath.ToSlash(filepath.Join(sourceLabel, entry.Rel))
-		content := artifact.WithManagedBy("---\n"+artifact.Marker(artifact.YAMLFront,
-			relSource,
-		)+"\ndescription: "+quoteOpenCodeYAML(
-			chain.Apply(strings.TrimSpace(fields["description"]), ctx),
-		)+"\n---\n"+chain.Apply(body, ctx), managedBy)
-		add(artifact.Artifact{Path: output, Content: []byte(content), Source: entry.Path, Syntax: artifact.YAMLFront})
+	policy := config.Default()
+	if len(policies) > 0 {
+		policy = policies[0]
 	}
+	for _, entry := range discoverOpenCodeMarkdown(sourceRoot, problem, keepDangling, model) {
+		compileOpenCodeCommand(entry, openCodeCommandSource{Label: sourceLabel, Roster: roster, Agents: model.AgentRoster}, outputRoot, add, problem, dangling, model, managedBy, policy)
+	}
+}
+
+// openCodeCommandSource is what differs between a machine command and a
+// plugin one: the marker label, the command roster, and for a plugin the
+// agent roster and its root.
+type openCodeCommandSource struct {
+	Label          string
+	Roster, Agents map[string]string
+	// PluginRoot and Marker are a plugin source's root and marker credit.
+	PluginRoot, Marker string
+}
+
+// compileOpenCodeCommand renders one command, or a skill's SKILL.md, into
+// {outputRoot}/{flat name}.md.
+func compileOpenCodeCommand(
+	entry claudesource.Entry,
+	source openCodeCommandSource,
+	outputRoot string,
+	add func(artifact.Artifact),
+	problem func(string, ...any),
+	dangling func(string, error),
+	model *claudesource.Project,
+	managedBy string,
+	policy config.Config,
+) {
+	file := entry.Path
+	if entry.SkillDir {
+		file = filepath.Join(entry.Path, "SKILL.md")
+	}
+	_, err := model.Read(file)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			dangling(file, err)
+		} else {
+			problem("read %s: %v", file, err)
+		}
+		return
+	}
+	flat := openCodeFlatName(entry.Rel)
+	if err := paths.ValidateName(flat); err != nil {
+		problem("%s: %v", entry.Path, err)
+		return
+	}
+	output := filepath.Join(outputRoot, flat+".md")
+	front, body, parseErr := model.Frontmatter(file)
+	fields := front.Fields
+	if parseErr != nil {
+		problem("%s", claudesource.DescribeParseError(file, parseErr))
+		// A source that does not parse keeps its installed twin until it builds again.
+		add(artifact.Artifact{Path: output, Kept: &artifact.SourceLink{Path: file}})
+		return
+	}
+	chain := append(rewrite.Builtins(), rewrite.Configured(policy.Rewrites)...)
+	ctx := rewrite.Context{Engine: "opencode", Kind: "command", Source: file, Roster: source.Roster, Agents: source.Agents, PluginRoot: source.PluginRoot}
+	relSource := filepath.ToSlash(filepath.Join(source.Label, entry.Rel))
+	if source.Marker != "" {
+		relSource = source.Marker
+	}
+	content := artifact.WithManagedBy("---\n"+artifact.Marker(artifact.YAMLFront,
+		relSource,
+	)+"\ndescription: "+quoteOpenCodeYAML(
+		chain.Apply(strings.TrimSpace(fields["description"]), ctx),
+	)+"\n---\n"+chain.Apply(body, ctx), managedBy)
+	add(artifact.Artifact{Path: output, Content: []byte(content), Source: entry.Path, Syntax: artifact.YAMLFront})
 }

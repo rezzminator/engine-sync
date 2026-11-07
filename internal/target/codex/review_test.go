@@ -184,7 +184,7 @@ func TestReviewNeutralAndConfiguredPolicy(t *testing.T) {
 	cfg := config.Default()
 	cfg.Codex.Review = config.Review{ModelAlias: "review-tier", DefaultEffort: "low", Prompt: "Review own changed files.", SlotPrompt: "Review the selected set."}
 	cfg.Codex.ModelMap["review-tier"] = "sample-model"
-	_, text, _, err := renderGlobalAgentTOML("reader.md", "---\nname: reader\ndescription: Reads.\n---\n/code-review\n", "agents", cfg)
+	_, text, _, err := renderGlobalAgentTOML(claudesource.Agent{Path: "reader.md", Raw: []byte("---\nname: reader\ndescription: Reads.\n---\n/code-review\n")}, "agents", nil, cfg)
 	if err != nil || !strings.Contains(text, "sample-model") || !strings.Contains(text, "Review own changed files.") {
 		t.Errorf("policy not restored: %s %v", text, err)
 	}

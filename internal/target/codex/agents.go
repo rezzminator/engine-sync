@@ -207,11 +207,14 @@ func codexReadOnly(tools string) bool {
 }
 
 // renderGlobalAgentTOML compiles one agent's Markdown into the role name and
-// the exact TOML bytes its registry file holds. raw is passed in rather than
-// read here because a generated agent's Markdown exists only in memory until the build
-// phase writes it; mdPath labels errors and, against agentsDir, names the
-// source the generated marker credits.
-func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Config) (string, string, string, error) {
+// the exact TOML bytes its registry file holds. The agent's Raw is used rather
+// than a read here because a generated agent's Markdown exists only in memory
+// until the build phase writes it; its Path labels errors and, against
+// agentsDir, names the source the generated marker credits. A plugin agent
+// takes its twin name, credits its plugin, and its text takes the agent
+// roster and its plugin root.
+func renderGlobalAgentTOML(agent claudesource.Agent, agentsDir string, agents map[string]string, policies ...config.Config) (string, string, string, error) {
+	mdPath, raw := agent.Path, string(agent.Raw)
 	front, body, err := claudesource.Parse(raw)
 	if err != nil {
 		return "", "", "", fmt.Errorf("%s", claudesource.DescribeParseError(mdPath, err))
@@ -220,6 +223,9 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 		return "", "", "", fmt.Errorf("%s: no frontmatter", mdPath)
 	}
 	name := strings.TrimSpace(front.Fields["name"])
+	if agent.Plugin != nil {
+		name = agent.Name // its twin name; a plugin agent may omit name:
+	}
 	description := strings.TrimSpace(front.Fields["description"])
 	if name == "" || description == "" {
 		return "", "", "", fmt.Errorf("%s: frontmatter needs both name: and description", mdPath)
@@ -233,11 +239,15 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 	if len(policies) > 0 {
 		cfg = policies[0]
 	}
-	generated := filepath.Dir(mdPath) != filepath.Clean(agentsDir)
+	generated := agent.Plugin == nil && filepath.Dir(mdPath) != filepath.Clean(agentsDir)
 	if problems, _ := claudesource.ValidateAgent(mdPath, front, cfg.Agents.PassthroughKeys, generated); len(problems) > 0 {
 		return "", "", "", fmt.Errorf("%s", strings.Join(problems, "; "))
 	}
-	ctx := rewrite.Context{Engine: "codex", Kind: "agent", Source: mdPath}
+	marker := globalAgentMarkerSource(mdPath, agentsDir, cfg.Machine.AgentMarkerDir)
+	ctx := rewrite.Context{Engine: "codex", Kind: "agent", Source: mdPath, Agents: agents}
+	if agent.Plugin != nil {
+		marker, ctx.PluginRoot = claudesource.PluginMarkerSource(agent.Plugin, mdPath), agent.Plugin.Root
+	}
 	rules := rewrite.Builtins(rewrite.Func(func(text string, _ rewrite.Context) string {
 		return rewriteCodeReview(text, cfg.Codex.ModelMap, cfg.Codex.Review)
 	}))
@@ -247,7 +257,7 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string, policies ...config.Con
 	description = rewrite.Configured(append(cfg.Machine.Rewrites, cfg.Rewrites...)).Apply(description, ctx)
 	body = rules.Apply(body, ctx)
 	content, warning, err := renderRole(roleSpec{
-		Header:       artifact.WithManagedBy(globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir, cfg.Machine.AgentMarkerDir)), cfg.Machine.ManagedBy),
+		Header:       artifact.WithManagedBy(globalRoleHeader(marker), cfg.Machine.ManagedBy),
 		Name:         name,
 		Description:  description,
 		Instructions: body,
@@ -282,8 +292,10 @@ const claudeInheritModel = "inherit"
 
 type codexRole struct{ Model, Effort, Sandbox string }
 
-func RenderMachineAgent(path, raw, dir string, cfg ...config.Config) (string, string, error) {
-	name, content, _, err := renderGlobalAgentTOML(path, raw, dir, cfg...)
+// RenderMachineAgent is one machine agent's role name and TOML; agents is the
+// project's plugin agent roster.
+func RenderMachineAgent(agent claudesource.Agent, dir string, agents map[string]string, cfg ...config.Config) (string, string, error) {
+	name, content, _, err := renderGlobalAgentTOML(agent, dir, agents, cfg...)
 	return name, content, err
 }
 func ValidateRole(text string) error { return validateTOML(text) }

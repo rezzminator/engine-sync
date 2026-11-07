@@ -147,8 +147,53 @@ func compileInstalledGlobalCommands(
 		sourceRoot = result.Source.SourceCommandDir
 	}
 	roster := discoverCommandRosterIn(sourceRoot, nil, result)
-	transform := TransformOptions{Review: cfg.Review, ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, RetiredFiles: policy.Machine.RetiredFiles, Rewrites: policy.Rewrites, ManagedBy: policy.Machine.ManagedBy}
+	var plugins []claudesource.Plugin
+	var agents map[string]string
+	if result.Source != nil {
+		plugins, agents = result.Source.Plugins, result.Source.AgentRoster
+	}
+	if result.Source != nil {
+		// A plugin that could not be read keeps every "/{plugin}:…" on its
+		// flattened twin name (rewrite.CommandsIn's prefix key).
+		for _, failure := range result.Source.PluginFailures {
+			roster[failure.Plugin+":"] = "$" + claudesource.PluginTwinName(failure.Plugin, "")
+		}
+	}
+	for _, plugin := range plugins {
+		for _, entry := range plugin.Commands {
+			roster[claudesource.CommandName(entry.Rel)] = "$" + flatName(filepath.ToSlash(entry.Rel))
+		}
+		for _, skill := range plugin.Skills {
+			roster[claudesource.CommandName(skill.Rel)] = "$" + flatName(filepath.ToSlash(skill.Rel))
+		}
+	}
+	transform := TransformOptions{Review: cfg.Review, ModelMap: cfg.ModelMap, Commands: roster, Source: result.Source, RetiredFiles: policy.Machine.RetiredFiles, Rewrites: policy.Rewrites, ManagedBy: policy.Machine.ManagedBy, Agents: agents}
 	compileGlobalCommands(outputHome, sourceHome, outputHome, cfg, transform, add, problem, warn, result)
+	for _, plugin := range plugins {
+		compilePluginCommands(outputHome, plugin, transform, add, problem, warn, result)
+	}
+}
+
+// compilePluginCommands compiles one Claude plugin's commands as machine
+// commands (a prompt, and a skill unless disable-model-invocation) and each
+// of its skills as a skill whose SKILL.md is compiled, every other file of
+// the skill directory linked beside it. Names flatten "{plugin}/{rel}" as
+// machine commands do; markers credit "plugin:{plugin}/{path in its root}".
+func compilePluginCommands(outputHome string, plugin claudesource.Plugin, options TransformOptions, add func(artifact.Artifact), problem, warn func(string), result *Result) {
+	options.PluginRoot = plugin.Root
+	label := "plugin:" + plugin.Name
+	for _, entry := range plugin.Commands {
+		compileCommandFile(outputHome, plugin.Root, entry, label, "", options, add, problem, warn, result, true)
+	}
+	skills := filepath.Join(outputHome, ".codex", "skills")
+	for _, skill := range plugin.Skills {
+		entry := claudesource.Entry{Path: skill.Path, Rel: skill.Rel}
+		compileCommandFile(outputHome, plugin.Root, entry, label, skills, options, add, problem, warn, result, false)
+		flat := flatName(filepath.ToSlash(skill.Rel))
+		for _, file := range skill.Files {
+			add(artifact.Artifact{Path: filepath.Join(skills, flat, file), Target: filepath.Join(filepath.Dir(skill.Path), file)})
+		}
+	}
 }
 
 func compileCommandFile(
@@ -208,6 +253,7 @@ func compileCommandFile(
 	// A /code-review written there IS a command reference, and a Codex seat
 	// reading the Claude spelling reviews the whole branch (review.go).
 	header := rewriteCodeReviewFrontmatter(swapCommands(strings.Join(fm, "\n"), options.Commands), options.ModelMap, options.Review)
+	header = rewrite.PluginRootIn(rewrite.AgentsIn(header, options.Agents), options.PluginRoot)
 	header = rewrite.Configured(options.Rewrites).Apply(header, rewrite.Context{Engine: "codex", Kind: "command", Source: entry.Path})
 	generated := "---\n" + artifact.Marker(artifact.YAMLFront,
 		relSource,

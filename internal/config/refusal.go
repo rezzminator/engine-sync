@@ -52,3 +52,7 @@ func IsRefusal(err error) bool {
 }
 
 var managedByValue = regexp.MustCompile(artifact.ManagedByPattern)
+
+// pluginName is a machine.plugins entry: a Claude plugin's kebab-case name,
+// the part of an enabledPlugins key before its "@".
+var pluginName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)

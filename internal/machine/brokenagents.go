@@ -38,7 +38,7 @@ func skipBrokenAgents(model source.Project, cfg *config.Config) source.Project {
 // agentProblems renders one agent alone for both engines and returns every
 // error its Codex role or OpenCode agent reports.
 func agentProblems(model source.Project, agent source.Agent, cfg *config.Config) []string {
-	_, content, err := codex.RenderMachineAgent(agent.Path, string(agent.Raw), model.AgentSourceDir, *cfg)
+	_, content, err := codex.RenderMachineAgent(agent, model.AgentSourceDir, model.AgentRoster, *cfg)
 	if err != nil {
 		return []string{err.Error()}
 	}
@@ -46,7 +46,7 @@ func agentProblems(model source.Project, agent source.Agent, cfg *config.Config)
 		return []string{fmt.Sprintf("%s: does not parse: %v", agent.Path, err)}
 	}
 	single := model
-	single.Agents, single.Failed, single.Problems, single.Warnings, single.MachineCommands = []source.Agent{agent}, nil, nil, nil, false
+	single.Agents, single.Failed, single.Problems, single.Warnings, single.MachineCommands, single.PluginFailures = []source.Agent{agent}, nil, nil, nil, false, nil
 	target := opencode.Target{}
 	artifacts, diagnostics := target.Render(single, *cfg)
 	var problems []string

@@ -21,10 +21,14 @@ type TransformOptions struct {
 	// ManagedBy names the installer the machine prompts credit; only the
 	// machine-global planner sets it.
 	ManagedBy string
+	// Agents is the plugin agent roster; PluginRoot the root of the plugin
+	// the source ships in, empty for any other source.
+	Agents     map[string]string
+	PluginRoot string
 }
 
 func transformMarkdown(text string, options TransformOptions) string {
-	ctx := rewrite.Context{Engine: "codex", Kind: options.Kind, Source: options.Path, Roster: options.Commands, ModelMap: options.ModelMap, Naming: codexCommandNaming}
+	ctx := rewrite.Context{Engine: "codex", Kind: options.Kind, Source: options.Path, Roster: options.Commands, ModelMap: options.ModelMap, Naming: codexCommandNaming, Agents: options.Agents, PluginRoot: options.PluginRoot}
 	rules := rewrite.Builtins(rewrite.Func(func(text string, ctx rewrite.Context) string {
 		return rewriteCodeReview(text, ctx.ModelMap, options.Review)
 	}))

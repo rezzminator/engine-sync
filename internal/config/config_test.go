@@ -46,6 +46,9 @@ func TestReviewLayeredPolicy(t *testing.T) {
 		{"missing model alias", `{"version":1,"codex":{"modelMap":{"opus":"model-a"}}}`, `{"version":1,"codex":{"rootAdapter":"Use {{index .Models \"opus\"}} or {{index .Models \"haiku\"}}."}}`, "Use model-a or haiku.", false, []string{`config {project}: codex.rootAdapter: model alias "haiku" is not in the engine's modelMap; it renders as "haiku"`}},
 		{"unknown key", `{"version":1,"codex":{"suffixMode":"none","mystery":true},"later":{}}`, `{"version":1,"opencode":{"mystery":1}}`, "", false, []string{"config {machine}: codex.mystery: unknown key, ignored", "config {machine}: later: unknown key, ignored", "config {project}: opencode.mystery: unknown key, ignored"}},
 		{"invalid entries", `{"version":1,"codex":{"neverRegister":["kept","a b"]},"machine":{"retiredAgents":["..","old"]},"agents":{"passthroughKeys":["x-key","a:b"]},"targets":{"capabilities":["gpt"," "]}}`, "", "", false, []string{`config {machine}: codex.neverRegister: invalid entry "a b", ignored`, `config {machine}: machine.retiredAgents: invalid entry "..", ignored`, `config {machine}: agents.passthroughKeys: invalid entry "a:b", ignored`, `config {machine}: targets.capabilities: invalid entry " ", ignored`}},
+		{"machine plugins", `{"version":1,"machine":{"plugins":["flights","tool-visibility"]}}`, "", "", false, nil},
+		{"machine plugins invalid name", `{"version":1,"machine":{"plugins":["flights","Flights:x"]}}`, "", `machine.plugins: invalid plugin name "Flights:x" (want ^[a-z0-9][a-z0-9-]*$)`, true, nil},
+		{"machine plugins duplicate", `{"version":1,"machine":{"plugins":["flights","flights"]}}`, "", `machine.plugins: duplicate plugin "flights"`, true, nil},
 		{"absent version", `{"codex":{"suffixMode":"none"}}`, `{"opencode":{}}`, "", false, nil},
 		{"duplicate", `{"version":1,"version":1}`, "", "duplicate", true, nil},
 		{"nested duplicate", `{"version":1,"codex":{"suffixMode":"none","suffixMode":"project"}}`, "", "duplicate", true, nil},
@@ -104,6 +107,10 @@ func TestReviewLayeredPolicy(t *testing.T) {
 			case "unknown key", "absent version":
 				if cfg.Version != 1 || cfg.Codex.SuffixMode != "none" {
 					t.Fatalf("the rest of the file was lost: version %d suffixMode %q", cfg.Version, cfg.Codex.SuffixMode)
+				}
+			case "machine plugins":
+				if !reflect.DeepEqual(cfg.Machine.Plugins, []string{"flights", "tool-visibility"}) {
+					t.Fatalf("machine.plugins = %q, want [flights tool-visibility]", cfg.Machine.Plugins)
 				}
 			case "invalid entries":
 				if !reflect.DeepEqual(cfg.Codex.NeverRegister, []string{"kept"}) || !reflect.DeepEqual(cfg.Machine.RetiredAgents, []string{"old"}) || !reflect.DeepEqual(cfg.Agents.PassthroughKeys, []string{"x-key"}) || !reflect.DeepEqual(cfg.Targets.Capabilities, []string{"gpt"}) {

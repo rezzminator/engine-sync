@@ -49,10 +49,12 @@ type Action = reconciler.Action
 type GlobalCommandsOptions struct {
 	Config     *config.Config
 	CodexHomes []string
-	Uninstall  bool
-	Home       string
-	SourceHome string
-	Mode       Mode
+	// ClaudeConfigDirs resolve machine.plugins; empty is the targets'.
+	ClaudeConfigDirs []string
+	Uninstall        bool
+	Home             string
+	SourceHome       string
+	Mode             Mode
 }
 
 // Run discovers the incumbent Claude source tree, transforms it into Codex
@@ -127,15 +129,21 @@ func RunGlobalCommands(options GlobalCommandsOptions) (Result, error) {
 	if options.Config != nil {
 		cfg = *options.Config
 	}
-	p := claudesource.LoadMachineCommands(home, sourceHome, options.Uninstall, cfg)
-	p.CodexHomes = options.CodexHomes
-	if p.CodexHomes == nil {
+	codexHomes, claudeConfigDirs := options.CodexHomes, options.ClaudeConfigDirs
+	if codexHomes == nil || (len(claudeConfigDirs) == 0 && len(cfg.Machine.Plugins) > 0) {
 		roster, err := config.ResolveTargets(paths.Getenv, home, cfg, config.Targets{})
 		if err != nil {
 			return Result{}, err
 		}
-		p.CodexHomes = *roster.CodexHomes
+		if codexHomes == nil {
+			codexHomes = *roster.CodexHomes
+		}
+		if len(claudeConfigDirs) == 0 {
+			claudeConfigDirs = roster.ClaudeConfigDirs
+		}
 	}
+	p := claudesource.LoadMachineCommands(home, sourceHome, options.Uninstall, claudeConfigDirs, cfg)
+	p.CodexHomes = codexHomes
 	t := Target{}
 	r, ok := engine.Execute(p, cfg, codexMode(options.Mode), t.Render, t.Roots, t.Validate)
 	return Result{OK: ok, Warnings: r.Warnings, Problems: r.Problems, Rebuildable: r.Rebuildable, Dangling: r.Dangling, Wrote: r.Wrote, Unchanged: r.Unchanged, Deleted: r.Deleted, Actions: r.Actions}, nil
