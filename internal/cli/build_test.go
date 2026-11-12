@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -355,5 +356,193 @@ func TestProjectPluginLogWarnings(t *testing.T) {
 				t.Fatalf("warning text missing: %s", raw)
 			}
 		})
+	}
+}
+
+// mirrorFiles is every file under root an engine's project mirror owns, by
+// its slash path relative to root.
+func mirrorFiles(t *testing.T, root, engine string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || !entry.Type().IsRegular() {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		owned := strings.HasPrefix(rel, ".opencode/")
+		if engine == "codex" {
+			owned = rel == "AGENTS.md" || strings.HasPrefix(rel, ".codex/")
+		}
+		if owned {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			files[rel] = string(raw)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// ENGINE_SYNC_DISABLE leaves a disabled engine's stale mirror exactly as it
+// is through every project command and the Stop hook, while the enabled
+// engine is still checked and rebuilt.
+func TestDisabledEnginesLeaveProjectMirrorsAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name, value       string
+		disabled, enabled []string
+	}{
+		{name: "codex alone", value: "codex", disabled: []string{"codex"}, enabled: []string{"opencode"}},
+		{name: "opencode alone", value: " opencode ", disabled: []string{"opencode"}, enabled: []string{"codex"}},
+		{name: "both, one repeated", value: "codex, opencode,codex,", disabled: []string{"codex", "opencode"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, home := testjail.Scratch(t), testjail.Scratch(t)
+			putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
+			putProjectFile(t, root, ".claude/commands/hello.md", "---\ndescription: Say hello.\n---\nHello.\n")
+			vars := map[string]string{"HOME": home, "CLAUDE_PROJECT_DIR": root}
+			e := env{get: func(key string) string { return vars[key] }}
+			run := func(stdin string, args ...string) (int, string, string) {
+				var out, errOut bytes.Buffer
+				e.stdin = strings.NewReader(stdin)
+				code := dispatch(args, &out, &errOut, e)
+				return code, out.String(), errOut.String()
+			}
+			if code, out, errOut := run("", "build", root); code != 0 {
+				t.Fatalf("fixture build rc=%d: %s%s", code, out, errOut)
+			}
+			putProjectFile(t, root, "CLAUDE.md", "# Sample, edited\n")
+			putProjectFile(t, root, ".claude/commands/bye.md", "---\ndescription: Say bye.\n---\nBye.\n")
+			before := map[string]map[string]string{"codex": mirrorFiles(t, root, "codex"), "opencode": mirrorFiles(t, root, "opencode")}
+			vars["ENGINE_SYNC_DISABLE"] = tc.value
+			skips := func(action string) string {
+				rows := ""
+				for _, name := range tc.disabled {
+					rows += strings.ToUpper(name) + " " + strings.ToUpper(action) + " SKIP disabled by ENGINE_SYNC_DISABLE\n"
+				}
+				return rows
+			}
+			untouched := func(step string) {
+				t.Helper()
+				for _, name := range tc.disabled {
+					if got := mirrorFiles(t, root, name); !reflect.DeepEqual(got, before[name]) {
+						t.Fatalf("after %s the disabled %s mirror changed:\n got %q\nwant %q", step, name, got, before[name])
+					}
+				}
+			}
+
+			wantCode := 1 // the enabled engine's mirror is stale and still checked
+			if len(tc.enabled) == 0 {
+				wantCode = 0
+			}
+			if code, out, errOut := run("", "check", root); code != wantCode || out != skips("check") {
+				t.Fatalf("stale check rc=%d stdout %q, want rc=%d stdout %q (stderr %s)", code, out, wantCode, skips("check"), errOut)
+			}
+
+			flag := setFlag(t, e, root)
+			if code, out, errOut := run("{}", "hook", "claude", "stop"); code != 0 || out != "" {
+				t.Fatalf("stop rc=%d stdout %q, want 0 and no answer (stderr %s)", code, out, errOut)
+			}
+			if _, err := os.Stat(flag); !os.IsNotExist(err) {
+				t.Fatalf("stop left the dirty flag %s: %v", flag, err)
+			}
+			untouched("stop")
+
+			pass := skips("check")
+			for _, name := range tc.enabled {
+				pass += strings.ToUpper(name) + " CHECK PASS\n"
+			}
+			if code, out, errOut := run("", "check", root); code != 0 || out != pass {
+				t.Fatalf("check after stop rc=%d stdout %q, want 0 and %q (stderr %s)", code, out, pass, errOut)
+			}
+			if code, out, errOut := run("", "build", root); code != 0 || !strings.HasPrefix(out, skips("build")) {
+				t.Fatalf("build rc=%d stdout %q, want 0 opening %q (stderr %s)", code, out, skips("build"), errOut)
+			}
+			if code, out, errOut := run("", "doctor", root); code != 0 || !strings.HasPrefix(out, skips("doctor")) {
+				t.Fatalf("doctor rc=%d stdout %q, want 0 opening %q (stderr %s)", code, out, skips("doctor"), errOut)
+			}
+			for _, name := range tc.disabled {
+				want := `{"ok":true,"problems":[],"rebuildable":[],"warnings":[],"wrote":0,"unchanged":0,"deleted":0,"error":"","skipped":["` + name + `"]}` + "\n"
+				if code, out, errOut := run("", name, "build", root, "--json"); code != 0 || out != want {
+					t.Fatalf("%s build --json rc=%d stdout %q, want 0 and %q (stderr %s)", name, code, out, want, errOut)
+				}
+				want = strings.ToUpper(name) + " CHECK SKIP disabled by ENGINE_SYNC_DISABLE\n"
+				if code, out, errOut := run("", name, "check", root); code != 0 || out != want {
+					t.Fatalf("%s check rc=%d stdout %q, want 0 and %q (stderr %s)", name, code, out, want, errOut)
+				}
+			}
+			code, out, errOut := run("", "plan", root, "--json")
+			var plan struct {
+				OK      bool     `json:"ok"`
+				Skipped []string `json:"skipped"`
+			}
+			if err := json.Unmarshal([]byte(out), &plan); err != nil || code != 0 || !plan.OK || !reflect.DeepEqual(plan.Skipped, tc.disabled) {
+				t.Fatalf("plan --json rc=%d %q (%v), want ok and skipped %q (stderr %s)", code, out, err, tc.disabled, errOut)
+			}
+			untouched("every project command")
+			for _, name := range tc.enabled {
+				if got := mirrorFiles(t, root, name); reflect.DeepEqual(got, before[name]) {
+					t.Fatalf("the enabled %s mirror was never rebuilt: %q", name, got)
+				}
+			}
+		})
+	}
+}
+
+// An unknown name in ENGINE_SYNC_DISABLE refuses every project command.
+func TestDisableNamingAnUnknownEngineIsRefused(t *testing.T) {
+	root, home := testjail.Scratch(t), testjail.Scratch(t)
+	putProjectFile(t, root, "CLAUDE.md", "# Sample\n")
+	vars := map[string]string{"HOME": home, "CLAUDE_PROJECT_DIR": root, "ENGINE_SYNC_DISABLE": "codex, claude"}
+	e := env{get: func(key string) string { return vars[key] }}
+	const refusal = `ENGINE_SYNC_DISABLE: unknown engine "claude"; valid: codex, opencode`
+	for _, tc := range []struct {
+		args         []string
+		out, lastErr string
+	}{
+		{args: []string{"build", root}, lastErr: "engine-sync build: " + refusal},
+		{args: []string{"opencode", "check", root}, lastErr: "engine-sync check: " + refusal},
+		{args: []string{"codex", "check", root, "--json"},
+			out: `{"ok":false,"problems":[],"rebuildable":[],"warnings":[],"wrote":0,"unchanged":0,"deleted":0,"error":"` + strings.ReplaceAll(refusal, `"`, `\"`) + `"}` + "\n"},
+	} {
+		var out, errOut bytes.Buffer
+		code := dispatch(tc.args, &out, &errOut, e)
+		lines := strings.Split(strings.TrimSuffix(errOut.String(), "\n"), "\n")
+		if code != 2 || out.String() != tc.out || (tc.lastErr != "" && lines[len(lines)-1] != tc.lastErr) {
+			t.Fatalf("%v rc=%d stdout %q stderr %q; want rc=2 stdout %q stderr ending %q", tc.args, code, out.String(), errOut.String(), tc.out, tc.lastErr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("a refused build wrote AGENTS.md: %v", err)
+	}
+}
+
+// Machine scope never reads ENGINE_SYNC_DISABLE, a bad value included.
+func TestMachineScopeIgnoresDisable(t *testing.T) {
+	home := testjail.Scratch(t)
+	putProjectFile(t, home, ".claude/agents/reader.md", "---\nname: reader\ndescription: Reads files.\n---\nRead the source.\n")
+	vars := map[string]string{"HOME": home}
+	e := env{get: func(key string) string { return vars[key] }}
+	for _, args := range [][]string{{"global", "--plan"}, {"doctor", "--machine"}} {
+		delete(vars, "ENGINE_SYNC_DISABLE")
+		var wantOut, wantErr bytes.Buffer
+		wantCode := dispatch(args, &wantOut, &wantErr, e)
+		if wantOut.Len() == 0 {
+			t.Fatalf("%v printed nothing to compare (rc=%d, stderr %s)", args, wantCode, &wantErr)
+		}
+		for _, value := range []string{"codex,opencode", "bogus"} {
+			vars["ENGINE_SYNC_DISABLE"] = value
+			var out, errOut bytes.Buffer
+			if code := dispatch(args, &out, &errOut, e); code != wantCode || out.String() != wantOut.String() || errOut.String() != wantErr.String() {
+				t.Fatalf("%v with ENGINE_SYNC_DISABLE=%q rc=%d\n%s%s\nwant rc=%d\n%s%s", args, value, code, &out, &errOut, wantCode, &wantOut, &wantErr)
+			}
+		}
 	}
 }

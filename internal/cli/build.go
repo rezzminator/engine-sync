@@ -26,11 +26,12 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		fmt.Fprintf(stderr, "engine-sync %s: incompatible --dry-run or --engine\n", action)
 		return 2
 	}
-	var targets []target.Target
-	for _, t := range target.Registry {
-		if selected.Engine == "" || selected.Engine == t.Name() {
-			targets = append(targets, t)
-		}
+	targets, skipped, disabled, err := target.Select(selected.Engine, e.get)
+	if err != nil {
+		return cliargs.ReportFailure("engine-sync "+action, asJSON, &config.Refusal{Msg: err.Error()}, stdout, stderr)
+	}
+	if code, done := diag.Skips(stdout, stderr, skipped, len(targets) == 0, action, asJSON, action == "plan" || selected.DryRun); done {
+		return code
 	}
 	if len(targets) == 0 {
 		runlog.Record(e.get, stderr, pluginlog.Row{Level: "info", Event: "usage-refused", Msg: fmt.Sprintf("unknown engine %q", selected.Engine), Where: "internal/cli/build.go#runProjectTargets"})
@@ -41,6 +42,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 	if err == nil {
 		var value config.Config
 		value, err = cfg.WithCodexOverrides(o.CLIOverrides)
+		value.Disabled = disabled // OpenCode's AGENTS.md check reads Codex's switch
 		cfg = &value
 	}
 	if err == nil {
@@ -58,7 +60,7 @@ func runProjectTargets(action string, args []string, stdout, stderr io.Writer, e
 		mode = reconcile.Plan
 	}
 	roots := []string{o.Root}
-	combined := diag.Report{OK: true}
+	combined := diag.Report{OK: true, Skipped: skipped}
 
 	// The global-commands step is optional: its failure (a machine policy or
 	// targets that do not resolve, a global root the writer guard refuses) is a

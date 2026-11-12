@@ -50,6 +50,8 @@ Every command exits `0` on pass, `1` on a finding or failure, `2` on usage error
 
 Repeatable Codex flags are `--model`, `--exclude-dir`, `--exclude-project`, `--never-register`. Flags may precede or follow the positional root. Both engines run even if the first fails; `doctor` runs Codex check then OpenCode doctor.
 
+`ENGINE_SYNC_DISABLE` (§ Environment) switches engines off for a project: every project command above, and so every `stop` and `start` stage, leaves a disabled engine's mirror files (`AGENTS.md`, `.codex/**` for Codex; `.opencode/**` for OpenCode) exactly as they are — no write, no check, no global command write for it, no `STALE` row, OpenCode's `AGENTS.md` check included when Codex is disabled — and prints `{ENGINE} {ACTION} SKIP disabled by ENGINE_SYNC_DISABLE` (`CODEX BUILD SKIP disabled by ENGINE_SYNC_DISABLE`) in that engine's place; with `--json` the object adds `"skipped":["{engine}",…]`, and a run whose every named engine is disabled reads no policy or source and prints `{"ok":true,…,"skipped":[…]}`, exit 0. An unknown name is a configuration refusal, exit 2, naming the variable, the name and the valid names. Machine scope (`global`, `doctor --machine`, `codex agents`, `start`'s machine refresh) never reads it.
+
 Without an explicit root, resolve the nearest ancestor holding `.claude/engine-sync.json`, the configured workbench marker, `.git`, or a regular `CLAUDE.md`. A workbench suppresses global command writes and is excluded from its parent's project discovery. `ENGINE_SYNC_WORKBENCH_MARKER` overrides the resolved marker.
 
 Project JSON result:
@@ -310,6 +312,7 @@ All three hooks treat root resolution to HOME or an ancestor (`paths.ErrHomeRoot
 | `ENGINE_SYNC_HOME` | Absolute cache home; else absolute `XDG_DATA_HOME/engine-sync`, else `$HOME/.local/share/engine-sync` |
 | `ENGINE_SYNC_STATE` | Absolute state root; else absolute `XDG_STATE_HOME/engine-sync`, else `$HOME/.local/state/engine-sync` |
 | `ENGINE_SYNC_WORKBENCH_MARKER` | Relative workbench marker overriding either file; empty means no override |
+| `ENGINE_SYNC_DISABLE` | Comma-separated engines (`codex`, `opencode`) whose project mirrors every project command and hook leaves alone (§ Project commands); names trimmed, duplicates allowed, empty or unset disables nothing, an unknown name exits 2; machine scope ignores it |
 | `CLAUDE_CONFIG_DIR` | Global Claude roles source and default destination config directory; else `$HOME/.claude` |
 | `CODEX_HOME` | Default machine Codex target when absolute |
 | `CLAUDE_PROJECT_DIR` | Hook project root |

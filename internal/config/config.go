@@ -33,10 +33,13 @@ type Config struct {
 	// Capabilities is the host's capability set for this run: every
 	// --capability flag plus the global file's targets.capabilities. It is never read
 	// from a config file and carries no meaning beyond set membership.
-	Capabilities []string          `json:"-"`
-	Source       string            `json:"-"`
-	Legacy       bool              `json:"-"`
-	Sources      map[string]string `json:"-"`
+	Capabilities []string `json:"-"`
+	// Disabled names the engines $ENGINE_SYNC_DISABLE switches off for this
+	// run's project mirrors; never read from a config file.
+	Disabled []string          `json:"-"`
+	Source   string            `json:"-"`
+	Legacy   bool              `json:"-"`
+	Sources  map[string]string `json:"-"`
 	// Warnings are what the loader ignored or changed, each naming its file:
 	// a deprecated spelling, an unknown key, an invalid list entry.
 	Warnings    []string  `json:"-"`
