@@ -16,6 +16,9 @@ import (
 type MachineOptions struct {
 	MarkerDir        string
 	ClaudeConfigDirs []string
+	// Plugins is machine.plugins: the Claude plugins whose agents join the
+	// set, resolved against every ClaudeConfigDirs entry.
+	Plugins []string
 }
 
 // declarationLine finds a top-level from: key in a source whose header does
@@ -118,11 +121,15 @@ func LoadMachine(home, agentsDir, generatedDir string, options ...MachineOptions
 		p.documents[a.Path] = document{Raw: a.Content, Front: front, Body: body}
 		p.Agents = append(p.Agents, Agent{Name: a.Name, Path: a.Path, Raw: a.Content, Front: front, Body: body, Generated: true})
 	}
+	p.loadPlugins(opts.Plugins, opts.ClaudeConfigDirs, true)
 	p.frozen = true
 	return p, nil
 }
 
-func LoadMachineCommands(home, sourceHome string, uninstall bool, policies ...config.Config) Project {
+// LoadMachineCommands snapshots the machine commands and, from each policy's
+// machine.plugins resolved against configDirs (empty: the policy's Claude
+// config dir), every plugin command and skill.
+func LoadMachineCommands(home, sourceHome string, uninstall bool, configDirs []string, policies ...config.Config) Project {
 	p := Project{Root: sourceHome, Home: home, SourceHome: sourceHome, Scope: MachineScope, MachineCommands: true, documents: map[string]document{}, directories: map[string]directory{}}
 	p.SourceCommandDir = filepath.Join(sourceHome, ".claude", "commands")
 	if len(policies) > 0 && sourceHome == home && policies[0].ClaudeConfigDir != "" {
@@ -139,6 +146,12 @@ func LoadMachineCommands(home, sourceHome string, uninstall bool, policies ...co
 				path = filepath.Join(path, "SKILL.md")
 			}
 			_, _ = p.Read(path)
+		}
+		if len(policies) > 0 {
+			if len(configDirs) == 0 {
+				configDirs = []string{policies[0].ClaudeConfigDir}
+			}
+			p.loadPlugins(policies[0].Machine.Plugins, configDirs, false)
 		}
 	}
 	p.frozen = true

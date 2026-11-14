@@ -174,8 +174,11 @@ func RunMachine(options Options) Report {
 func (r *run) wireAgents() error {
 	agentsDir := source.AgentsDirectory(r.options.Home, r.options.SourceRepo, r.policy)
 	if _, err := os.Stat(agentsDir); errors.Is(err, fs.ErrNotExist) {
-		r.skip("Codex global agents source absent at " + agentsDir)
-		return nil
+		if len(r.policy.Machine.Plugins) == 0 {
+			r.skip("Codex global agents source absent at " + agentsDir)
+			return nil
+		}
+		// machine.plugins still owes its plugin agents their twins.
 	} else if err != nil {
 		return fmt.Errorf("inspect Codex global agents source %s: %w", agentsDir, err)
 	}

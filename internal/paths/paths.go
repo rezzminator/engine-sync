@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -112,6 +113,28 @@ func SameEntry(first, second string) (bool, error) {
 		return false, e
 	}
 	return filepath.Base(first) == filepath.Base(second) && a == b, nil
+}
+
+// EnvDisable names the engines whose project mirrors every project command and
+// hook leaves alone; machine scope never reads it.
+const EnvDisable = "ENGINE_SYNC_DISABLE"
+
+// DisabledEngines is the set $ENGINE_SYNC_DISABLE names: engine names joined
+// by commas, each trimmed, an empty item or value naming nothing. A name
+// outside valid is an error naming the variable, the name and valid.
+func DisabledEngines(env Env, valid []string) (map[string]bool, error) {
+	disabled := map[string]bool{}
+	for _, name := range strings.Split(env(EnvDisable), ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !slices.Contains(valid, name) {
+			return nil, fmt.Errorf("%s: unknown engine %q; valid: %s", EnvDisable, name, strings.Join(valid, ", "))
+		}
+		disabled[name] = true
+	}
+	return disabled, nil
 }
 
 // Env reads one environment variable; os.Getenv in production, a map in a

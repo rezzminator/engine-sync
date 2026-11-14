@@ -33,10 +33,13 @@ type Config struct {
 	// Capabilities is the host's capability set for this run: every
 	// --capability flag plus the global file's targets.capabilities. It is never read
 	// from a config file and carries no meaning beyond set membership.
-	Capabilities []string          `json:"-"`
-	Source       string            `json:"-"`
-	Legacy       bool              `json:"-"`
-	Sources      map[string]string `json:"-"`
+	Capabilities []string `json:"-"`
+	// Disabled names the engines $ENGINE_SYNC_DISABLE switches off for this
+	// run's project mirrors; never read from a config file.
+	Disabled []string          `json:"-"`
+	Source   string            `json:"-"`
+	Legacy   bool              `json:"-"`
+	Sources  map[string]string `json:"-"`
 	// Warnings are what the loader ignored or changed, each naming its file:
 	// a deprecated spelling, an unknown key, an invalid list entry.
 	Warnings    []string  `json:"-"`
@@ -92,6 +95,9 @@ type Machine struct {
 	RetiredFiles    []string  `json:"retiredFiles"`
 	Rewrites        []Rewrite `json:"rewrites"`
 	CodexHomes      []string  `json:"codexHomes"`
+	// Plugins names the Claude plugins whose agents, commands and skills
+	// compile into Codex and OpenCode twins.
+	Plugins []string `json:"plugins" pattern:"^[a-z0-9][a-z0-9-]*$"`
 	// SourceGeneratedAgentsDir is the directory of the source repository the
 	// declarations that carry `from:` render into.
 	SourceGeneratedAgentsDir string `json:"sourceGeneratedAgentsDir"`
@@ -161,6 +167,7 @@ func Default() Config {
 			RetiredFiles:    []string{},
 			Rewrites:        []Rewrite{},
 			CodexHomes:      []string{},
+			Plugins:         []string{},
 		},
 		Sources: map[string]string{},
 	}
@@ -386,6 +393,16 @@ func Validate(cfg Config) error {
 				return fmt.Errorf("%s: invalid name %q", key, value)
 			}
 		}
+	}
+	seenPlugins := map[string]bool{}
+	for _, name := range cfg.Machine.Plugins {
+		if !pluginName.MatchString(name) {
+			return fmt.Errorf("machine.plugins: invalid plugin name %q (want %s)", name, pluginName)
+		}
+		if seenPlugins[name] {
+			return fmt.Errorf("machine.plugins: duplicate plugin %q", name)
+		}
+		seenPlugins[name] = true
 	}
 	for key, models := range map[string]map[string]string{"codex.modelMap": cfg.Codex.ModelMap, "opencode.modelMap": cfg.OpenCode.ModelMap} {
 		for alias, model := range models {

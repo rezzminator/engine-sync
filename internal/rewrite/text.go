@@ -55,14 +55,11 @@ func CommandsIn(text string, commands map[string]string, naming func(string) str
 			index++
 			continue
 		}
-		matched := ""
+		matched, end := "", -1
 		for _, key := range keys {
 			name := strings.TrimPrefix(key, "/")
-			end := index + 1 + len(name)
-			if end > len(text) || text[index+1:end] != name {
-				continue
-			}
-			if end < len(text) && (SuffixChar(text[end]) || (text[end] == '.' && end+1 < len(text) && WordChar(text[end+1]))) {
+			end = idEnd(text, index+1, name)
+			if end < 0 {
 				continue
 			}
 			matched = name
@@ -77,11 +74,54 @@ func CommandsIn(text string, commands map[string]string, naming func(string) str
 		if !ok {
 			replacement = commands["/"+matched]
 		}
+		replacement += prefixRest(text, index+1, matched, end)
 		if naming != nil {
 			replacement = naming(replacement)
 		}
 		out.WriteString(replacement)
-		index += 1 + len(matched)
+		index = end
+	}
+	return out.String()
+}
+
+// AgentsIn swaps each Claude plugin agent id of agents ("{plugin}:{name}")
+// for its twin name, longest id first. A match is bounded on both sides: no
+// name character, ':' or path character before it (a "/" makes it a
+// command), and the command suffix rule after it, so "flights:lander" never
+// touches "flights:lander-x" or "flights:lander.md". A key ending in ":"
+// is a plugin prefix (a plugin whose records could not be read): it matches
+// any id of that plugin and keeps the rest of the id, ":" flattened to "-".
+func AgentsIn(text string, agents map[string]string) string {
+	if len(agents) == 0 {
+		return text
+	}
+	keys := make([]string, 0, len(agents))
+	for key := range agents {
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return len(keys[i]) > len(keys[j]) || len(keys[i]) == len(keys[j]) && keys[i] < keys[j]
+	})
+	var out strings.Builder
+	for index := 0; index < len(text); {
+		matched, end := "", -1
+		if index == 0 || !(PrefixChar(text[index-1]) || text[index-1] == ':') {
+			for _, key := range keys {
+				if end = idEnd(text, index, key); end >= 0 {
+					matched = key
+					break
+				}
+			}
+		}
+		if matched == "" {
+			out.WriteByte(text[index])
+			index++
+			continue
+		}
+		out.WriteString(agents[matched] + prefixRest(text, index, matched, end))
+		index = end
 	}
 	return out.String()
 }
@@ -100,4 +140,36 @@ func SuffixChar(value byte) bool {
 
 func WordChar(value byte) bool {
 	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
+}
+
+// idEnd is where the id key, matched at text[start:], ends, or -1 when it
+// does not match there. A key ending in ":" is a prefix that takes the id's
+// name characters after it; every id is then bounded by the command suffix
+// rule, so "x:y" never matches "x:y-z", "x:y/z" or "x:y.md".
+func idEnd(text string, start int, key string) int {
+	end := start + len(key)
+	if end > len(text) || text[start:end] != key {
+		return -1
+	}
+	if strings.HasSuffix(key, ":") {
+		for end < len(text) && (WordChar(text[end]) || text[end] == '-' || text[end] == ':' && end+1 < len(text) && WordChar(text[end+1])) {
+			end++
+		}
+		if end == start+len(key) {
+			return -1
+		}
+	}
+	if end < len(text) && (SuffixChar(text[end]) || (text[end] == '.' && end+1 < len(text) && WordChar(text[end+1]))) {
+		return -1
+	}
+	return end
+}
+
+// prefixRest is what a prefix key matched past itself, flattened as twin
+// names are (":" to "-"); an exact key leaves nothing.
+func prefixRest(text string, start int, key string, end int) string {
+	if !strings.HasSuffix(key, ":") {
+		return ""
+	}
+	return strings.ReplaceAll(text[start+len(key):end], ":", "-")
 }

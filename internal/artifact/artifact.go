@@ -27,7 +27,11 @@ type Root struct {
 	Path           string
 	SourceRoots    []string
 }
-type SourceLink struct{ Path, Target, Prefix string }
+type SourceLink struct {
+	Path, Target, Prefix string
+	// Except are longer prefixes a Prefix reservation never takes.
+	Except []string
+}
 type Artifact struct {
 	NativeMode    string
 	Merge         func([]byte) ([]byte, []string, []string)

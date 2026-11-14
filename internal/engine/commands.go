@@ -9,11 +9,11 @@ import (
 	"github.com/rezzminator/engine-sync/internal/source"
 )
 
-func Commands(home, sourceHome string, cfg config.Config, homes []string, uninstall bool, mode reconcile.Mode, render func(source.Project, config.Config) ([]artifact.Artifact, []diag.Diagnostic), roots func(source.Project, config.Config) []artifact.Root, validate func([]artifact.Artifact) []diag.Diagnostic) (reconcile.Result, bool) {
+func Commands(home, sourceHome string, cfg config.Config, homes, claudeConfigDirs []string, uninstall bool, mode reconcile.Mode, render func(source.Project, config.Config) ([]artifact.Artifact, []diag.Diagnostic), roots func(source.Project, config.Config) []artifact.Root, validate func([]artifact.Artifact) []diag.Diagnostic) (reconcile.Result, bool) {
 	if sourceHome == "" {
 		sourceHome = home
 	}
-	p := source.LoadMachineCommands(home, sourceHome, uninstall, cfg)
+	p := source.LoadMachineCommands(home, sourceHome, uninstall, claudeConfigDirs, cfg)
 	p.CodexHomes = homes
 	return Execute(p, cfg, mode, render, roots, validate)
 }
@@ -27,7 +27,7 @@ func GlobalCommands(home string, mode reconcile.Mode, render func(source.Project
 	if err == nil {
 		var roster config.Targets
 		if roster, err = config.ResolveTargets(paths.Getenv, home, machine, config.Targets{}); err == nil {
-			return Commands(home, "", machine, *roster.CodexHomes, false, mode, render, roots, validate)
+			return Commands(home, "", machine, *roster.CodexHomes, roster.ClaudeConfigDirs, false, mode, render, roots, validate)
 		}
 	}
 	return reconcile.Result{Problems: []string{"global commands: " + err.Error()}}, false

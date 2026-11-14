@@ -31,7 +31,7 @@ func ProjectCommands(get paths.Env, home string, mode reconciler.Mode, targets [
 	}
 	_, err = guard(GuardRoots(home, *roster.CodexHomes, roster.ClaudeConfigDirs), mode == reconciler.Build, func() int {
 		for _, t := range targets {
-			r, pass := engine.Commands(home, "", *machinePolicy, *roster.CodexHomes, false, mode, t.Render, t.Roots, t.Validate)
+			r, pass := engine.Commands(home, "", *machinePolicy, *roster.CodexHomes, roster.ClaudeConfigDirs, false, mode, t.Render, t.Roots, t.Validate)
 			combined.Merge(r, pass)
 			if !quiet {
 				diag.PrintLines(stderr, r.Problems, r.Warnings)

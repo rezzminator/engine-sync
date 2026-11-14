@@ -23,6 +23,10 @@ type Agent struct {
 	Generated  bool
 	Front      Frontmatter
 	Body       string
+	// Plugin is the Claude plugin of machine.plugins the agent ships in; Name
+	// is then its twin name, and Claude loads it natively, so no Claude
+	// registry link is owed.
+	Plugin *Plugin
 }
 type Command struct {
 	Name, Path string
@@ -78,6 +82,12 @@ type Project struct {
 	// Codex render reports it there, costing that AGENTS.md alone.
 	RulesFailed        map[string]string
 	Problems, Warnings []string
+	// Plugins are the resolved Claude plugins of machine.plugins;
+	// PluginFailures the ones whose records could not be read, their twins
+	// kept; AgentRoster maps each plugin agent's Claude id to its twin name.
+	Plugins        []Plugin
+	PluginFailures []PluginFailure
+	AgentRoster    map[string]string
 	// Failed names each machine agent skipped for an error: its installed
 	// copies are kept, never retired, until it builds again.
 	Failed []string

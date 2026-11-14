@@ -131,6 +131,10 @@ type openCodeAgentSpec struct {
 	Generated                            bool
 	// Global marks a machine agent, which engine-sync global writes.
 	Global bool
+	// Agents is the plugin agent roster; PluginRoot the root of the plugin
+	// the agent ships in.
+	Agents     map[string]string
+	PluginRoot string
 }
 
 // renderOpenCodeAgent is the one OpenCode agent renderer. An agent whose
@@ -168,7 +172,7 @@ func renderOpenCodeAgent(
 	if front.Engines.OpenCode != nil {
 		settings = *front.Engines.OpenCode
 	}
-	ctx := rewrite.Context{Engine: "opencode", Kind: "agent", Source: spec.Path, Roster: roster}
+	ctx := rewrite.Context{Engine: "opencode", Kind: "agent", Source: spec.Path, Roster: roster, Agents: spec.Agents, PluginRoot: spec.PluginRoot}
 	chain := append(rewrite.Builtins(), rewrite.Configured(rewrites)...)
 	mode := openCodeAgentMode
 	if settings.Mode != "" {

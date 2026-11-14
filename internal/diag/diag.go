@@ -62,6 +62,8 @@ type Report struct {
 	LeafLinks                                 []source.Entry
 	Wrote, Unchanged, Deleted                 int
 	Actions                                   []reconcile.Action
+	// Skipped names each engine $ENGINE_SYNC_DISABLE left alone.
+	Skipped []string
 }
 
 // danglingSource records a source that could not be resolved: a warning for

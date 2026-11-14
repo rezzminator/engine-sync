@@ -161,7 +161,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	// same fail-loud order the host script used.
 	model := options.Source
 	if model == nil {
-		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
+		loaded, e := source.LoadMachine(home, source.AgentsDirectory(home, sourceRepo, *cfg), source.GeneratedDirectory(home, sourceRepo, *cfg), machineOptions(cfg, claudeConfigDirs))
 		if e != nil {
 			return GlobalAgentsResult{}, e
 		}
@@ -231,7 +231,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 				result.Actions = append(result.Actions, GlobalAgentAction{Kind: actionWrite, Path: agent.mdSource})
 			}
 		}
-		for _, config := range claudeConfigDirs {
+		for _, config := range agent.claudeDirs(claudeConfigDirs) {
 			same, e := paths.SameEntry(filepath.Join(config, "agents", filepath.Base(agent.mdSource)), agent.mdSource)
 			if e != nil {
 				result.Problems = append(result.Problems, e.Error())
@@ -362,6 +362,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 // generated Claude directory: a generated agent is the Claude -> Claude step, and from
 // there it takes the same link and the same role file as any original.
 type compiledAgent struct {
+	plugin      bool // a Claude plugin agent; see claudeDirs
 	name        string
 	mdSource    string
 	mdContent   []byte
@@ -377,7 +378,7 @@ func compileGlobalAgents(home, sourceRepo string, cfg *config.Config, claudeConf
 	if len(claudeConfigDirs) == 0 {
 		claudeConfigDirs = []string{cfg.ClaudeConfigDir}
 	}
-	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, sourceRepo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: claudeConfigDirs})
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, sourceRepo, *cfg), machineOptions(cfg, claudeConfigDirs))
 	if err != nil {
 		return nil, err
 	}
@@ -389,8 +390,7 @@ func compileMachineAgents(model source.Project, cfg *config.Config) ([]compiledA
 	agentSources := model.Agents
 	compiled := make([]compiledAgent, 0, len(agentSources))
 	for _, src := range agentSources {
-		raw := src.Raw
-		name, content, err := codex.RenderMachineAgent(src.Path, string(raw), agentsDir, *cfg)
+		name, content, err := codex.RenderMachineAgent(src, agentsDir, model.AgentRoster, *cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -404,6 +404,7 @@ func compileMachineAgents(model source.Project, cfg *config.Config) ([]compiledA
 			toml = []byte(content)
 		}
 		compiled = append(compiled, compiledAgent{
+			plugin:   src.Plugin != nil,
 			name:     name,
 			mdSource: src.Path,
 			mdContent: func() []byte {

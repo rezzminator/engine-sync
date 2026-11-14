@@ -20,6 +20,8 @@ type JSONResult struct {
 	Unchanged     int                `json:"unchanged"`
 	Deleted       int                `json:"deleted"`
 	Error         string             `json:"error"`
+	// Skipped names each engine $ENGINE_SYNC_DISABLE left alone.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // WriteJSON prints one result as JSON and returns its exit code: 0 when it
@@ -28,6 +30,7 @@ func WriteJSON(stdout, stderr io.Writer, result Report, runErr error, sources ..
 	out := JSONResult{
 		OK: result.OK && runErr == nil, Problems: nonNil(result.Problems), Rebuildable: nonNil(result.Rebuildable),
 		Warnings: nonNil(result.Warnings), Wrote: result.Wrote, Unchanged: result.Unchanged, Deleted: result.Deleted,
+		Skipped: result.Skipped,
 	}
 	if len(sources) > 0 {
 		out.ConfigSources = sources[0]

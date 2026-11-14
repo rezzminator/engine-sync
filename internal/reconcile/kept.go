@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -45,7 +46,7 @@ func ExpandKept(outputs []artifact.Artifact) ([]artifact.Artifact, []string) {
 			continue
 		}
 		for _, entry := range entries {
-			if entry.Name() == filepath.Base(a.Path) || strings.HasPrefix(entry.Name(), a.Kept.Prefix) {
+			if entry.Name() == filepath.Base(a.Path) || strings.HasPrefix(entry.Name(), a.Kept.Prefix) && !slices.ContainsFunc(a.Kept.Except, func(except string) bool { return strings.HasPrefix(entry.Name(), except) }) {
 				b := a
 				b.Path = filepath.Join(filepath.Dir(a.Path), entry.Name())
 				b.Kept = &artifact.SourceLink{Path: a.Kept.Path, Target: a.Kept.Target}

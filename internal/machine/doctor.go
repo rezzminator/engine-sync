@@ -275,7 +275,7 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 		dirs = []string{store}
 	}
 	agentsDir := source.AgentsDirectory(home, repo, *cfg)
-	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, repo, *cfg), source.MachineOptions{MarkerDir: cfg.Machine.AgentMarkerDir, ClaudeConfigDirs: dirs})
+	model, err := source.LoadMachine(home, agentsDir, source.GeneratedDirectory(home, repo, *cfg), machineOptions(cfg, dirs))
 	if err != nil {
 		return []AgentsStatus{{Dir: agentsDir, State: AgentsUnreadable, Error: err.Error()}}
 	}
@@ -299,11 +299,23 @@ func InspectRegistries(options DoctorOptions) []AgentsStatus {
 	if len(orphans) != 0 {
 		broken = append(broken, AgentsStatus{Dir: model.GeneratedDir, State: AgentsOrphan, Names: orphans})
 	}
+	// A plugin whose records could not be read is "could not look": one
+	// BROKEN row naming it, its installed twins kept by global.
+	for _, failure := range model.PluginFailures {
+		broken = append(broken, AgentsStatus{Dir: agentsDir, State: AgentsBroken, Names: []string{"plugin:" + failure.Plugin}, Error: failure.Problem})
+	}
+	// Claude loads plugin agents itself: only machine agents are owed a
+	// store link, while every agent is owed its Codex role.
 	var sources []string
+	plugins := 0
 	for _, agent := range model.Agents {
+		if agent.Plugin != nil {
+			plugins++
+			continue
+		}
 		sources = append(sources, agent.Path)
 	}
-	if len(sources) == 0 {
+	if len(sources)+plugins == 0 {
 		return append(broken, AgentsStatus{Dir: agentsDir, State: AgentsNoSources})
 	}
 	statuses := broken

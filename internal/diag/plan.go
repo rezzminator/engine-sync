@@ -3,6 +3,7 @@ package diag
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rezzminator/engine-sync/internal/paths"
 	"github.com/rezzminator/engine-sync/internal/reconcile"
 	"io"
 	"strings"
@@ -38,9 +39,29 @@ func PrintEngine(stdout, stderr io.Writer, r reconcile.Result, mode reconcile.Mo
 	}
 
 }
+
+// Skips prints the row of each engine $ENGINE_SYNC_DISABLE left alone. When
+// all is set no engine is left to run and Skips answers the run, done true:
+// exit 0 and, with asJSON, the one passing object naming them.
+func Skips(stdout, stderr io.Writer, skipped []string, all bool, action string, asJSON, plan bool) (code int, done bool) {
+	if !asJSON {
+		for _, name := range skipped {
+			fmt.Fprintf(stdout, "%s %s SKIP disabled by %s\n", strings.ToUpper(name), strings.ToUpper(action), paths.EnvDisable)
+		}
+	}
+	if !all || len(skipped) == 0 || !asJSON {
+		return 0, all && len(skipped) > 0
+	}
+	report := Report{OK: true, Skipped: skipped}
+	if plan {
+		return WritePlan(stdout, stderr, report, nil, nil, 0), true
+	}
+	return WriteJSON(stdout, stderr, report, nil), true
+}
+
 func WritePlan(stdout, stderr io.Writer, report Report, actions []reconcile.Action, err error, code int) int {
 
-	record := planJSON{OK: report.OK && err == nil, Problems: report.Problems, Rebuildable: report.Rebuildable, Warnings: report.Warnings, Actions: make([]planAction, 0, len(actions))}
+	record := planJSON{OK: report.OK && err == nil, Problems: report.Problems, Rebuildable: report.Rebuildable, Warnings: report.Warnings, Actions: make([]planAction, 0, len(actions)), Skipped: report.Skipped}
 	if record.Problems == nil {
 		record.Problems = []string{}
 	}
@@ -79,4 +100,5 @@ type planJSON struct {
 	Deleted     int          `json:"deleted"`
 	Error       string       `json:"error"`
 	Actions     []planAction `json:"actions"`
+	Skipped     []string     `json:"skipped,omitempty"`
 }

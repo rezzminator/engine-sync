@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/engine-sync/internal/target/codex"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -35,8 +36,11 @@ func compileOpenCodeMirrors(root string, model *claudesource.Project, cfg config
 // CLAUDE.md and project rules is STALE, a warning in a build and a failure in
 // check and doctor. An absent or hand-written one is the Codex check's to
 // report; one that cannot be compiled or read is a warning, never clean, and
-// leaves every other AGENTS.md checked.
+// leaves every other AGENTS.md checked. A disabled Codex leaves it unchecked.
 func agentsDrift(p claudesource.Project, cfg config.Config) []diag.Diagnostic {
+	if slices.Contains(cfg.Disabled, codex.Target{}.Name()) {
+		return nil // $ENGINE_SYNC_DISABLE leaves the Codex mirror, AGENTS.md included, as it is
+	}
 	const remedy = "OpenCode reads it; run engine-sync codex build"
 	orientations, problems := codex.Orientations(p, cfg)
 	var diagnostics []diag.Diagnostic
