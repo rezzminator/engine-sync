@@ -4,6 +4,8 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-14
+
 ### Added
 
 - `ENGINE_SYNC_DISABLE` (comma-separated `codex`, `opencode`) switches engines off for a project: `build`, `check`, `doctor`, `plan`, `codex build|check`, `opencode build|check|doctor` and the `stop` and `start` hooks leave a disabled engine's mirror files as they are, never writing, checking or reporting them stale, and print `{ENGINE} {ACTION} SKIP disabled by ENGINE_SYNC_DISABLE`; `--json` adds `"skipped"`. An unknown name exits 2. `global`, `doctor --machine` and `codex agents` ignore it.
