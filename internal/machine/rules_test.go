@@ -196,7 +196,7 @@ func TestGlobalRulesDoctor(t *testing.T) {
 
 	bad := filepath.Join(home, ".claude", "rules", "bad.md")
 	writeMachineFixture(t, bad, "---\npaths:\n  - a: [unclosed\n---\nBad body.\n")
-	writeMachineFixture(t, filepath.Join(home, ".claude", "rules", "big.md"), strings.Repeat("x", 10<<10)+"\n")
+	writeMachineFixture(t, filepath.Join(home, ".claude", "rules", "big.md"), strings.Repeat("x", 11<<10)+"\n")
 	pipe := filepath.Join(home, ".claude", "rules", "pipe.md")
 	if err := syscall.Mkfifo(pipe, 0o644); err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func TestGlobalRulesDoctor(t *testing.T) {
 		t.Errorf("an unreadable rule is not %q: %v", want.Message, rows)
 	}
 	if !hasRow(rows, LevelWarn, "GLOBAL-BUDGET ") {
-		t.Errorf("a set over 10 KiB has no GLOBAL-BUDGET row: %v", rows)
+		t.Errorf("a set over 11 KiB has no GLOBAL-BUDGET row: %v", rows)
 	}
 	runRules(t, home, codexHome, false, false)
 	if got := readFixture(t, agents); strings.Contains(got, "Bad body.") || !strings.Contains(got, "Always A, edited.") {

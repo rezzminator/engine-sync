@@ -19,9 +19,9 @@ import (
 )
 
 // globalRulesBudget is the always-on set's size past which doctor warns: every
-// agent of every project pays it. 10 KiB holds the always-on rules plus the
+// agent of every project pays it. 11 KiB holds the always-on rules plus the
 // path-scoped rules' read-on-match pointers.
-const globalRulesBudget = 10 << 10
+const globalRulesBudget = 11 << 10
 
 // openCodeInstructionsKey is the global OpenCode config's array of extra
 // instruction files.

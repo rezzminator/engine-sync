@@ -6,7 +6,7 @@ Every release of engine-sync. Versions follow [semantic versioning](https://semv
 
 ### Changed
 
-- The `GLOBAL-BUDGET` warning fires past 10 KiB of always-on text instead of 9 KiB.
+- The `GLOBAL-BUDGET` warning fires past 11 KiB of always-on text instead of 9 KiB.
 
 ## [0.9.0] - 2026-11-14
 
